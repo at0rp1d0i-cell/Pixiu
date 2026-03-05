@@ -1,0 +1,23 @@
+[project]
+name = "evoquant"
+version = "0.1.0"
+description = "A Multi-Agent Framework for Quantitative Trading in A-Shares"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyqlib",
+    "lightgbm",
+    "pandas",
+    "polars",
+    "langchain",
+    "langgraph",
+    "langchain-openai",
+    "python-dotenv",
+    "mlflow",
+    "akshare",
+    "baostock"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
