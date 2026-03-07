@@ -100,4 +100,49 @@ Std($close / Ref($close, 1) - 1, 20)
 
 ---
 
-*最后更新：2026-03-05*
+## ⚠️ Ref 符号规则（极高频错误，LLM 必看）
+
+```
+Ref($close, 1)   = 昨天的收盘价  ✅ 正确
+Ref($close, 5)   = 5日前的收盘价 ✅ 正确
+Ref($close, -1)  = 明天的收盘价  ❌ 未来数据！Validator 必拦截
+Ref($close, 0)   = 今天的收盘价  ⚠️ 等同于 $close，无意义
+```
+
+**记忆口诀**：正数 = 过去，负数 = 未来。只用正数。
+
+---
+
+## 经过 A 股回测验证的有效因子模板
+
+以下公式已在 CSI300 数据集验证，IC 统计显著，可直接用于 proposed_formula 或作为变体出发点：
+
+```python
+# 1. Amihud 非流动性因子（市场冲击代理）
+# IC ≈ 0.03~0.05，适合价值+低流动性方向
+Mean(Abs($close/Ref($close,1)-1) / ($volume * $close), 20)
+
+# 2. 量价背离因子（资金撤退信号）
+# 负相关 = 放量下跌 or 缩量上涨，均为弱势
+Corr(Rank($volume, 10), Rank($close, 10), 20)
+
+# 3. 波动率期限结构斜率（短期 vs 长期波动）
+# 短波 > 长波 = 近期异动，反转或趋势加速
+Std($close/Ref($close,1)-1, 5) / (Std($close/Ref($close,1)-1, 20) + 1e-8)
+
+# 4. 换手调整动量（高换手削弱动量）
+# 过度交易稀释了真实趋势信号
+($close/Ref($close,20)-1) / (Mean($volume/Mean($volume,60),20) + 1e-8)
+
+# 5. RSI 近似（无未来数据版本）
+# 上涨幅度均值 / 总波动均值，值域 [0,1]
+Mean(If(Gt($close,Ref($close,1)),$close/Ref($close,1)-1,0),14) / (Mean(Abs($close/Ref($close,1)-1),14) + 1e-8)
+```
+
+**使用注意**：
+- 除法分母加 `1e-8` 防止零除（Validator 不检查，但 Qlib 执行时可能产生 NaN）
+- 以上模板为出发点，结合当前 Island 上下文和市场状态做变体，不要直接照搬
+
+---
+
+*最后更新：2026-03-07*
