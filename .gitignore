@@ -5,11 +5,16 @@ __pycache__/
 # Environment
 .env
 .venv
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+.uv/
+
+# Testing
+.pytest_cache/
 
 # Project specifics
 data/
