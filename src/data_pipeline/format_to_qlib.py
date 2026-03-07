@@ -10,8 +10,8 @@ from tqdm import tqdm
 
 PARQUET_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "parquet_staging"))
 QLIB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "qlib_bin"))
-# 按照研报规范，这 7 个列是必须的
-FIELDS = ["open", "close", "high", "low", "volume", "amount", "factor"]
+# 按照研报规范，这 8 个列是必须的，特别是 vwap 经常在因子中被使用
+FIELDS = ["open", "close", "high", "low", "volume", "amount", "vwap", "factor"]
 FREQ = "day"
 
 def main():
@@ -82,10 +82,11 @@ def main():
             
             bin_path = os.path.join(sym_dir, f"{field}.{FREQ}.bin")
             with open(bin_path, 'wb') as fp:
-                # 写入头: 4字节 float32 start_index
-                fp.write(np.array([start_idx], dtype=np.float32).tobytes())
-                # 写入连续数组: N字节 float32
-                fp.write(arr.tobytes())
+                # 写入头: 4字节 uint32 start_index (小端序)
+                fp.write(np.array([start_idx], dtype='<u4').tobytes())
+                # 写入连续数组: N字节 float32 (小端序)
+                # 为确保兼容性，统一指定为小端浮点 '<f4'
+                fp.write(arr.astype('<f4').tobytes())
                 
     # Step 3: 构建系统基准池索引
     print("\nStep 3/3: 封装 Instruments 索引集...")

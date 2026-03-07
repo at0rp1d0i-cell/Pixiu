@@ -103,9 +103,14 @@ def process_single_asset(code: str) -> bool:
     qlib_df['volume'] = df_merged['volume_unadj'] / qlib_df['factor']
     qlib_df['amount'] = df_merged['amount_unadj']
     
+    # 增加 vwap 字段计算 (VWAP = Amount / Volume)
+    # 处理停牌或无交易引发的除 0 问题
+    unadj_vwap = (df_merged['amount_unadj'] / df_merged['volume_unadj']).replace([np.inf, -np.inf], np.nan)
+    qlib_df['vwap'] = unadj_vwap * qlib_df['factor']
+    
     # 6. 停牌遮罩清洗机制：成交量为 0 的天强置为 NaN，阻断未来无效梯度
     suspended_mask = (df_merged['volume_unadj'] <= 0)
-    target_cols = ['open', 'close', 'high', 'low', 'volume', 'amount', 'factor']
+    target_cols = ['open', 'close', 'high', 'low', 'volume', 'amount', 'vwap', 'factor']
     qlib_df.loc[suspended_mask, target_cols] = np.nan
     
     # 针对极端未复权数据引发的问题进行保险清理
