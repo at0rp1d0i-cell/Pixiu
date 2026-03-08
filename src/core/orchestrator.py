@@ -1,264 +1,682 @@
 """
-Pixiu: LangGraph Orchestrator
-Role: Wires Researcher, Coder, and Critic nodes into a stateful cyclic graph.
+Pixiu v2 Orchestrator（完全重写）
+
+完整的 12 节点 LangGraph 图，实现高通量漏斗架构：
+  Stage 1: market_context（MarketAnalyst + LiteratureMiner）
+  Stage 2: hypothesis_gen → synthesis
+  Stage 3: prefilter
+  Stage 4: exploration → note_refinement → coder
+  Stage 5: judgment → portfolio → report
+  Human Gate: interrupt() 等待 CIO 审批
+  Loop Control: 调度下一轮
+
+依赖规格：docs/specs/v2_orchestrator.md
 """
+import asyncio
 import logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+from datetime import datetime
+from typing import List, Optional
+
 from langgraph.graph import StateGraph, START, END
-from src.agents.state import AgentState
-from src.agents.researcher import research_node
-from src.agents.validator import validator_node, route_validation
-from src.agents.coder import coder_node
-from src.agents.critic import critic_node, route_eval
-from src.factor_pool.pool import get_factor_pool
-from src.agents.schemas import FactorHypothesis, BacktestMetrics
+from langgraph.checkpoint.memory import MemorySaver
+
+from src.schemas.state import AgentState
+from src.schemas.market_context import MarketContextMemo
+from src.factor_pool.islands import ISLANDS
 from src.factor_pool.scheduler import IslandScheduler
-from src.schemas.thresholds import THRESHOLDS
+from src.factor_pool.pool import get_factor_pool
 
-def build_graph() -> StateGraph:
-    logging.info("[Pixiu Orchestrator] 构建 LangGraph 引擎...")
-    
-    # 1. Initialize StateGraph
-    workflow = StateGraph(AgentState)
-    
-    # 2. Add Nodes
-    workflow.add_node("researcher", research_node)
-    workflow.add_node("validator", validator_node)
-    workflow.add_node("coder", coder_node)
-    workflow.add_node("critic", critic_node)
-    
-    # 3. Add Edges (Linear Path)
-    workflow.add_edge(START, "researcher")
-    workflow.add_edge("researcher", "validator")
-    
-    workflow.add_conditional_edges(
-        "validator",
-        route_validation,
-        {
-            "proceed_to_coder": "coder",
-            "loop_to_researcher": "researcher"
-        }
-    )
-    
-    workflow.add_edge("coder", "critic")
-    
-    # 4. Add Conditional Routing (A/B Test loops)
-    workflow.add_conditional_edges(
-        "critic",
-        route_eval,
-        {
-            "loop": "researcher",
-            "end": END
-        }
-    )
-    
-    # 5. Compile the graph
-    app = workflow.compile()
-    return app
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-def run_layer1_ab_test(island_name: str = "momentum"):
-    """
-    运行基于 Layer 1 (quant_factors_dictionary) 的控制变量测试实验
+# ─────────────────────────────────────────────────────────
+# 配置常量（从 env 读取或使用默认值）
+# ─────────────────────────────────────────────────────────
+import os
 
-    Args:
-        island_name: 本轮激活的 Island（因子研究方向），默认 'momentum'
-    """
-    app = build_graph()
-    pool = get_factor_pool()
-    
-    # 初始化状态（新增 factor_hypothesis、backtest_metrics、island_name）
-    initial_state = {
-        "messages": [],
-        "factor_proposal": "",
-        "factor_hypothesis": None,
-        "code_snippet": "",
-        "backtest_result": "",
-        "backtest_metrics": None,
-        "error_message": "",
-        "current_iteration": 0,
-        "max_iterations": 3,
-        # Island 信息（注入给 Researcher 的上下文）
-        "island_name": island_name,
-    }
-    
-    logging.info("\n" + "=" * 60)
-    logging.info("🚀 启动大逃杀: Agent (Layer 1) vs Alpha158 Baseline (Sharpe: %.2f)", THRESHOLDS.min_sharpe)
-    logging.info("=" * 60)
-    
+MAX_ROUNDS: int = int(os.getenv("MAX_ROUNDS", "100"))
+ACTIVE_ISLANDS: List[str] = os.getenv(
+    "ACTIVE_ISLANDS", "momentum,northbound,valuation,volatility,volume,sentiment"
+).split(",")
+REPORT_EVERY_N_ROUNDS: int = int(os.getenv("REPORT_EVERY_N_ROUNDS", "5"))
+MAX_CONCURRENT_BACKTESTS: int = int(os.getenv("MAX_CONCURRENT_BACKTESTS", "2"))
+
+# ─────────────────────────────────────────────────────────
+# 节点名称常量
+# ─────────────────────────────────────────────────────────
+NODE_MARKET_CONTEXT  = "market_context"
+NODE_HYPOTHESIS_GEN  = "hypothesis_gen"
+NODE_SYNTHESIS       = "synthesis"
+NODE_PREFILTER       = "prefilter"
+NODE_EXPLORATION     = "exploration"
+NODE_NOTE_REFINEMENT = "note_refinement"
+NODE_CODER           = "coder"
+NODE_JUDGMENT        = "judgment"
+NODE_PORTFOLIO       = "portfolio"
+NODE_REPORT          = "report"
+NODE_HUMAN_GATE      = "human_gate"
+NODE_LOOP_CONTROL    = "loop_control"
+
+# ─────────────────────────────────────────────────────────
+# 模块级调度器（跨轮次复用）
+# ─────────────────────────────────────────────────────────
+_scheduler: Optional[IslandScheduler] = None
+
+def get_scheduler() -> IslandScheduler:
+    global _scheduler
+    if _scheduler is None:
+        pool = get_factor_pool()
+        _scheduler = IslandScheduler(pool=pool)
+    return _scheduler
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 1：市场上下文节点
+# ─────────────────────────────────────────────────────────
+def market_context_node(state: AgentState) -> dict:
+    """Stage 1: MarketAnalyst + LiteratureMiner，生成 MarketContextMemo。"""
+    from src.agents.market_analyst import market_context_node as _market_node
+
+    logger.info("[Stage 1] 生成市场上下文... (Round %d)", state.current_round)
+
     try:
-        final_state = app.invoke(initial_state)
-        logging.info("\n=== 回测探索结束 ===")
-        logging.info(f"最终状态迭代次数: {final_state['current_iteration']}")
+        result = _market_node(dict(state))
+        memo: MarketContextMemo = result.get("market_context")
 
-        # ── 注册最终因子到 FactorPool ───────────────────────────
-        hypothesis = final_state.get("factor_hypothesis")
-        metrics = final_state.get("backtest_metrics")
-
-        if hypothesis and metrics and metrics.parse_success:
-            pool.register(
-                hypothesis=hypothesis,
-                metrics=metrics,
-                island_name=island_name,
-            )
-            logging.info(
-                "[Orchestrator] 因子已注册到 FactorPool → Island=%s, Sharpe=%.2f",
-                island_name, metrics.sharpe,
-            )
-        else:
-            logging.info("[Orchestrator] 本轮无有效回测结果，跳过 FactorPool 注册")
-
-        # 打印排行榜
-        leaderboard = pool.get_island_leaderboard()
-        if leaderboard:
-            logging.info("\n=== Island 排行榜 ===")
-            for rank, item in enumerate(leaderboard, 1):
-                logging.info(
-                    "  #%d %s（%s）: best_sharpe=%.2f, 已实验=%d 个因子",
-                    rank, item["island_display_name"], item["island"],
-                    item["best_sharpe"], item["factor_count"],
-                )
-
-    except Exception as e:
-        logging.info(f"执行引擎异常退出: {e}")
-
-def run_evolution_loop(max_rounds: int = 20):
-    """
-    Island 进化大循环：多方向轮换搜索，直到找到超越基线的因子或达到最大轮次。
-
-    Args:
-        max_rounds: 最大大轮次数（每轮 = 一次完整 Researcher→Coder→Critic epoch）
-                    建议：测试用 5，正式搜索用 20-50
-    """
-    app = build_graph()
-    pool = get_factor_pool()
-    scheduler = IslandScheduler(pool)
-
-    logging.info("\n" + "=" * 60)
-    logging.info("🧬 启动 Island 进化搜索（最大 %d 轮）", max_rounds)
-    logging.info("=" * 60)
-
-    best_sharpe_ever = 0.0
-    best_factor_ever = None
-
-    for round_n in range(max_rounds):
-        logging.info("\n─── 第 %d / %d 大轮 ───────────────────────────────", round_n + 1, max_rounds)
-
-        # 1. 选 Island
-        island_name = scheduler.select_island()
-        island_display = __import__(
-            "src.factor_pool.islands", fromlist=["ISLANDS"]
-        ).ISLANDS.get(island_name, {}).get("name", island_name)
-        logging.info("[Orchestrator] 激活 Island: %s（%s）", island_name, island_display)
-
-        # 2. 构建本轮初始状态
-        initial_state = {
-            "messages": [],
-            "factor_proposal": "",
-            "factor_hypothesis": None,
-            "code_snippet": "",
-            "backtest_result": "",
-            "backtest_metrics": None,
-            "error_message": "",
-            "current_iteration": 0,
-            "max_iterations": 3,
-            "island_name": island_name,
-        }
-
-        # 3. 跑一个 epoch（Researcher → Validator → Coder → Critic，最多 3 次内循环）
+        # 将 LiteratureMiner 的历史洞察合并进 Memo
         try:
-            final_state = app.invoke(initial_state)
+            from src.agents.literature_miner import LiteratureMiner
+            pool = get_factor_pool()
+            miner = LiteratureMiner(factor_pool=pool)
+            insights = asyncio.run(miner.retrieve_insights(active_islands=ACTIVE_ISLANDS))
+            if memo and not memo.historical_insights:
+                # Pydantic is immutable - rebuild with insights
+                memo = memo.model_copy(update={"historical_insights": insights})
         except Exception as e:
-            logging.error("[Orchestrator] 第 %d 轮 epoch 异常：%s", round_n + 1, e)
-            scheduler.on_epoch_done(island_name, round_n)
-            continue
+            logger.warning("[Stage 1] LiteratureMiner 失败（跳过）: %s", e)
 
-        # 4. 注册结果到 FactorPool
-        hypothesis = final_state.get("factor_hypothesis")
-        metrics = final_state.get("backtest_metrics")
+        logger.info("[Stage 1] 市场上下文完成，Regime=%s", getattr(memo, "market_regime", "unknown"))
+        return {"market_context": memo}
+    except Exception as e:
+        logger.error("[Stage 1] 失败: %s", e)
+        return {"last_error": str(e), "error_stage": "market_context"}
 
-        if hypothesis and metrics and metrics.parse_success:
-            pool.register(
-                hypothesis=hypothesis,
-                metrics=metrics,
-                island_name=island_name,
-            )
-            sharpe = metrics.sharpe
-            logging.info(
-                "[Orchestrator] 注册因子 '%s'：Sharpe=%.2f, IC=%.4f, ICIR=%.2f",
-                hypothesis.name, sharpe, metrics.ic, metrics.icir,
-            )
 
-            # 追踪全局最优
-            if sharpe > best_sharpe_ever:
-                best_sharpe_ever = sharpe
-                best_factor_ever = hypothesis
-                logging.info(
-                    "🌟 新全局最优！Sharpe=%.2f，因子：%s",
-                    best_sharpe_ever, best_factor_ever.name,
-                )
+# ─────────────────────────────────────────────────────────
+# Stage 2a：假设生成节点
+# ─────────────────────────────────────────────────────────
+def hypothesis_gen_node(state: AgentState) -> dict:
+    """Stage 2: 并行调用所有 Island 的 AlphaResearcher，展开 Batch。"""
+    from src.agents.researcher import hypothesis_gen_node as _gen_node
 
-            # 突破基线 → 提前终止
-            if sharpe > THRESHOLDS.min_sharpe and metrics.ic > THRESHOLDS.min_ic_mean and metrics.icir > THRESHOLDS.min_icir:
-                logging.info("\n🎉 基线突破！终止进化搜索。")
-                break
+    logger.info("[Stage 2] 并行生成假设... (Round %d)", state.current_round)
+
+    # 注入 active_islands（从调度器选择）
+    scheduler = get_scheduler()
+    active = getattr(scheduler, "get_active_islands", lambda: ACTIVE_ISLANDS)()
+
+    enriched = dict(state)
+    enriched["active_islands"] = active
+    enriched["iteration"] = state.current_round
+
+    try:
+        result = _gen_node(enriched)
+        notes = result.get("research_notes", [])
+        logger.info("[Stage 2] 生成 %d 个候选", len(notes))
+        return {"research_notes": notes}
+    except Exception as e:
+        logger.error("[Stage 2] 假设生成失败: %s", e)
+        return {"research_notes": [], "last_error": str(e), "error_stage": "hypothesis_gen"}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 2b：Synthesis（跨 Island 洞察）
+# ─────────────────────────────────────────────────────────
+def synthesis_node(state: AgentState) -> dict:
+    """Stage 2b: SynthesisAgent 发现跨 Island 关联（当前轮次为直通节点）。
+
+    Phase 9 中作为 pass-through，完整 SynthesisAgent 在后续 Phase 实现。
+    """
+    # TODO: 实现 SynthesisAgent（跨 Island 向量相似度检索）
+    logger.info("[Stage 2b] Synthesis（pass-through）: %d 个候选", len(state.research_notes))
+    return {}  # 保持状态不变
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 3：前置过滤
+# ─────────────────────────────────────────────────────────
+def prefilter_node(state: AgentState) -> dict:
+    """Stage 3: Validator + NoveltyFilter + AlignmentChecker，最多放行 Top K。"""
+    from src.agents.prefilter import prefilter_node as _prefilter
+
+    logger.info("[Stage 3] 过滤 %d 个候选...", len(state.research_notes))
+    result = _prefilter(dict(state))
+    approved = result.get("approved_notes", [])
+    filtered = len(state.research_notes) - len(approved)
+    logger.info("[Stage 3] 放行 %d 个，淘汰 %d 个", len(approved), filtered)
+    return {"approved_notes": approved, "filtered_count": filtered}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 4a：探索性分析
+# ─────────────────────────────────────────────────────────
+def exploration_node(state: AgentState) -> dict:
+    """Stage 4a: 对有 exploration_questions 的 Note 执行 EDA。"""
+    from src.agents.exploration import ExplorationAgent
+
+    notes_needing_exploration = [
+        n for n in state.approved_notes
+        if n.exploration_questions and n.final_formula is None
+    ]
+
+    if not notes_needing_exploration:
+        logger.info("[Stage 4a] 无需探索，直接进入 note_refinement")
+        return {"exploration_results": []}
+
+    logger.info("[Stage 4a] 探索 %d 个 Notes...", len(notes_needing_exploration))
+
+    async def _run_all():
+        agent = ExplorationAgent()
+        results = []
+        for note in notes_needing_exploration:
+            try:
+                result = await agent.explore(note)
+                results.append(result)
+                logger.info("[Stage 4a] 探索完成: %s", note.note_id)
+            except Exception as e:
+                logger.warning("[Stage 4a] 探索失败 %s: %s", note.note_id, e)
+        return results
+
+    exploration_results = asyncio.run(_run_all())
+    return {"exploration_results": exploration_results}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 4a→2：Note 精化
+# ─────────────────────────────────────────────────────────
+def note_refinement_node(state: AgentState) -> dict:
+    """Stage 4a→2: 将 ExplorationResult 反馈给对应 ResearchNote，更新 final_formula。"""
+    if not state.exploration_results:
+        return {}
+
+    # 建立 note_id → ExplorationResult 映射
+    result_map = {r.note_id: r for r in state.exploration_results}
+
+    updated_notes = []
+    for note in state.approved_notes:
+        if note.note_id in result_map:
+            er = result_map[note.note_id]
+            # 用探索结果精化 final_formula
+            refined_formula = er.refined_formula_suggestion or note.proposed_formula
+            note = note.model_copy(update={
+                "final_formula": refined_formula,
+                "status": "ready_for_backtest",
+            })
+            logger.info("[Stage 4a→2] 精化 %s: %s", note.note_id, refined_formula[:60])
         else:
-            logging.info("[Orchestrator] 第 %d 轮无有效回测结果", round_n + 1)
+            # 无探索结果，直接用 proposed_formula
+            note = note.model_copy(update={"final_formula": note.proposed_formula, "status": "ready_for_backtest"})
+        updated_notes.append(note)
 
-        # 5. 调度器后处理（退火 + 重置检查）
-        scheduler.on_epoch_done(island_name, round_n)
-
-        # 6. 打印当前排行榜（每 5 轮一次）
-        if (round_n + 1) % 5 == 0:
-            _print_leaderboard(pool, scheduler)
-
-    # 最终汇报
-    _print_final_report(pool, best_sharpe_ever, best_factor_ever, round_n + 1)
+    return {"approved_notes": updated_notes}
 
 
-def _print_leaderboard(pool: object, scheduler: "IslandScheduler") -> None:
-    """打印 Island 排行榜。"""
-    status = scheduler.get_status()
-    logging.info("\n=== Island 排行榜（第 %d 轮，T=%.2f）===", status["round"], status["temperature"])
-    leaderboard = pool.get_island_leaderboard()
-    for rank, item in enumerate(leaderboard, 1):
-        active_mark = "✓" if item["island"] in status["active_islands"] else " "
-        logging.info(
-            "  [%s] #%d %-12s best=%.2f  avg=%.2f  n=%d  最优因子: %s",
-            active_mark, rank,
-            item["island_display_name"],
-            item["best_sharpe"],
-            item["avg_sharpe"],
-            item["factor_count"],
-            item["best_factor_name"],
+# ─────────────────────────────────────────────────────────
+# Stage 4b：回测执行
+# ─────────────────────────────────────────────────────────
+def coder_node(state: AgentState) -> dict:
+    """Stage 4b: 对每个 approved_note 调用 Coder 执行 Qlib 回测。
+
+    串行执行（Docker 资源限制），每个 note 生成一个 BacktestReport。
+    """
+    from src.agents.coder import generate_backtest_code, BacktestCodeRequest
+    from src.execution.docker_runner import DockerRunner
+    from src.schemas.backtest import BacktestReport, BacktestMetrics
+    import uuid
+
+    notes = state.approved_notes
+    if not notes:
+        logger.warning("[Stage 4b] 无待回测 Note，跳过")
+        return {"backtest_reports": []}
+
+    logger.info("[Stage 4b] 开始回测 %d 个因子...", len(notes))
+
+    reports = []
+    runner = DockerRunner()
+
+    for note in notes:
+        formula = note.final_formula or note.proposed_formula
+        factor_id = f"{note.island}_{note.note_id}"
+        logger.info("[Stage 4b] 回测: %s → %s", factor_id, formula[:60])
+
+        try:
+            # 生成回测代码
+            request = BacktestCodeRequest(
+                formula=formula,
+                factor_id=factor_id,
+                island=note.island,
+                universe=note.universe,
+                backtest_start=note.backtest_start,
+                backtest_end=note.backtest_end,
+                holding_period=note.holding_period,
+            )
+            code = generate_backtest_code(request)
+
+            # Docker 执行
+            exec_result = runner.run_backtest(code=code, factor_id=factor_id)
+
+            report = BacktestReport(
+                report_id=str(uuid.uuid4()),
+                note_id=note.note_id,
+                factor_id=factor_id,
+                island=note.island,
+                formula=formula,
+                passed=exec_result.exit_code == 0,
+                execution_time_seconds=exec_result.execution_time,
+                qlib_output_raw=exec_result.stdout,
+                error_message=exec_result.stderr if exec_result.exit_code != 0 else None,
+                metrics=_parse_metrics_from_output(exec_result.stdout),
+            )
+            reports.append(report)
+            logger.info("[Stage 4b] %s 完成 (exit=%d)", factor_id, exec_result.exit_code)
+
+        except Exception as e:
+            logger.error("[Stage 4b] %s 失败: %s", factor_id, e)
+            reports.append(BacktestReport(
+                report_id=str(uuid.uuid4()),
+                note_id=note.note_id,
+                factor_id=factor_id,
+                island=note.island,
+                formula=formula,
+                passed=False,
+                execution_time_seconds=0.0,
+                qlib_output_raw="",
+                error_message=str(e),
+                metrics=BacktestMetrics(
+                    sharpe=0.0, annualized_return=0.0, max_drawdown=0.0,
+                    ic_mean=0.0, ic_std=0.0, icir=0.0, turnover_rate=0.0,
+                ),
+            ))
+
+    logger.info("[Stage 4b] 回测完成：%d/%d 成功", sum(1 for r in reports if r.passed), len(reports))
+    return {"backtest_reports": reports}
+
+
+def _parse_metrics_from_output(output: str):
+    """解析回测输出的指标（转发给 BacktestMetrics）。"""
+    import re
+    from src.schemas.backtest import BacktestMetrics
+    import json
+
+    # 优先 JSON 格式
+    m = re.search(r'BACKTEST_METRICS_JSON:\s*(\{.*?\})', output, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(1))
+            return BacktestMetrics(
+                sharpe=float(data.get("sharpe", 0.0)),
+                annualized_return=float(data.get("annualized_return", 0.0)),
+                max_drawdown=float(data.get("max_drawdown", 0.0)),
+                ic_mean=float(data.get("ic", data.get("ic_mean", 0.0))),
+                ic_std=float(data.get("ic_std", 0.0)),
+                icir=float(data.get("icir", 0.0)),
+                turnover_rate=float(data.get("turnover", data.get("turnover_rate", 0.0))),
+            )
+        except Exception:
+            pass
+
+    return BacktestMetrics(
+        sharpe=0.0, annualized_return=0.0, max_drawdown=0.0,
+        ic_mean=0.0, ic_std=0.0, icir=0.0, turnover_rate=0.0,
+    )
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 5：判断
+# ─────────────────────────────────────────────────────────
+def judgment_node(state: AgentState) -> dict:
+    """Stage 5: Critic + RiskAuditor + FactorPool 写入。"""
+    from src.agents.judgment import Critic, RiskAuditor
+
+    if not state.backtest_reports:
+        logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
+        return {"critic_verdicts": [], "risk_audit_reports": []}
+
+    logger.info("[Stage 5] 评判 %d 个回测报告...", len(state.backtest_reports))
+
+    pool = get_factor_pool()
+    verdicts = []
+    risk_reports = []
+
+    async def _run_judgment():
+        critic = Critic()
+        auditor = RiskAuditor(factor_pool=pool)
+        for report in state.backtest_reports:
+            # Critic 评判
+            verdict = await critic.evaluate(report)
+            verdicts.append(verdict)
+            logger.info(
+                "[Stage 5] %s → passed=%s, failure=%s",
+                report.factor_id, verdict.overall_passed, verdict.failure_mode or "—",
+            )
+            # RiskAuditor
+            risk_report = await auditor.audit(report)
+            risk_reports.append(risk_report)
+            # FactorPool 写入
+            if verdict.register_to_pool:
+                try:
+                    pool.register_factor(
+                        report=report,
+                        verdict=verdict,
+                        risk_report=risk_report,
+                    )
+                except Exception as e:
+                    logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
+
+    asyncio.run(_run_judgment())
+
+    passed_count = sum(1 for v in verdicts if v.overall_passed)
+    logger.info("[Stage 5] 通过: %d/%d", passed_count, len(verdicts))
+    return {"critic_verdicts": verdicts, "risk_audit_reports": risk_reports}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 5b：Portfolio Manager
+# ─────────────────────────────────────────────────────────
+def portfolio_node(state: AgentState) -> dict:
+    """Stage 5b: PortfolioManager 更新组合权重。"""
+    from src.agents.judgment import PortfolioManager
+
+    logger.info("[Stage 5b] 更新组合权重...")
+
+    async def _run():
+        pm = PortfolioManager(factor_pool=get_factor_pool())
+        allocation = await pm.rebalance(state)
+        return allocation
+
+    try:
+        allocation = asyncio.run(_run())
+        logger.info("[Stage 5b] 组合更新完成：%d 个因子", len(allocation.factor_weights))
+        return {"portfolio_allocation": allocation}
+    except Exception as e:
+        logger.error("[Stage 5b] Portfolio 更新失败: %s", e)
+        return {"last_error": str(e), "error_stage": "portfolio"}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 5c：CIO 报告生成
+# ─────────────────────────────────────────────────────────
+def report_node(state: AgentState) -> dict:
+    """Stage 5c: ReportWriter 生成 CIOReport，标记等待人类审批。"""
+    from src.agents.judgment import ReportWriter
+
+    logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
+
+    async def _run():
+        writer = ReportWriter()
+        return await writer.generate_cio_report(state)
+
+    try:
+        cio_report = asyncio.run(_run())
+        logger.info("[Stage 5c] CIO 报告生成完成，等待审批...")
+        return {
+            "cio_report": cio_report,
+            "awaiting_human_approval": True,
+            "human_decision": None,
+        }
+    except Exception as e:
+        logger.error("[Stage 5c] 报告生成失败: %s", e)
+        return {"last_error": str(e), "error_stage": "report", "awaiting_human_approval": True}
+
+
+# ─────────────────────────────────────────────────────────
+# Human Gate（interrupt() 等待点）
+# ─────────────────────────────────────────────────────────
+def human_gate_node(state: AgentState) -> dict:
+    """Human Gate: 此节点本身不执行任何逻辑。
+
+    LangGraph 在 interrupt_before=[NODE_HUMAN_GATE] 配置下，
+    会在进入此节点前暂停，等待外部 .update_state() 注入 human_decision。
+
+    外部（CLI）调用方式：
+        graph.update_state(
+            config,
+            {"human_decision": "approve", "awaiting_human_approval": False},
+            as_node=NODE_HUMAN_GATE
         )
+    """
+    return {}  # pass-through，路由在 route_after_human 中处理
 
 
-def _print_final_report(pool: object, best_sharpe: float, best_factor: object, total_rounds: int) -> None:
-    """打印最终汇报。"""
-    stats = pool.get_stats()
-    logging.info("\n" + "=" * 60)
-    logging.info("🏁 进化搜索结束")
-    logging.info("  总轮次: %d", total_rounds)
-    logging.info("  总实验因子数: %d", stats["total_factors"])
-    logging.info("  突破基线因子数: %d", stats["beats_baseline_count"])
-    logging.info("  全局最优 Sharpe: %.2f", best_sharpe)
-    if best_factor:
-        logging.info("  最优因子: %s", best_factor.name)
-        logging.info("  最优公式: %s", best_factor.formula)
-    logging.info("=" * 60)
+# ─────────────────────────────────────────────────────────
+# Loop Control
+# ─────────────────────────────────────────────────────────
+def loop_control_node(state: AgentState) -> dict:
+    """轮次控制：更新调度器，清空本轮状态，递增 current_round。"""
+    scheduler = get_scheduler()
 
+    # 更新调度器（基于本轮结果做退火）
+    for verdict in state.critic_verdicts:
+        if verdict.overall_passed:
+            matching = [r for r in state.backtest_reports if r.factor_id == verdict.factor_id]
+            if matching:
+                scheduler.on_epoch_done(matching[0].island, state.current_round)
+
+    next_round = state.current_round + 1
+    logger.info("[Loop Control] 进入第 %d 轮", next_round)
+
+    # 清空本轮临时状态，保留跨轮次持久数据
+    return {
+        "current_round": next_round,
+        "research_notes": [],
+        "approved_notes": [],
+        "filtered_count": 0,
+        "exploration_results": [],
+        "backtest_reports": [],
+        "critic_verdicts": [],
+        "risk_audit_reports": [],
+        "awaiting_human_approval": False,
+        "human_decision": None,
+        "last_error": None,
+        "error_stage": None,
+    }
+
+
+# ─────────────────────────────────────────────────────────
+# 条件路由函数
+# ─────────────────────────────────────────────────────────
+def route_after_prefilter(state: AgentState) -> str:
+    if not state.approved_notes:
+        logger.info("[Route] prefilter → loop_control（无通过候选）")
+        return NODE_LOOP_CONTROL
+    has_exploration = any(
+        note.exploration_questions
+        for note in state.approved_notes
+        if note.final_formula is None
+    )
+    target = NODE_EXPLORATION if has_exploration else NODE_CODER
+    logger.info("[Route] prefilter → %s", target)
+    return target
+
+
+def route_after_judgment(state: AgentState) -> str:
+    new_passes = [v for v in state.critic_verdicts if v.overall_passed]
+    if new_passes:
+        target = NODE_PORTFOLIO
+    else:
+        target = NODE_LOOP_CONTROL
+    logger.info("[Route] judgment → %s（%d 个通过）", target, len(new_passes))
+    return target
+
+
+def route_after_portfolio(state: AgentState) -> str:
+    """每 N 轮或有重大新发现时生成报告。"""
+    if state.current_round % REPORT_EVERY_N_ROUNDS == 0:
+        return NODE_REPORT
+    # 有超越基线的因子，立即报告
+    from src.schemas.thresholds import THRESHOLDS
+    has_breakthrough = any(
+        r.metrics.sharpe > THRESHOLDS.min_sharpe * 1.1  # 超越基线 10%
+        for r in state.backtest_reports
+        if r.passed
+    )
+    if has_breakthrough:
+        return NODE_REPORT
+    return NODE_LOOP_CONTROL
+
+
+def route_after_human(state: AgentState) -> str:
+    decision = state.human_decision or "approve"
+    if decision == "stop":
+        logger.info("[Route] human_gate → END（用户停止）")
+        return END
+    if decision.startswith("redirect:"):
+        logger.info("[Route] human_gate → hypothesis_gen（重定向）")
+        return NODE_HYPOTHESIS_GEN
+    logger.info("[Route] human_gate → loop_control（批准继续）")
+    return NODE_LOOP_CONTROL
+
+
+def route_loop(state: AgentState) -> str:
+    if state.current_round >= MAX_ROUNDS:
+        logger.info("[Route] loop_control → END（达到最大轮次 %d）", MAX_ROUNDS)
+        return END
+    return NODE_MARKET_CONTEXT
+
+
+# ─────────────────────────────────────────────────────────
+# 图构建
+# ─────────────────────────────────────────────────────────
+_graph = None
+_graph_config = None
+
+
+def build_graph():
+    """构建完整 v2 LangGraph 图。"""
+    graph = StateGraph(AgentState)
+
+    # 注册节点
+    graph.add_node(NODE_MARKET_CONTEXT,  market_context_node)
+    graph.add_node(NODE_HYPOTHESIS_GEN,  hypothesis_gen_node)
+    graph.add_node(NODE_SYNTHESIS,       synthesis_node)
+    graph.add_node(NODE_PREFILTER,       prefilter_node)
+    graph.add_node(NODE_EXPLORATION,     exploration_node)
+    graph.add_node(NODE_NOTE_REFINEMENT, note_refinement_node)
+    graph.add_node(NODE_CODER,           coder_node)
+    graph.add_node(NODE_JUDGMENT,        judgment_node)
+    graph.add_node(NODE_PORTFOLIO,       portfolio_node)
+    graph.add_node(NODE_REPORT,          report_node)
+    graph.add_node(NODE_HUMAN_GATE,      human_gate_node)
+    graph.add_node(NODE_LOOP_CONTROL,    loop_control_node)
+
+    # 固定边
+    graph.add_edge(START,               NODE_MARKET_CONTEXT)
+    graph.add_edge(NODE_MARKET_CONTEXT, NODE_HYPOTHESIS_GEN)
+    graph.add_edge(NODE_HYPOTHESIS_GEN, NODE_SYNTHESIS)
+    graph.add_edge(NODE_SYNTHESIS,      NODE_PREFILTER)
+    graph.add_edge(NODE_EXPLORATION,    NODE_NOTE_REFINEMENT)
+    graph.add_edge(NODE_NOTE_REFINEMENT,NODE_CODER)
+    graph.add_edge(NODE_CODER,          NODE_JUDGMENT)
+
+    # 条件边
+    graph.add_conditional_edges(NODE_PREFILTER,  route_after_prefilter, {
+        NODE_EXPLORATION:     NODE_EXPLORATION,
+        NODE_CODER:           NODE_CODER,
+        NODE_LOOP_CONTROL:    NODE_LOOP_CONTROL,
+    })
+    graph.add_conditional_edges(NODE_JUDGMENT, route_after_judgment, {
+        NODE_PORTFOLIO:    NODE_PORTFOLIO,
+        NODE_LOOP_CONTROL: NODE_LOOP_CONTROL,
+    })
+    graph.add_conditional_edges(NODE_PORTFOLIO, route_after_portfolio, {
+        NODE_REPORT:       NODE_REPORT,
+        NODE_LOOP_CONTROL: NODE_LOOP_CONTROL,
+    })
+    graph.add_conditional_edges(NODE_HUMAN_GATE, route_after_human, {
+        NODE_LOOP_CONTROL:    NODE_LOOP_CONTROL,
+        NODE_HYPOTHESIS_GEN:  NODE_HYPOTHESIS_GEN,
+        END:                  END,
+    })
+    graph.add_conditional_edges(NODE_LOOP_CONTROL, route_loop, {
+        NODE_MARKET_CONTEXT: NODE_MARKET_CONTEXT,
+        END:                 END,
+    })
+
+    return graph.compile(
+        checkpointer=MemorySaver(),
+        interrupt_before=[NODE_HUMAN_GATE],  # 在进入 human_gate 前暂停
+    )
+
+
+def get_graph():
+    """获取编译好的图单例（供 CLI 的 approve/redirect/stop 注入状态）。"""
+    global _graph
+    if _graph is None:
+        _graph = build_graph()
+    return _graph
+
+
+def get_latest_config() -> dict:
+    """获取最近一次 run 的 LangGraph config（供 CLI 注入 human_decision）。"""
+    global _graph_config
+    return _graph_config or {}
+
+
+# ─────────────────────────────────────────────────────────
+# 入口函数
+# ─────────────────────────────────────────────────────────
+async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
+    """进化模式：多 Island 轮换，持续运行 rounds 轮。"""
+    global _graph_config
+
+    if islands:
+        global ACTIVE_ISLANDS
+        ACTIVE_ISLANDS = islands
+
+    graph = get_graph()
+    thread_id = f"pixiu_evolve_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    _graph_config = {"configurable": {"thread_id": thread_id}}
+
+    logger.info("\n%s", "=" * 60)
+    logger.info("🚀 Pixiu v2 启动（进化模式，最大 %d 轮）", rounds)
+    logger.info("   Active Islands: %s", ", ".join(ACTIVE_ISLANDS))
+    logger.info("%s\n", "=" * 60)
+
+    initial_state = AgentState(current_round=0)
+    await graph.ainvoke(initial_state.model_dump(), config=_graph_config)
+
+
+async def run_single(island: str):
+    """单次模式：指定 Island，单轮调试。"""
+    global _graph_config
+
+    graph = get_graph()
+    thread_id = f"pixiu_single_{island}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    _graph_config = {"configurable": {"thread_id": thread_id}}
+
+    logger.info("\n%s", "=" * 60)
+    logger.info("🔍 Pixiu v2 启动（单次模式，Island=%s）", island)
+    logger.info("%s\n", "=" * 60)
+
+    initial_state = AgentState(current_round=0, current_island=island)
+    await graph.ainvoke(initial_state.model_dump(), config=_graph_config)
+
+
+# ─────────────────────────────────────────────────────────
+# CLI 入口（向后兼容）
+# ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Pixiu Orchestrator")
-    parser.add_argument("--mode", choices=["single", "evolve"], default="evolve",
-                        help="single: 单 Island 单次运行；evolve: Island 进化大循环")
-    parser.add_argument("--island", default="momentum",
-                        help="single 模式下指定 Island")
-    parser.add_argument("--rounds", type=int, default=20,
-                        help="evolve 模式下的最大大轮次数")
+
+    parser = argparse.ArgumentParser(description="Pixiu v2 Orchestrator")
+    parser.add_argument("--mode", choices=["single", "evolve"], default="evolve")
+    parser.add_argument("--island", default="momentum")
+    parser.add_argument("--rounds", type=int, default=20)
+    parser.add_argument("--islands", default=None, help="逗号分隔的 Island 列表")
     args = parser.parse_args()
 
     if args.mode == "single":
-        run_layer1_ab_test(island_name=args.island)
+        asyncio.run(run_single(island=args.island))
     else:
-        run_evolution_loop(max_rounds=args.rounds)
+        island_list = args.islands.split(",") if args.islands else None
+        asyncio.run(run_evolve(rounds=args.rounds, islands=island_list))
