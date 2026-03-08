@@ -48,3 +48,16 @@ class SynthesisInsight(PixiuBase):
     relationship: str           # 描述两个假设的关联
     combined_hypothesis: Optional[str]  # 如果值得合并，给出合并假设
     priority: str               # "high" | "medium" | "low"
+
+
+class AlphaResearcherBatch(PixiuBase):
+    """AlphaResearcher 的单次调用输出，包含 2-3 个差异化候选。
+
+    设计原因：单次 LLM 调用生成多个候选，成本几乎等同于单个候选，
+    但可显著扩大漏斗入口（从 6 个/轮 提升到 12-18 个/轮），
+    使 Stage 3 过滤有实质意义。
+    """
+    island: str
+    notes: List[FactorResearchNote]   # 2-3 个，要求差异化经济逻辑
+    generation_rationale: str          # 为何选择这几个方向（供审计）
+
