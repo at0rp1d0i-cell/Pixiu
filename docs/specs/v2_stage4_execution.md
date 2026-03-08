@@ -1,4 +1,4 @@
-# EvoQuant v2 Stage 4：执行层规格
+# Pixiu v2 Stage 4：执行层规格
 
 > 版本：2.0
 > 创建：2026-03-07

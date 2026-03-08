@@ -1,4 +1,4 @@
-# EvoQuant v2 Terminal CLI + Web Dashboard 规格
+# Pixiu v2 Terminal CLI + Web Dashboard 规格
 
 > 版本：2.0
 > 创建：2026-03-07
@@ -9,7 +9,7 @@
 
 ## 1. 产品形态
 
-EvoQuant v2 提供两种交互界面，服务不同场景：
+Pixiu v2 提供两种交互界面，服务不同场景：
 
 | 界面 | 场景 | 技术栈 |
 |---|---|---|
@@ -57,7 +57,7 @@ from rich.live import Live
 from rich.panel import Panel
 import asyncio
 
-app = typer.Typer(help="EvoQuant v2 - 自主 AI 量化研究平台")
+app = typer.Typer(help="Pixiu v2 - 自主 AI 量化研究平台")
 console = Console()
 
 @app.command()
@@ -72,7 +72,7 @@ def run(
     from src.core.orchestrator import run_evolve, run_single
 
     console.print(Panel(
-        "[bold green]EvoQuant v2 启动[/bold green]\n"
+        "[bold green]Pixiu v2 启动[/bold green]\n"
         f"模式：{mode} | 轮次：{rounds}",
         title="EvoQuant"
     ))

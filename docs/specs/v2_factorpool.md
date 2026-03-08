@@ -1,4 +1,4 @@
-# EvoQuant v2 FactorPool 规格
+# Pixiu v2 FactorPool 规格
 
 > 版本：2.0
 > 创建：2026-03-07
