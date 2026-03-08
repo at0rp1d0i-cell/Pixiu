@@ -16,7 +16,9 @@ import chromadb
 from chromadb.config import Settings
 
 from src.agents.schemas import BacktestMetrics, FactorHypothesis
+from src.schemas.thresholds import THRESHOLDS
 from .islands import ISLANDS
+
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +99,7 @@ class FactorPool:
             # 时间戳
             "registered_at": datetime.now().isoformat(),
             # 是否达到基线（方便过滤）
-            "beats_baseline": metrics.sharpe > 2.67 and metrics.parse_success,
+            "beats_baseline": metrics.sharpe > THRESHOLDS.min_sharpe and metrics.parse_success,
         }
 
         self._collection.upsert(
@@ -271,8 +273,8 @@ def _summarize_failure(meta: dict) -> str:
     icir = meta.get("icir", 0.0)
     turnover = meta.get("turnover", 0.0)
 
-    if sharpe <= 2.67:
-        reasons.append(f"Sharpe={sharpe:.2f}（基线2.67）")
+    if sharpe <= THRESHOLDS.min_sharpe:
+        reasons.append(f"Sharpe={sharpe:.2f}（基线{THRESHOLDS.min_sharpe}）")
     if ic != 0.0 and ic < 0.02:
         reasons.append(f"IC={ic:.4f}（低于0.02）")
     if icir != 0.0 and icir < 0.3:

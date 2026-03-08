@@ -3,12 +3,15 @@ Pixiu 数据下载与预处理核心引擎 (Phase 1 架构升级)
 实现从 BaoStock 获取 A 股数据，处理前/后复权，严格计算 Factor，
 清洗停牌缺失值，并输出为 Qlib 兼容的 Parquet 格式，杜绝数据倾轧。
 """
+import logging
 import baostock as bs
 import pandas as pd
 import numpy as np
 import os
 from tqdm import tqdm
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 # ============ 配置 ============
 PARQUET_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "parquet_staging"))
@@ -25,10 +28,10 @@ def bs_code_to_qlib(bs_code: str) -> str:
     return bs_code.replace(".", "").upper()
 
 def get_csi300_components():
-    print("正在获取沪深300成分股名单...")
+    logger.info("正在获取沪深300成分股名单...")
     rs = bs.query_hs300_stocks()
     if rs.error_code != '0':
-        print(f"获取失败: {rs.error_msg}")
+        logger.error("获取失败: %s", rs.error_msg)
         return []
     
     stocks = []
@@ -66,7 +69,7 @@ def process_single_asset(code: str) -> bool:
     parquet_path = os.path.join(PARQUET_DIR, f"{qlib_code}.parquet")
     
     if os.path.exists(parquet_path):
-        return True # 已缓存
+        return True  # 已缓存
         
     # 1. 获取未复权数据 (用于真实的 Amount 和计算 Factor)
     df_unadj = fetch_bs_data(code, adjustflag="3")
@@ -123,7 +126,7 @@ def process_single_asset(code: str) -> bool:
     return True
 
 def download_all(stock_codes: list):
-    print(f"开始核心清洗与并发下载 {len(stock_codes)} 只股票 ({START_DATE} ~ {END_DATE})...")
+    logger.info("开始核心清洗与并发下载 %d 只股票 (%s ~ %s)...", len(stock_codes), START_DATE, END_DATE)
     
     success = 0
     fail = 0
@@ -136,18 +139,19 @@ def download_all(stock_codes: list):
             fail += 1
             failed_codes.append(code)
     
-    print(f"\n✅ 数据提取清洗完成！成功: {success}, 失败: {fail}")
+    logger.info("数据提取清洗完成！成功: %d, 失败: %d", success, fail)
     if failed_codes:
-        print(f"⚠️  失败的股票: {failed_codes[:10]}{'...' if len(failed_codes) > 10 else ''}")
-    print(f"📂 Parquet 文件保存在: {PARQUET_DIR}")
+        logger.warning("失败的股票: %s%s", failed_codes[:10], '...' if len(failed_codes) > 10 else '')
+    logger.info("Parquet 文件保存在: %s", PARQUET_DIR)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     setup_dirs()
     
     # 登录 BaoStock
     lg = bs.login()
     if lg.error_code != '0':
-        print(f"BaoStock 登录失败: {lg.error_msg}")
+        logger.error("BaoStock 登录失败: %s", lg.error_msg)
         exit(1)
         
     try:

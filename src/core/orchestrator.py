@@ -13,6 +13,7 @@ from src.agents.critic import critic_node, route_eval
 from src.factor_pool.pool import get_factor_pool
 from src.agents.schemas import FactorHypothesis, BacktestMetrics
 from src.factor_pool.scheduler import IslandScheduler
+from src.schemas.thresholds import THRESHOLDS
 
 def build_graph() -> StateGraph:
     logging.info("[Pixiu Orchestrator] 构建 LangGraph 引擎...")
@@ -81,7 +82,7 @@ def run_layer1_ab_test(island_name: str = "momentum"):
     }
     
     logging.info("\n" + "=" * 60)
-    logging.info("🚀 启动大逃杀: Agent (Layer 1) vs Alpha158 Baseline (Sharpe: 2.67)")
+    logging.info("🚀 启动大逃杀: Agent (Layer 1) vs Alpha158 Baseline (Sharpe: %.2f)", THRESHOLDS.min_sharpe)
     logging.info("=" * 60)
     
     try:
@@ -197,7 +198,7 @@ def run_evolution_loop(max_rounds: int = 20):
                 )
 
             # 突破基线 → 提前终止
-            if sharpe > 2.67 and metrics.ic > 0.02 and metrics.icir > 0.3:
+            if sharpe > THRESHOLDS.min_sharpe and metrics.ic > THRESHOLDS.min_ic_mean and metrics.icir > THRESHOLDS.min_icir:
                 logging.info("\n🎉 基线突破！终止进化搜索。")
                 break
         else:

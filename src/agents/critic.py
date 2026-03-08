@@ -43,8 +43,8 @@ def _parse_metrics(log: str) -> BacktestMetrics:
                 parse_success=True,
                 raw_log_tail=log[-500:],
             )
-        except Exception:
-            pass  # 降级到正则
+        except Exception as e:
+            logger.warning("JSON 解析失败，降级到正则: %s", e)
 
     # ── 降级路径：正则解析 ──────────────────────────────────────
     def _find(pattern, default=0.0):
