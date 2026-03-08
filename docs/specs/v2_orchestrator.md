@@ -1,4 +1,4 @@
-# EvoQuant v2 Orchestrator 规格
+# Pixiu v2 Orchestrator 规格
 
 > 版本：2.0
 > 创建：2026-03-07
@@ -397,4 +397,29 @@ STAGE3_TOP_K = 5                    # Stage 3 最多放行候选数
 MAX_CONCURRENT_BACKTESTS = 2        # Stage 4b 最大并发回测数
 EXPLORATION_TIMEOUT_SECONDS = 120   # ExplorationAgent 超时
 BACKTEST_TIMEOUT_SECONDS = 600      # 单次回测超时（10分钟）
+FUNDAMENTAL_FIELDS_ENABLED = False  # 是否启用基本面字段（需 Tushare 接入）
+```
+
+---
+
+## 9. 评估基准定义
+
+**旧基准（已废弃）**：`Alpha158 + LightGBM 训练集 Sharpe = 2.67`
+该数字为样本内（IS）估计，不适合作为 Agent 因子的超越目标。
+
+**新基准（三条线，均使用样本外 OOS 估计）**：
+
+| 基准线 | 计算方式 | 说明 |
+|--------|---------|------|
+| **B0：等权 CSI300** | CSI300 指数等权持有，无再平衡 | 最简单的基准，任何策略必须超越 |
+| **B1：Alpha158+LightGBM OOS Sharpe** | 在测试集（2025-04-01 起）计算 | 机器学习基准，Pixiu 的主要超越目标 |
+| **B2：单因子 IC > 0.035** | IC × √252 的信息比 | 单因子有效性标准，Critic 放行阈值 |
+
+`CriticThresholds` 中的 `sharpe_threshold` 应对标 **B1 的 OOS 值**，该值需在运行基线后更新（预期约 1.5-2.0，显著低于 IS 的 2.67）。
+
+执行方式：
+```bash
+# 重跑基线并记录 OOS Sharpe
+python -m src.core.run_baseline --eval-period oos
+# 更新 src/core/config.py 中的 CRITIC_SHARPE_THRESHOLD
 ```

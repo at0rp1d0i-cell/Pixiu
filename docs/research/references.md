@@ -1,6 +1,6 @@
 # EvoQuant 参考文献与开源项目
 
-> 最后更新：2026-03-04
+> 最后更新：2026-03-08
 
 ---
 
@@ -16,11 +16,15 @@
 
 ### 学术论文
 
-| 论文 | 年份 | 核心贡献 |
-|------|------|---------|
-| **Alpha-GPT 2.0** | 2024 | LLM 迭代挖因子的学术范式验证，多轮 Researcher→回测→反馈循环 |
-| **QuantAgent (Huawei)** | 2024 | 双循环架构：内循环=写代码试错，外循环=知识提取存入向量库 |
-| **FinMem** | 2024 | 三层分层记忆（工作/情节/语义），直接对标 EvoQuant 的三层记忆系统设计 |
+| 论文 | arXiv | 年份 | 核心贡献 | 与 EvoQuant 的关联 |
+|------|-------|------|---------|------------------|
+| **AlphaAgent** | 2502.16789 | 2025 | 三维前置过滤漏斗（复杂度/语义对齐/新颖性）+ ICRank 评估 | **Stage 3 PreFilter 直接蓝本** |
+| **RD-Agent (Microsoft)** | 2505.15155 | 2025 | 文档驱动接口，Research→Development 分离，YAML/JSON 任务对象 | **核心接口设计原则** |
+| **QuantaAlpha** | 2602.07085 | 2026 | 探索性轨迹变异 + 收敛到因子表达式 + 语义一致性约束 | **Exploration Agent 设计** |
+| **CogAlpha** | 2511.18850 | 2025 | 七层智能体层次 + 21 个 Agent 质量检验体系 | **Agent 团队规模参考** |
+| **QuantAgent (Huawei)** | 2402.03755 | 2024 | 双循环架构：内循环=写代码试错，外循环=知识提取存入向量库 | **Island 进化外循环** |
+| **Alpha-GPT 2.0** | — | 2024 | LLM 迭代挖因子的学术范式验证，多轮 Researcher→回测→反馈循环 | 漏斗架构的早期验证 |
+| **FinMem** | — | 2024 | 三层分层记忆（工作/情节/语义） | FactorPool v2 三集合设计参考 |
 
 ---
 
@@ -30,6 +34,9 @@
 
 | 项目 | URL | 借鉴点 |
 |------|-----|--------|
+| **TradingAgents** | https://github.com/TauricResearch/TradingAgents | LangGraph 多智能体交易框架。特色：多分析师团队（基本面/情绪/新闻/技术）+ Bull vs Bear 辩论机制 + Risk Manager 层。**借鉴：** Stage 1 多分析师分工、CriticVerdict 反驳机制、RiskAuditor 层级设计 |
+| **VNPy** | https://github.com/vnpy/vnpy | 事件驱动 Reactor 模式 + Gateway 抽象 + 26+ 券商接入。**借鉴：** 事件驱动解耦、标准网关接口（Phase 4 实盘对接） |
+| **Dexter** | https://github.com/virattt/dexter | LLM 任务分解 + JSONL 审计日志 + LLM-as-Judge。**借鉴：** 可审计性设计、多提供商 LLM 支持、结构化日志 |
 | **FinGPT** | https://github.com/AI4Finance-Foundation/FinGPT | ChatGLM/LLaMA 金融微调，可作本地情绪分析因子引擎（~14k stars） |
 | **FinRobot** | https://github.com/AI4Finance-Foundation/FinRobot | 多Agent金融平台，参考其Agent角色设计；弱点：无真正回测循环 |
 | **Smolagents (HF)** | https://github.com/huggingface/smolagents | 轻量级Agent框架，备选 Researcher 实现方案 |
