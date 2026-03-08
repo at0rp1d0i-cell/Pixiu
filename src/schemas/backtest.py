@@ -1,7 +1,7 @@
 from typing import Optional
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 
-class BacktestMetrics(EvoQuantBase):
+class BacktestMetrics(PixiuBase):
     sharpe: float
     annualized_return: float
     max_drawdown: float
@@ -12,7 +12,7 @@ class BacktestMetrics(EvoQuantBase):
     win_rate: Optional[float] = None
     long_short_spread: Optional[float] = None
 
-class BacktestReport(EvoQuantBase):
+class BacktestReport(PixiuBase):
     # 标识
     report_id: str             # UUID
     note_id: str               # 对应的 FactorResearchNote

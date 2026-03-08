@@ -1,5 +1,5 @@
 """
-EvoQuant: FactorPool — 因子实验历史库
+Pixiu: FactorPool — 因子实验历史库
 基于 ChromaDB 持久化，支持：
   - 存储因子假设 + 回测指标
   - 按 Island 分组管理

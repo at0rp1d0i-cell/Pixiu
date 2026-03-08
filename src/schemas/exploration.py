@@ -1,14 +1,14 @@
 from typing import List, Dict, Any, Optional
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 from src.schemas.research_note import ExplorationQuestion
 
-class ExplorationRequest(EvoQuantBase):
+class ExplorationRequest(PixiuBase):
     request_id: str             # UUID
     note_id: str                # 对应的 FactorResearchNote
     question: ExplorationQuestion
     data_fields: List[str]      # 实际需要从 Qlib 加载的字段
 
-class ExplorationResult(EvoQuantBase):
+class ExplorationResult(PixiuBase):
     request_id: str
     note_id: str
     success: bool

@@ -1,5 +1,5 @@
 """
-EvoQuant: LangGraph State Definition
+Pixiu: LangGraph State Definition
 """
 from typing import TypedDict, Annotated, Sequence, Optional
 from langchain_core.messages import BaseMessage

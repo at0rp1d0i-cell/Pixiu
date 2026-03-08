@@ -1,13 +1,13 @@
 from typing import List, Optional
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 
-class ThresholdCheck(EvoQuantBase):
+class ThresholdCheck(PixiuBase):
     metric: str
     value: float
     threshold: float
     passed: bool
 
-class CriticVerdict(EvoQuantBase):
+class CriticVerdict(PixiuBase):
     report_id: str
     factor_id: str
     overall_passed: bool
@@ -24,12 +24,12 @@ class CriticVerdict(EvoQuantBase):
     register_to_pool: bool
     pool_tags: List[str] = []
 
-class CorrelationFlag(EvoQuantBase):
+class CorrelationFlag(PixiuBase):
     existing_factor_id: str
     correlation: float
     flag_reason: str  # "too_similar" | "opposite" | "complement"
 
-class RiskAuditReport(EvoQuantBase):
+class RiskAuditReport(PixiuBase):
     factor_id: str
     overfitting_score: float
     overfitting_flag: bool
@@ -37,13 +37,13 @@ class RiskAuditReport(EvoQuantBase):
     recommendation: str
     audit_notes: str
 
-class FactorWeight(EvoQuantBase):
+class FactorWeight(PixiuBase):
     factor_id: str
     island: str
     weight: float
     rationale: str
 
-class PortfolioAllocation(EvoQuantBase):
+class PortfolioAllocation(PixiuBase):
     allocation_id: str
     timestamp: str
     factor_weights: List[FactorWeight] = []
@@ -53,7 +53,7 @@ class PortfolioAllocation(EvoQuantBase):
     total_factors: int
     notes: str
 
-class CIOReport(EvoQuantBase):
+class CIOReport(PixiuBase):
     """触发 interrupt()，等待人类 CIO 审批"""
     report_id: str
     period: str

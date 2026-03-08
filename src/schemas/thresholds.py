@@ -1,6 +1,6 @@
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 
-class CriticThresholds(EvoQuantBase):
+class CriticThresholds(PixiuBase):
     """可通过环境变量覆盖的阈值配置"""
     min_sharpe: float = 2.67          # 基线 Sharpe
     min_ic_mean: float = 0.02

@@ -1,13 +1,13 @@
 from typing import Optional, List
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 
-class ExplorationQuestion(EvoQuantBase):
+class ExplorationQuestion(PixiuBase):
     """Researcher 提出的探索性问题，由 ExplorationAgent 在 Stage 4a 执行"""
     question: str               # 自然语言问题
     suggested_analysis: str     # 建议的分析方式（"correlation", "ic_by_regime", "quantile_return"等）
     required_fields: List[str]  # 需要的数据字段
 
-class FactorResearchNote(EvoQuantBase):
+class FactorResearchNote(PixiuBase):
     # 标识
     note_id: str                # UUID，格式：{island}_{date}_{sequence}
     island: str                 # 所属 Island
@@ -39,7 +39,7 @@ class FactorResearchNote(EvoQuantBase):
     # 状态
     status: str = "draft"  # "draft" | "exploring" | "ready_for_backtest" | "completed"
 
-class SynthesisInsight(EvoQuantBase):
+class SynthesisInsight(PixiuBase):
     """SynthesisAgent 发现的跨 Island 关联"""
     island_a: str
     island_b: str

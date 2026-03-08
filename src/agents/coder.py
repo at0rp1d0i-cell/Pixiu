@@ -1,5 +1,5 @@
 """
-EvoQuant v2: Coder Agent (Deterministic Mode)
+Pixiu v2: Coder Agent (Deterministic Mode)
 Role: Wrapper for the Execution Layer (no internal LLMs).
 """
 import logging

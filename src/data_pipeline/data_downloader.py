@@ -1,5 +1,5 @@
 """
-EvoQuant 数据下载与预处理核心引擎 (Phase 1 架构升级)
+Pixiu 数据下载与预处理核心引擎 (Phase 1 架构升级)
 实现从 BaoStock 获取 A 股数据，处理前/后复权，严格计算 Factor，
 清洗停牌缺失值，并输出为 Qlib 兼容的 Parquet 格式，杜绝数据倾轧。
 """

@@ -1,5 +1,5 @@
 """
-EvoQuant: Parquet -> Qlib Bin 高速转换器 (完全对齐底层 C++ 内存映射规范)
+Pixiu: Parquet -> Qlib Bin 高速转换器 (完全对齐底层 C++ 内存映射规范)
 读取 data_downloader 生成的高质量 Parquet 文件，注入 start_index，并输出二进制。
 """
 import os

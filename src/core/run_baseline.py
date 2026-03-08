@@ -1,5 +1,5 @@
 """
-EvoQuant: Qlib 基线模型 (Phase 1 Skateboard)
+Pixiu: Qlib 基线模型 (Phase 1 Skateboard)
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 使用 Alpha158 因子 + LightGBM 模型进行沪深300的截面选股回测。
 这是 AI 系统未来需要击败的"及格线"。
@@ -21,7 +21,7 @@ def run_baseline():
     
     # MLflow Setup via Qlib
     R.set_uri(f"file://{os.path.abspath(os.path.join(RESULTS_DIR, '..', 'mlruns'))}")
-    R.start_exp(experiment_name="EvoQuant_Research")
+    R.start_exp(experiment_name="Pixiu_Research")
     R.start_run(run_name="baseline_Alpha158_LGBM")
     
     logging.info("Step 1: 初始化 Qlib...")
@@ -157,7 +157,7 @@ def run_baseline():
     
     # ============ Step 6: 输出结果 ============
     logging.info("\n" + "=" * 60)
-    logging.info("📊 EvoQuant Baseline Results (Alpha158 + LightGBM + TopK50)")
+    logging.info("📊 Pixiu Baseline Results (Alpha158 + LightGBM + TopK50)")
     logging.info("=" * 60)
     
     total_return = result_df['cumulative_return'].iloc[-1] - 1
@@ -200,7 +200,7 @@ def run_baseline():
         
         ax1.plot(result_df['date'], result_df['cumulative_return'], color='#2196F3', linewidth=2)
         ax1.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
-        ax1.set_title('EvoQuant Baseline: Alpha158 + LightGBM (CSI 300 Universe)', fontsize=14)
+        ax1.set_title('Pixiu Baseline: Alpha158 + LightGBM (CSI 300 Universe)', fontsize=14)
         ax1.set_ylabel('Cumulative Return')
         ax1.grid(True, alpha=0.3)
         

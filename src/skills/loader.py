@@ -1,5 +1,5 @@
 """
-EvoQuant: SkillLoader — 统一管理 Skill 文档的加载与条件注入
+Pixiu: SkillLoader — 统一管理 Skill 文档的加载与条件注入
 """
 import logging
 import os

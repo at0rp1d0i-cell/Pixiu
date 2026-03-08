@@ -1,5 +1,5 @@
 """
-EvoQuant: Researcher Agent（MCP 增强版）
+Pixiu: Researcher Agent（MCP 增强版）
 Role: 调用 AKShare MCP 工具获取实时市场数据，结合因子字典提出量化因子假设。
 """
 import asyncio

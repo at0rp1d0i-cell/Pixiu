@@ -1,5 +1,5 @@
 """
-EvoQuant ChromaDB MCP Server
+Pixiu ChromaDB MCP Server
 工具：FactorPool 查询（Island 最优、相似失败、排行榜）
 注意：只读查询工具，写入通过 orchestrator 直接调用 pool.register()
 启动：python mcp_servers/chromadb_server.py

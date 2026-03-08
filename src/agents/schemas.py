@@ -1,5 +1,5 @@
 """
-EvoQuant: 结构化数据模型
+Pixiu: 结构化数据模型
 统一定义 Agent 间传递的数据结构，消除自由文本接缝。
 """
 from typing import Literal

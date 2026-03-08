@@ -1,5 +1,5 @@
 """
-EvoQuant: Layer 3 金融新闻情绪提取器 (News Sentiment Spider)
+Pixiu: Layer 3 金融新闻情绪提取器 (News Sentiment Spider)
 目标：
 1. 走本地 Mihomo 代理 (HTTP: 17890) 绕过防火墙。
 2. 爬取金十/财联社的每日宏观及市场动态摘要。

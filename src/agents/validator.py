@@ -1,5 +1,5 @@
 """
-EvoQuant: Formula Validator Node
+Pixiu: Formula Validator Node
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 Role: Performs lightweight static analysis on the Researcher's generated Qlib factors
 to prevent obvious syntax errors from wasting Sandbox execution time.

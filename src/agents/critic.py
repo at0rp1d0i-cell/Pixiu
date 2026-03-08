@@ -1,5 +1,5 @@
 """
-EvoQuant: Critic Agent（结构化增强版）
+Pixiu: Critic Agent（结构化增强版）
 Role: 从回测日志解析多维度指标，评估因子质量，决定路由。
 评估标准：Sharpe > 基线 AND IC > 0.02 AND ICIR > 0.3 AND 换手率 < 50%
 """

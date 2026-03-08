@@ -1,6 +1,6 @@
 """
-EvoQuant: Island 调度器
-实现 FunSearch Island 模型的 EvoQuant 适配版：
+Pixiu: Island 调度器
+实现 FunSearch Island 模型的 Pixiu 适配版：
   - softmax 采样（偏向优秀 Island，保留探索性）
   - 温度退火（初期探索，后期利用）
   - Island 重置（淘汰长期无效方向，补充新方向）

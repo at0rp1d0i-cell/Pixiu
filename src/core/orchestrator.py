@@ -1,5 +1,5 @@
 """
-EvoQuant: LangGraph Orchestrator
+Pixiu: LangGraph Orchestrator
 Role: Wires Researcher, Coder, and Critic nodes into a stateful cyclic graph.
 """
 import logging
@@ -15,7 +15,7 @@ from src.agents.schemas import FactorHypothesis, BacktestMetrics
 from src.factor_pool.scheduler import IslandScheduler
 
 def build_graph() -> StateGraph:
-    logging.info("[EvoQuant Orchestrator] 构建 LangGraph 引擎...")
+    logging.info("[Pixiu Orchestrator] 构建 LangGraph 引擎...")
     
     # 1. Initialize StateGraph
     workflow = StateGraph(AgentState)
@@ -248,7 +248,7 @@ def _print_final_report(pool: object, best_sharpe: float, best_factor: object, t
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="EvoQuant Orchestrator")
+    parser = argparse.ArgumentParser(description="Pixiu Orchestrator")
     parser.add_argument("--mode", choices=["single", "evolve"], default="evolve",
                         help="single: 单 Island 单次运行；evolve: Island 进化大循环")
     parser.add_argument("--island", default="momentum",

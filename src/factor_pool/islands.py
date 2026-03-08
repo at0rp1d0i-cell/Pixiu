@@ -1,5 +1,5 @@
 """
-EvoQuant: Island 定义
+Pixiu: Island 定义
 每个 Island 代表一个因子研究方向（家族）。
 Island 概念来自 FunSearch 进化算法，用于防止搜索陷入局部最优。
 """

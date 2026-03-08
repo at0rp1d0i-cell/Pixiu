@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: evoquant
+Version: 0.1.0
+Summary: A Multi-Agent Framework for Quantitative Trading in A-Shares
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pyqlib
+Requires-Dist: lightgbm
+Requires-Dist: pandas
+Requires-Dist: polars
+Requires-Dist: langchain
+Requires-Dist: langgraph
+Requires-Dist: langchain-openai
+Requires-Dist: python-dotenv
+Requires-Dist: mlflow
+Requires-Dist: akshare
+Requires-Dist: baostock
+Requires-Dist: chromadb

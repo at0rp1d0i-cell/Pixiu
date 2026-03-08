@@ -15,10 +15,10 @@ class ExecutionResult:
 
 class DockerRunner:
     """
-    在 evoquant-coder Docker 容器中执行 Python 脚本。
+    在 Pixiu-coder Docker 容器中执行 Python 脚本。
     使用 subprocess，不依赖任何 LLM。
     """
-    IMAGE = "evoquant-coder:latest"
+    IMAGE = "Pixiu-coder:latest"
     
     # 选项 A: 动态获取项目根目录下的 data/qlib_bin 路径
     _project_root = Path(__file__).parent.parent.parent.resolve()

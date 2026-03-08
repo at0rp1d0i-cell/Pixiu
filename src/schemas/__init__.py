@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
-class EvoQuantBase(BaseModel):
-    """所有 EvoQuant schema 的基类"""
+class PixiuBase(BaseModel):
+    """所有 Pixiu schema 的基类"""
     created_at: datetime = Field(default_factory=datetime.utcnow)
     version: str = Field(default="2.0")
 

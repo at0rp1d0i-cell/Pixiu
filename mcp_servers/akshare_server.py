@@ -1,5 +1,5 @@
 """
-EvoQuant AKShare MCP Server
+Pixiu AKShare MCP Server
 工具：北向资金、全市场资金流、北向持股、券商研报、行业估值
 启动：python mcp_servers/akshare_server.py
 """
@@ -231,6 +231,108 @@ async def get_individual_fund_flow_rank(period: str = "今日", top_n: int = 20)
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         logger.error("get_individual_fund_flow_rank failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+
+# ─────────────────────────────────────────────
+# 工具 8：个股财务摘要
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_stock_financial_summary(symbol: str) -> str:
+    """获取个股最新财务摘要（TTM口径）。
+
+    Args:
+        symbol: 股票代码，如 '000001'。
+
+    返回字段：股票代码、总资产、净资产、营业收入、净利润、
+    摊薄净资产收益率(ROE)、市盈率(PE-TTM)、市净率(PB)、
+    每股收益(EPS)、营收同比增速、净利润同比增速。
+    用途：基本面 valuation island 的核心输入，估计因子经济逻辑。
+    注意：数据约有1个季度的滞后（财报发布延迟）。
+    """
+    try:
+        df = ak.stock_financial_abstract_ths(symbol=symbol, indicator="按年度")
+        if df is None or df.empty:
+            return json.dumps({"error": f"No financial data for {symbol}"}, ensure_ascii=False)
+        # 取最近2条记录
+        result = df.head(2).to_dict(orient="records")
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_stock_financial_summary failed for %s: %s", symbol, e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 9：宏观经济指标
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_macro_indicators() -> str:
+    """获取中国主要宏观经济指标最新值。
+
+    返回内容：
+    - 制造业PMI（最近6个月）
+    - M2货币供应量同比（最近3个月）
+    - CPI同比（最近3个月）
+
+    用途：Stage 1 MarketAnalyst 判断宏观 regime，
+    辅助 valuation island 判断估值扩张/收缩周期。
+    """
+    try:
+        result = {}
+
+        # 制造业PMI
+        try:
+            pmi_df = ak.macro_china_pmi_yearly()
+            result["pmi_manufacturing"] = pmi_df.tail(6).to_dict(orient="records")
+        except Exception as e:
+            result["pmi_manufacturing"] = {"error": str(e)}
+
+        # M2
+        try:
+            m2_df = ak.macro_china_m2_yearly()
+            result["m2_yoy"] = m2_df.tail(3).to_dict(orient="records")
+        except Exception as e:
+            result["m2_yoy"] = {"error": str(e)}
+
+        # CPI
+        try:
+            cpi_df = ak.macro_china_cpi_yearly()
+            result["cpi_yoy"] = cpi_df.tail(3).to_dict(orient="records")
+        except Exception as e:
+            result["cpi_yoy"] = {"error": str(e)}
+
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_macro_indicators failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 10：融资融券数据
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_margin_trading_summary(days: int = 10) -> str:
+    """获取全市场融资融券汇总数据（最近N个交易日）。
+
+    Args:
+        days: 返回最近多少个交易日，默认 10，最大 30。
+
+    返回字段：日期、融资余额、融资买入额、融券余量、
+    融券卖出量、融资融券余额。
+    用途：判断市场杠杆水平和情绪；高融资余额 + 下跌 = 踩踏信号，
+    构建情绪/动量 Island 的杠杆风险因子。
+    """
+    try:
+        days = min(max(days, 1), 30)
+        df = ak.stock_margin_account_info()
+        if df is None or df.empty:
+            return json.dumps({"error": "No margin data available"}, ensure_ascii=False)
+        df = df.tail(days)
+        result = df.to_dict(orient="records")
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_margin_trading_summary failed: %s", e)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 

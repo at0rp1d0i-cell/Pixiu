@@ -1,13 +1,13 @@
 from typing import List, Optional
 from pydantic import Field
-from src.schemas import EvoQuantBase
+from src.schemas import PixiuBase
 from src.schemas.market_context import MarketContextMemo
 from src.schemas.research_note import FactorResearchNote, SynthesisInsight
 from src.schemas.exploration import ExplorationResult
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport, PortfolioAllocation, CIOReport
 
-class AgentState(EvoQuantBase):
+class AgentState(PixiuBase):
     """LangGraph 全局状态，在节点间传递"""
 
     # 当前上下文
