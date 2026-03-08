@@ -1,7 +1,7 @@
 [project]
-name = "evoquant"
-version = "0.1.0"
-description = "A Multi-Agent Framework for Quantitative Trading in A-Shares"
+name = "pixiu"
+version = "2.0.0"
+description = "Pixiu — A Multi-Agent Framework for Quantitative Alpha Discovery in A-Shares"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,13 +12,23 @@ dependencies = [
     "langchain",
     "langgraph",
     "langchain-openai",
+    "langchain-mcp-adapters",
     "python-dotenv",
     "mlflow",
     "akshare",
     "baostock",
-    "chromadb"
+    "chromadb",
+    "typer[all]",
+    "rich",
+    "fastapi",
+    "uvicorn[standard]",
+    "tqdm",
 ]
+
+[project.scripts]
+pixiu = "src.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
