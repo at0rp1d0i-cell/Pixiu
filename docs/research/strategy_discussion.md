@@ -381,7 +381,7 @@ Researcher 用 `get_northbound_flow_today()` 工具发现"今日北向净流入 
 
 ### `langchain-mcp-adapters` 0.1.0 正确集成方式
 
-从源码确认（见 `deep_dive_core_references.md` §3）：
+从源码确认（见 `docs/archive/docs4ai/deep_dive_core_references.md` §3）：
 
 ```python
 # ✅ 正确：不用 async with
@@ -405,7 +405,7 @@ async with MultiServerMCPClient(connections) as client:  # NotImplementedError!
 ### 实施决策：分两期
 
 **Period 1（给 Gemini 做）：** AKShare MCP Server 核心版
-详见 `docs/specs/akshare_mcp_server_spec.md`
+详见 `docs/archive/docs4ai/specs/akshare_mcp_server_spec.md`
 
 **Period 2（未来）：** 研报 PDF 解析 + ChromaDB 向量存储接入
 

@@ -174,7 +174,7 @@ Pixiu is released under the **GNU Affero General Public License v3.0 (AGPL-3.0)*
 
 ## Contributing
 
-Issues and PRs welcome. Please read the architecture overview at `docs/specs/v2_architecture_overview.md` before contributing.
+Issues and PRs welcome. Please start with `docs/README.md`, then read `docs/specs/v2_architecture_overview.md` before contributing.
 
 ---
 
