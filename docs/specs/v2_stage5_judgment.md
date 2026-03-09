@@ -5,6 +5,8 @@
 > 前置依赖：`v2_interface_contracts.md`
 > 文件位置：`src/agents/judgment.py`（扩展现有 `critic.py`）
 
+> 当前收口顺序：先读 `v2_stage45_golden_path.md`，本文件保留完整 Stage 5 目标形态与扩展设计。
+
 ---
 
 ## 1. 四个组件

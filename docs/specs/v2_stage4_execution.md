@@ -6,6 +6,8 @@
 > 实施优先级：**P0 — 最先实施，替换当前 Claude Code 方案**
 > 文件位置：`src/execution/`（新目录，替换 `src/sandbox/`）
 
+> 当前收口顺序：先读 `v2_stage45_golden_path.md`，本文件保留 Stage 4 的详细设计与迁移背景。
+
 ---
 
 ## 0. 迁移说明
