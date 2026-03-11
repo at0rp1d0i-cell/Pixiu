@@ -222,17 +222,14 @@ def note_refinement_node(state: AgentState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 4b：回测执行
+# Stage 4b：回测执行（v2 Golden Path）
 # ─────────────────────────────────────────────────────────
 def coder_node(state: AgentState) -> dict:
-    """Stage 4b: 对每个 approved_note 调用 Coder 执行 Qlib 回测。
+    """Stage 4b: 对每个 approved_note 调用 Coder v2 执行确定性回测。
 
-    串行执行（Docker 资源限制），每个 note 生成一个 BacktestReport。
+    使用新的 Coder v2 实现，遵循 v2_stage45_golden_path.md 规格。
     """
-    from src.agents.coder import generate_backtest_code, BacktestCodeRequest
-    from src.execution.docker_runner import DockerRunner
-    from src.schemas.backtest import BacktestReport, BacktestMetrics
-    import uuid
+    from src.execution.coder import Coder
 
     notes = state.approved_notes
     if not notes:
@@ -241,62 +238,21 @@ def coder_node(state: AgentState) -> dict:
 
     logger.info("[Stage 4b] 开始回测 %d 个因子...", len(notes))
 
-    reports = []
-    runner = DockerRunner()
+    async def _run_all_backtests():
+        coder = Coder()
+        reports = []
+        for note in notes:
+            try:
+                logger.info("[Stage 4b] 回测: %s → %s", note.note_id, (note.final_formula or note.proposed_formula)[:60])
+                report = await coder.run_backtest(note)
+                reports.append(report)
+                logger.info("[Stage 4b] %s 完成 (status=%s)", note.note_id, report.status)
+            except Exception as e:
+                logger.error("[Stage 4b] %s 失败: %s", note.note_id, e)
+        return reports
 
-    for note in notes:
-        formula = note.final_formula or note.proposed_formula
-        factor_id = f"{note.island}_{note.note_id}"
-        logger.info("[Stage 4b] 回测: %s → %s", factor_id, formula[:60])
-
-        try:
-            # 生成回测代码
-            request = BacktestCodeRequest(
-                formula=formula,
-                factor_id=factor_id,
-                island=note.island,
-                universe=note.universe,
-                backtest_start=note.backtest_start,
-                backtest_end=note.backtest_end,
-                holding_period=note.holding_period,
-            )
-            code = generate_backtest_code(request)
-
-            # Docker 执行
-            exec_result = runner.run_backtest(code=code, factor_id=factor_id)
-
-            report = BacktestReport(
-                report_id=str(uuid.uuid4()),
-                note_id=note.note_id,
-                factor_id=factor_id,
-                island=note.island,
-                formula=formula,
-                passed=exec_result.exit_code == 0,
-                execution_time_seconds=exec_result.execution_time,
-                qlib_output_raw=exec_result.stdout,
-                error_message=exec_result.stderr if exec_result.exit_code != 0 else None,
-                metrics=_parse_metrics_from_output(exec_result.stdout),
-            )
-            reports.append(report)
-            logger.info("[Stage 4b] %s 完成 (exit=%d)", factor_id, exec_result.exit_code)
-
-        except Exception as e:
-            logger.error("[Stage 4b] %s 失败: %s", factor_id, e)
-            reports.append(BacktestReport(
-                report_id=str(uuid.uuid4()),
-                note_id=note.note_id,
-                factor_id=factor_id,
-                island=note.island,
-                formula=formula,
-                passed=False,
-                execution_time_seconds=0.0,
-                qlib_output_raw="",
-                error_message=str(e),
-                metrics=BacktestMetrics(
-                    sharpe=0.0, annualized_return=0.0, max_drawdown=0.0,
-                    ic_mean=0.0, ic_std=0.0, icir=0.0, turnover_rate=0.0,
-                ),
-            ))
+    reports = asyncio.run(_run_all_backtests())
+    logger.info("[Stage 4b] 回测完成，生成 %d 个报告", len(reports))
 
     logger.info("[Stage 4b] 回测完成：%d/%d 成功", sum(1 for r in reports if r.passed), len(reports))
     return {"backtest_reports": reports}
@@ -341,92 +297,118 @@ def judgment_node(state: AgentState) -> dict:
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
         return {"critic_verdicts": [], "risk_audit_reports": []}
+    return {"backtest_reports": reports}
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 5：判断与综合（v2 Golden Path）
+# ─────────────────────────────────────────────────────────
+def judgment_node(state: AgentState) -> dict:
+    """Stage 5: Critic v2 确定性判定 + FactorPool 写回。
+
+    使用新的 Critic v2 实现，遵循 v2_stage45_golden_path.md 规格。
+    """
+    from src.agents.critic import Critic
+    from src.agents.factor_pool_writer import FactorPoolWriter
+
+    if not state.backtest_reports:
+        logger.warning("[Stage 5] 无回测报告，跳过判定")
+        return {"critic_verdicts": []}
 
     logger.info("[Stage 5] 评判 %d 个回测报告...", len(state.backtest_reports))
 
     pool = get_factor_pool()
+    critic = Critic()
+    writer = FactorPoolWriter(pool)
+
     verdicts = []
-    risk_reports = []
-
-    async def _run_judgment():
-        critic = Critic()
-        auditor = RiskAuditor(factor_pool=pool)
-        for report in state.backtest_reports:
-            # Critic 评判
-            verdict = await critic.evaluate(report)
+    for report in state.backtest_reports:
+        try:
+            # Critic 确定性判定
+            verdict = critic.evaluate(report)
             verdicts.append(verdict)
+
             logger.info(
-                "[Stage 5] %s → passed=%s, failure=%s",
-                report.factor_id, verdict.overall_passed, verdict.failure_mode or "—",
+                "[Stage 5] %s → decision=%s, score=%.3f",
+                report.note_id, verdict.decision, verdict.score,
             )
-            # RiskAuditor
-            risk_report = await auditor.audit(report)
-            risk_reports.append(risk_report)
-            # FactorPool 写入
-            if verdict.register_to_pool:
-                try:
-                    pool.register_factor(
-                        report=report,
-                        verdict=verdict,
-                        risk_report=risk_report,
-                    )
-                except Exception as e:
-                    logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
 
-    asyncio.run(_run_judgment())
+            # FactorPool 写回
+            try:
+                factor_id = writer.write_record(report, verdict)
+                logger.info("[Stage 5] 写入 FactorPool: %s", factor_id)
+            except Exception as e:
+                logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
 
-    passed_count = sum(1 for v in verdicts if v.overall_passed)
-    logger.info("[Stage 5] 通过: %d/%d", passed_count, len(verdicts))
-    return {"critic_verdicts": verdicts, "risk_audit_reports": risk_reports}
+        except Exception as e:
+            logger.error("[Stage 5] 判定失败 %s: %s", report.note_id, e)
+
+    promoted_count = sum(1 for v in verdicts if v.decision == "promote")
+    logger.info("[Stage 5] 判定完成: %d promoted, %d total", promoted_count, len(verdicts))
+
+    return {"critic_verdicts": verdicts}
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 5b：Portfolio Manager
+# Stage 5b：Portfolio Manager（暂时简化）
 # ─────────────────────────────────────────────────────────
 def portfolio_node(state: AgentState) -> dict:
-    """Stage 5b: PortfolioManager 更新组合权重。"""
-    from src.agents.judgment import PortfolioManager
+    """Stage 5b: Portfolio 更新（当前版本简化为 pass-through）。
 
-    logger.info("[Stage 5b] 更新组合权重...")
+    完整的 PortfolioManager 不在 v2 Golden Path 范围内。
+    """
+    logger.info("[Stage 5b] Portfolio 更新（简化版）...")
 
-    async def _run():
-        pm = PortfolioManager(factor_pool=get_factor_pool())
-        allocation = await pm.rebalance(state)
-        return allocation
-
-    try:
-        allocation = asyncio.run(_run())
-        logger.info("[Stage 5b] 组合更新完成：%d 个因子", len(allocation.factor_weights))
-        return {"portfolio_allocation": allocation}
-    except Exception as e:
-        logger.error("[Stage 5b] Portfolio 更新失败: %s", e)
-        return {"last_error": str(e), "error_stage": "portfolio"}
+    # TODO: 实现完整的 PortfolioManager
+    # 当前版本：直接返回空的 allocation
+    return {}
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 5c：CIO 报告生成
+# Stage 5c：CIO 报告生成（v2 Golden Path）
 # ─────────────────────────────────────────────────────────
 def report_node(state: AgentState) -> dict:
-    """Stage 5c: ReportWriter 生成 CIOReport，标记等待人类审批。"""
-    from src.agents.judgment import ReportWriter
+    """Stage 5c: 生成最小化 CIO 报告。
+
+    使用确定性模板渲染器，不调用 LLM。
+    """
+    from src.agents.cio_report_renderer import CIOReportRenderer
+    from pathlib import Path
 
     logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
 
-    async def _run():
-        writer = ReportWriter()
-        return await writer.generate_cio_report(state)
+    if not state.backtest_reports or not state.critic_verdicts:
+        logger.warning("[Stage 5c] 无报告或判定结果，跳过")
+        return {}
 
     try:
-        cio_report = asyncio.run(_run())
-        logger.info("[Stage 5c] CIO 报告生成完成，等待审批...")
+        renderer = CIOReportRenderer()
+        reports_dir = Path(__file__).parent.parent.parent / "data" / "cio_reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # 为每个因子生成报告
+        report_paths = []
+        for report, verdict in zip(state.backtest_reports, state.critic_verdicts):
+            factor_id = f"{report.island_id}_{report.note_id}"
+            cio_markdown = renderer.render(report, verdict, factor_id)
+
+            # 保存到文件
+            report_path = reports_dir / f"{factor_id}_round{state.current_round}.md"
+            report_path.write_text(cio_markdown, encoding="utf-8")
+            report_paths.append(str(report_path))
+
+            logger.info("[Stage 5c] CIO 报告已保存: %s", report_path.name)
+
+        logger.info("[Stage 5c] 生成 %d 个 CIO 报告", len(report_paths))
+
         return {
-            "cio_report": cio_report,
             "awaiting_human_approval": True,
             "human_decision": None,
         }
+
     except Exception as e:
         logger.error("[Stage 5c] 报告生成失败: %s", e)
-        return {"last_error": str(e), "error_stage": "report", "awaiting_human_approval": True}
+        return {"last_error": str(e), "error_stage": "report"}
 
 
 # ─────────────────────────────────────────────────────────

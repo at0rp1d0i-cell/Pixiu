@@ -1,28 +1,21 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from src.schemas import PixiuBase
 
-class ThresholdCheck(PixiuBase):
-    metric: str
-    value: float
-    threshold: float
-    passed: bool
-
 class CriticVerdict(PixiuBase):
+    """Stage 5 确定性判定结果"""
+    verdict_id: str
     report_id: str
-    factor_id: str
-    overall_passed: bool
+    note_id: str
 
-    # 逐项检查
-    checks: List[ThresholdCheck] = []
+    # 决策（确定性状态机）
+    decision: Literal["promote", "archive", "reject", "retry"]
+    score: float
+    passed_checks: List[str]
+    failed_checks: List[str]
 
-    # 失败归因（overall_passed=False 时必填）
-    failure_mode: Optional[str] = None
-    failure_explanation: Optional[str] = None
-    suggested_fix: Optional[str] = None
-
-    # FactorPool 写入决策
-    register_to_pool: bool
-    pool_tags: List[str] = []
+    # 摘要和原因码
+    summary: str
+    reason_codes: List[str]  # "LOW_SHARPE" | "LOW_IC" | "LOW_ICIR" | "HIGH_TURNOVER" | etc.
 
 class CorrelationFlag(PixiuBase):
     existing_factor_id: str

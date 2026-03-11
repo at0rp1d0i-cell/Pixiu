@@ -1,168 +1,241 @@
 """
-Pixiu: Critic Agent（结构化增强版）
-Role: 从回测日志解析多维度指标，评估因子质量，决定路由。
-评估标准：Sharpe > 基线 AND IC > 0.02 AND ICIR > 0.3 AND 换手率 < 50%
+Stage 5: Critic - 确定性判定逻辑
+按照 v2_stage45_golden_path.md 规格实现
 """
+import uuid
 import logging
-import re
-from .state import AgentState
-from .schemas import BacktestMetrics
+from typing import List, Tuple, Optional
+from src.schemas.backtest import BacktestReport
+from src.schemas.judgment import CriticVerdict
+from src.schemas.thresholds import THRESHOLDS
 
 logger = logging.getLogger(__name__)
 
-# ── 基线与阈值 ──────────────────────────────────────────────────
-BASELINE_SHARPE = 2.67   # Phase 1 Alpha158+LightGBM 基线
-MIN_IC = 0.02            # IC 均值最低门槛（低于此 = 无效因子）
-MIN_ICIR = 0.3           # ICIR 稳定性门槛
-MAX_TURNOVER = 50.0      # 日均换手率上限（%），超过手续费会吃掉收益
+# 原因码枚举
+REASON_LOW_SHARPE = "LOW_SHARPE"
+REASON_LOW_IC = "LOW_IC"
+REASON_LOW_ICIR = "LOW_ICIR"
+REASON_HIGH_TURNOVER = "HIGH_TURNOVER"
+REASON_HIGH_DRAWDOWN = "HIGH_DRAWDOWN"
+REASON_LOW_COVERAGE = "LOW_COVERAGE"
+REASON_EXECUTION_FAILED = "EXECUTION_FAILED"
+REASON_PARSE_INCOMPLETE = "PARSE_INCOMPLETE"
+REASON_JUDGE_INCOMPLETE = "JUDGE_INCOMPLETE"
 
-
-def _parse_metrics(log: str) -> BacktestMetrics:
-    """从回测日志中提取结构化指标。
-
-    优先尝试解析 JSON 格式输出；回退到正则解析自由文本。
+class Critic:
     """
-    import json
+    确定性判定器（v2 Golden Path）
 
-    if not log:
-        return BacktestMetrics()
+    职责：
+    1. 接收 BacktestReport
+    2. 执行固定顺序的检查（完整性 → 硬阈值 → 评分）
+    3. 返回确定性的 CriticVerdict
 
-    # ── 优先路径：解析 JSON ──────────────────────────────────────
-    json_match = re.search(r"BACKTEST_METRICS_JSON:\s*(\{.*?\})", log, re.DOTALL)
-    if json_match:
-        try:
-            data = json.loads(json_match.group(1))
-            return BacktestMetrics(
-                sharpe=float(data.get("sharpe", 0.0)),
-                annualized_return=float(data.get("annualized_return", 0.0)),
-                max_drawdown=float(data.get("max_drawdown", 0.0)),
-                ic=float(data.get("ic", 0.0)),
-                icir=float(data.get("icir", 0.0)),
-                turnover=float(data.get("turnover", 0.0)),
-                win_rate=float(data.get("win_rate", 0.0)),
-                parse_success=True,
-                raw_log_tail=log[-500:],
+    不调用任何 LLM，不做自由文本推理。
+    """
+
+    def __init__(self, thresholds=None):
+        self.thresholds = thresholds or THRESHOLDS
+
+    def evaluate(self, report: BacktestReport) -> CriticVerdict:
+        """
+        确定性判定的唯一入口
+
+        判定顺序（固定）：
+        1. 完整性检查
+        2. 硬阈值检查
+        3. 加权评分
+        """
+        verdict_id = str(uuid.uuid4())
+
+        # Step 1: 完整性检查
+        completeness_ok, reason_codes = self._check_completeness(report)
+        if not completeness_ok:
+            return CriticVerdict(
+                verdict_id=verdict_id,
+                report_id=report.report_id,
+                note_id=report.note_id,
+                decision="retry",
+                score=0.0,
+                passed_checks=[],
+                failed_checks=["completeness"],
+                summary="报告不完整，需要重试",
+                reason_codes=reason_codes,
             )
-        except Exception as e:
-            logger.warning("JSON 解析失败，降级到正则: %s", e)
 
-    # ── 降级路径：正则解析 ──────────────────────────────────────
-    def _find(pattern, default=0.0):
-        m = re.search(pattern, log)
-        try:
-            return float(m.group(1)) if m else default
-        except (ValueError, AttributeError):
-            return default
+        # Step 2: 硬阈值检查
+        passed_checks, failed_checks, reason_codes = self._check_thresholds(report)
 
-    sharpe   = _find(r"夏普比率[:：]\s*([-\d\.]+)")
-    ann_ret  = _find(r"年化收益率?[:：]\s*([-\d\.]+)")
-    max_dd   = _find(r"最大回撤[:：]\s*([-\d\.]+)")
-    ic       = _find(r"\bIC均值?[:：]\s*([-\d\.]+)")
-    icir     = _find(r"\bICIR[:：]\s*([-\d\.]+)")
-    turnover = _find(r"换手率[:：]\s*([-\d\.]+)")
+        # Step 3: 加权评分
+        score = self._calculate_score(report)
 
-    parse_success = sharpe != 0.0  # 至少解析到 Sharpe 才算成功
+        # Step 4: 决策
+        decision = self._make_decision(passed_checks, failed_checks, score)
 
-    return BacktestMetrics(
-        sharpe=sharpe,
-        annualized_return=ann_ret,
-        max_drawdown=max_dd,
-        ic=ic,
-        icir=icir,
-        turnover=turnover,
-        parse_success=parse_success,
-        raw_log_tail=log[-500:],
-    )
+        # Step 5: 生成摘要
+        summary = self._generate_summary(decision, passed_checks, failed_checks, score)
 
+        return CriticVerdict(
+            verdict_id=verdict_id,
+            report_id=report.report_id,
+            note_id=report.note_id,
+            decision=decision,
+            score=score,
+            passed_checks=passed_checks,
+            failed_checks=failed_checks,
+            summary=summary,
+            reason_codes=reason_codes,
+        )
 
-def _evaluate(metrics: BacktestMetrics, has_error: bool) -> tuple[str, str]:
-    """
-    多维度评估，返回 (route, reason)。
-    route: "end"（成功）| "loop"（继续迭代）
-    reason: 给 Researcher 下一轮参考的中文反馈
-    """
-    if has_error:
-        return "loop", "代码执行报错，请检查 Qlib 表达式语法和数据列名。"
+    def _check_completeness(self, report: BacktestReport) -> Tuple[bool, List[str]]:
+        """Step 1: 完整性检查"""
+        reason_codes = []
 
-    if not metrics.parse_success:
-        return "loop", "未能从回测日志解析到有效指标，请确认 Coder 输出格式正确。"
+        # 检查执行状态
+        if report.status == "failed":
+            if report.failure_stage == "compile":
+                reason_codes.append(REASON_EXECUTION_FAILED)
+            elif report.failure_stage == "run":
+                reason_codes.append(REASON_EXECUTION_FAILED)
+            elif report.failure_stage == "parse":
+                reason_codes.append(REASON_PARSE_INCOMPLETE)
+            elif report.failure_stage == "judge":
+                reason_codes.append(REASON_JUDGE_INCOMPLETE)
+            else:
+                reason_codes.append(REASON_EXECUTION_FAILED)
+            return False, reason_codes
 
-    reasons = []
+        # 检查必要指标是否存在
+        metrics = report.metrics
+        if metrics.sharpe is None or metrics.ic_mean is None or metrics.icir is None:
+            reason_codes.append(REASON_PARSE_INCOMPLETE)
+            return False, reason_codes
 
-    # ── 核心指标检查 ─────────────────────────────────────────────
-    if metrics.sharpe <= BASELINE_SHARPE:
-        reasons.append(f"Sharpe {metrics.sharpe:.2f} 未超越基线 {BASELINE_SHARPE}")
+        return True, []
 
-    if metrics.ic != 0.0 and metrics.ic < MIN_IC:
-        reasons.append(f"IC均值 {metrics.ic:.4f} 低于门槛 {MIN_IC}（因子预测能力不足）")
+    def _check_thresholds(self, report: BacktestReport) -> Tuple[List[str], List[str], List[str]]:
+        """Step 2: 硬阈值检查"""
+        passed_checks = []
+        failed_checks = []
+        reason_codes = []
 
-    if metrics.icir != 0.0 and metrics.icir < MIN_ICIR:
-        reasons.append(f"ICIR {metrics.icir:.2f} 低于门槛 {MIN_ICIR}（因子不够稳定）")
+        metrics = report.metrics
 
-    if metrics.turnover != 0.0 and metrics.turnover > MAX_TURNOVER:
-        reasons.append(f"日均换手率 {metrics.turnover:.1f}% 过高（手续费将吃掉大部分收益）")
+        # Sharpe 检查
+        if metrics.sharpe is not None:
+            if metrics.sharpe >= self.thresholds.min_sharpe:
+                passed_checks.append("sharpe")
+            else:
+                failed_checks.append("sharpe")
+                reason_codes.append(REASON_LOW_SHARPE)
 
-    if reasons:
-        feedback = "；".join(reasons) + "。请考虑：(1) 换一个方向的因子，(2) 降低因子换手（加长均线周期），(3) 检查因子是否存在前视偏差。"
-        return "loop", feedback
+        # IC 检查
+        if metrics.ic_mean is not None:
+            if metrics.ic_mean >= self.thresholds.min_ic_mean:
+                passed_checks.append("ic_mean")
+            else:
+                failed_checks.append("ic_mean")
+                reason_codes.append(REASON_LOW_IC)
 
-    # ── 全部通过 ─────────────────────────────────────────────────
-    return "end", (
-        f"因子通过全部评估！Sharpe={metrics.sharpe:.2f}, "
-        f"IC={metrics.ic:.4f}, ICIR={metrics.icir:.2f}, "
-        f"换手率={metrics.turnover:.1f}%"
-    )
+        # ICIR 检查
+        if metrics.icir is not None:
+            if metrics.icir >= self.thresholds.min_icir:
+                passed_checks.append("icir")
+            else:
+                failed_checks.append("icir")
+                reason_codes.append(REASON_LOW_ICIR)
 
+        # 换手率检查
+        if metrics.turnover is not None:
+            if metrics.turnover <= self.thresholds.max_turnover:
+                passed_checks.append("turnover")
+            else:
+                failed_checks.append("turnover")
+                reason_codes.append(REASON_HIGH_TURNOVER)
 
-def critic_node(state: AgentState) -> dict:
-    logger.info("[Critic] 开始多维度因子评估...")
+        # 最大回撤检查
+        if metrics.max_drawdown is not None:
+            if abs(metrics.max_drawdown) <= self.thresholds.max_drawdown:
+                passed_checks.append("max_drawdown")
+            else:
+                failed_checks.append("max_drawdown")
+                reason_codes.append(REASON_HIGH_DRAWDOWN)
 
-    log = state.get("backtest_result", "")
-    error = state.get("error_message", "")
-    current_iter = state.get("current_iteration", 0) + 1
+        # 覆盖率检查（如果有）
+        if metrics.coverage is not None:
+            if metrics.coverage >= self.thresholds.min_coverage:
+                passed_checks.append("coverage")
+            else:
+                failed_checks.append("coverage")
+                reason_codes.append(REASON_LOW_COVERAGE)
 
-    metrics = _parse_metrics(log)
-    route, reason = _evaluate(metrics, bool(error))
+        return passed_checks, failed_checks, reason_codes
 
-    # 日志输出
-    if route == "end":
-        logger.info("[Critic] ✅ %s", reason)
-    else:
-        logger.info("[Critic] 🔄 第 %d/%d 轮未达标：%s",
-                    current_iter, state.get("max_iterations", 3), reason)
+    def _calculate_score(self, report: BacktestReport) -> float:
+        """Step 3: 加权评分（确定性）"""
+        metrics = report.metrics
 
-    return {
-        "current_iteration": current_iter,
-        "backtest_metrics": metrics,
-        # 把评估原因写入 error_message，Researcher 下一轮可以读到
-        "error_message": reason if route == "loop" else "",
-    }
+        # 归一化各指标到 [0, 1]
+        sharpe_score = min(1.0, max(0.0, (metrics.sharpe or 0) / 3.0))  # 假设 3.0 为优秀
+        ic_score = min(1.0, max(0.0, (metrics.ic_mean or 0) / 0.05))    # 假设 0.05 为优秀
+        icir_score = min(1.0, max(0.0, (metrics.icir or 0) / 1.0))      # 假设 1.0 为优秀
 
+        # 换手率和回撤是负向指标
+        turnover_score = 1.0 - min(1.0, (metrics.turnover or 0) / self.thresholds.max_turnover)
+        drawdown_score = 1.0 - min(1.0, abs(metrics.max_drawdown or 0) / self.thresholds.max_drawdown)
 
-def route_eval(state: AgentState) -> str:
-    """LangGraph 路由函数。"""
-    current_iter = state.get("current_iteration", 0)
-    max_iter = state.get("max_iterations", 3)
+        # 加权平均（权重可调整）
+        weights = {
+            "sharpe": 0.3,
+            "ic": 0.25,
+            "icir": 0.2,
+            "turnover": 0.15,
+            "drawdown": 0.1,
+        }
 
-    if current_iter >= max_iter:
-        logger.info("[Critic] ⚠️ 达到最大迭代次数 %d，强制终止。", current_iter)
-        return "end"
+        score = (
+            weights["sharpe"] * sharpe_score +
+            weights["ic"] * ic_score +
+            weights["icir"] * icir_score +
+            weights["turnover"] * turnover_score +
+            weights["drawdown"] * drawdown_score
+        )
 
-    metrics = state.get("backtest_metrics")
-    error = state.get("error_message", "")
+        return round(score, 3)
 
-    # 如果 backtest_metrics 存在，用已解析的结果路由
-    if metrics and isinstance(metrics, BacktestMetrics):
-        if error:  # critic_node 把失败原因写入 error_message
-            return "loop"
-        route, _ = _evaluate(metrics, False)
-        return route
+    def _make_decision(
+        self,
+        passed_checks: List[str],
+        failed_checks: List[str],
+        score: float,
+    ) -> str:
+        """Step 4: 决策（确定性状态机）"""
 
-    # 兼容旧路径：backtest_metrics 为空时降级到正则
-    backtest = state.get("backtest_result", "")
-    if backtest:
-        m = re.search(r"夏普比率[:：]\s*([-\d\.]+)", backtest)
-        if m and float(m.group(1)) > BASELINE_SHARPE:
-            return "end"
+        # 所有硬阈值通过 → promote
+        if len(failed_checks) == 0:
+            return "promote"
 
-    return "loop"
+        # 有失败但分数还可以 → archive（留档）
+        if score >= 0.5:
+            return "archive"
+
+        # 分数太低 → reject
+        return "reject"
+
+    def _generate_summary(
+        self,
+        decision: str,
+        passed_checks: List[str],
+        failed_checks: List[str],
+        score: float,
+    ) -> str:
+        """Step 5: 生成摘要（确定性模板）"""
+
+        if decision == "promote":
+            return f"因子通过所有检查，综合得分 {score:.2f}，推荐进入候选池"
+        elif decision == "archive":
+            return f"因子部分指标未达标（{', '.join(failed_checks)}），但综合得分 {score:.2f}，留档备用"
+        elif decision == "reject":
+            return f"因子质量不达标（{', '.join(failed_checks)}），综合得分 {score:.2f}，不推荐使用"
+        else:  # retry
+            return "执行或解析异常，建议重试"

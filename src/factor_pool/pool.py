@@ -20,6 +20,7 @@ from src.schemas.thresholds import THRESHOLDS
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.research_note import FactorResearchNote
+from src.schemas.factor_pool_record import FactorPoolRecord
 from .islands import ISLANDS
 
 
@@ -364,6 +365,53 @@ class FactorPool:
         except Exception as e:
             logger.warning("[FactorPool] get_top_factors failed: %s", e)
             return []
+
+    def register_factor_v2(self, record: FactorPoolRecord) -> None:
+        """
+        v2 Golden Path: 写入 FactorPoolRecord
+
+        按照 v2_stage45_golden_path.md 规格实现
+        """
+        # 向量化文档：公式 + 假设 + 逻辑
+        document = (
+            f"公式: {record.formula}\n"
+            f"假设: {record.hypothesis}\n"
+            f"逻辑: {record.economic_rationale}"
+        )
+
+        # 元数据
+        metadata = {
+            "factor_id": record.factor_id,
+            "note_id": record.note_id,
+            "formula": record.formula,
+            "hypothesis": record.hypothesis,
+            "economic_rationale": record.economic_rationale,
+            "backtest_report_id": record.backtest_report_id,
+            "verdict_id": record.verdict_id,
+            "decision": record.decision,
+            "score": record.score,
+            "sharpe": record.sharpe or 0.0,
+            "ic_mean": record.ic_mean or 0.0,
+            "icir": record.icir or 0.0,
+            "turnover": record.turnover or 0.0,
+            "max_drawdown": record.max_drawdown or 0.0,
+            "coverage": record.coverage or 0.0,
+            "created_at": record.created_at.isoformat(),
+            "tags": json.dumps(record.tags),
+            # 向后兼容
+            "passed": record.decision == "promote",
+            "beats_baseline": record.decision == "promote",
+        }
+
+        self._collection.upsert(
+            ids=[record.factor_id],
+            documents=[document],
+            metadatas=[metadata],
+        )
+        logger.info(
+            "[FactorPool] register_factor_v2: %s → decision=%s, score=%.3f",
+            record.factor_id, record.decision, record.score,
+        )
 
     def get_common_failure_modes(
         self,
