@@ -1,7 +1,9 @@
-# EvoQuant 战略讨论文档
+# Pixiu / EvoQuant 战略讨论记录（历史）
 
-> 持续更新，记录每轮讨论的结论与建议
+> 历史讨论记录，保留用于追溯项目如何演进到当前设计。
 > 最后更新：2026-03-04
+
+> 注意：本文档包含大量旧时代假设、旧命名和已被后续设计修正的判断，不应直接作为当前实现依据。
 
 ---
 
@@ -91,7 +93,7 @@ EvoQuant/
 
 ### Q4：值得借鉴的开源项目和论文
 
-详见：`docs/research/references.md`
+详见：`docs/reference/llm_quant_projects_and_papers.md`
 
 ---
 
@@ -189,7 +191,7 @@ Layer 4: 优雅退出
 
 ### Q2：文档保存
 
-本文档持续更新。论文参考另见 `docs/research/references.md`
+本文档保留为历史背景材料。论文参考另见 `docs/reference/llm_quant_projects_and_papers.md`
 
 ---
 

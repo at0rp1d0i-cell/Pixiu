@@ -84,30 +84,61 @@ The system runs autonomously (Stage 1–4). Humans receive a `CIOReport` and cho
 # 1. Set up environment
 conda create -n pixiu python=3.11
 conda activate pixiu
-pip install -r requirements.txt
+pip install -e .
 
 # 2. Configure credentials
 cp .env.example .env
-# Edit .env: set RESEARCHER_API_KEY, CODER_MODEL, etc.
+# Edit .env: set RESEARCHER_MODEL / RESEARCHER_BASE_URL / RESEARCHER_API_KEY
+# Optional: PIXIU_STATE_STORE_PATH, ACTIVE_ISLANDS, TUSHARE_TOKEN, TAVILY_API_KEY
 
 # 3. Download A-share data (CSI 300)
-python -m src.data_pipeline.data_downloader
-python -m src.data_pipeline.format_to_qlib
+python3 -m src.data_pipeline.data_downloader
+python3 -m src.data_pipeline.format_to_qlib
 
 # 4. Run baseline (establishes benchmark)
-python -m src.core.run_baseline
+python3 -m src.core.run_baseline
 
 # 5. Start single-island research (debug mode)
-python -m src.core.orchestrator --mode single --island momentum
+python3 -m src.core.orchestrator --mode single --island momentum
 
 # 6. Start full evolution loop
-python -m src.core.orchestrator --mode evolve --rounds 20
+python3 -m src.core.orchestrator --mode evolve --rounds 20
 
 # 7. Check status / approve factors
 pixiu status
 pixiu factors --top 10
-pixiu approve --factor-id <id>
+pixiu approve
 ```
+
+### Environment Truth
+
+Current MVP runtime reads these variables directly:
+
+- `RESEARCHER_MODEL`
+- `RESEARCHER_BASE_URL`
+- `RESEARCHER_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_API_BASE`
+- `OPENAI_API_KEY`
+- `MAX_ROUNDS`
+- `ACTIVE_ISLANDS`
+- `REPORT_EVERY_N_ROUNDS`
+- `MAX_CONCURRENT_BACKTESTS`
+- `PIXIU_STATE_STORE_PATH`
+- `FUNDAMENTAL_FIELDS_ENABLED`
+
+Planned / optional integrations:
+
+- `TUSHARE_TOKEN`
+- `TAVILY_API_KEY`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_API_KEY`
+
+Current code reality:
+
+- LLM runtime is mainly direct OpenAI-compatible API calls.
+- MCP is used selectively, especially in Stage 1 market context.
+- Skills are local prompt/constraint documents, not yet a universal runtime capability layer.
 
 ---
 
@@ -174,7 +205,7 @@ Pixiu is released under the **GNU Affero General Public License v3.0 (AGPL-3.0)*
 
 ## Contributing
 
-Issues and PRs welcome. Please start with `docs/README.md`, then read `docs/specs/v2_architecture_overview.md` before contributing.
+Issues and PRs welcome. Please start with `docs/README.md`, then read `docs/overview/architecture-overview.md` before contributing.
 
 ---
 
