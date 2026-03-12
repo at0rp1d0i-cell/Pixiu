@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 _SKILL_LOADER = SkillLoader()
 
 # ====================================================
-# System Prompt（严格按照 v2_stage2_hypothesis_generation.md）
+# System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
 # ====================================================
 ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于 A 股市场量化因子发现。
 

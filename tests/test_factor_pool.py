@@ -1,4 +1,5 @@
 """验收测试：FactorPool ChromaDB 数据层。"""
+import json
 import os
 import sys
 import tempfile
@@ -8,6 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.agents.schemas import BacktestMetrics, FactorHypothesis
 from src.factor_pool.pool import FactorPool
+from src.schemas.backtest import BacktestMetrics as V2BacktestMetrics, BacktestReport, FactorSpecSnapshot
+from src.schemas.judgment import CriticVerdict, RiskAuditReport
 
 
 @pytest.fixture()
@@ -109,3 +112,64 @@ class TestReads:
         assert stats["beats_baseline_count"] == 1
         assert stats["global_best_sharpe"] == 3.0
         assert stats["global_avg_sharpe"] == 2.0
+
+    def test_register_factor_writes_richer_contract_metadata(self, pool):
+        report = BacktestReport(
+            report_id="report-1",
+            note_id="note-1",
+            factor_id="factor-1",
+            island="momentum",
+            formula="$close",
+            factor_spec=FactorSpecSnapshot(
+                formula="$close",
+                hypothesis="趋势延续",
+                economic_rationale="资金流和惯性共同驱动。",
+            ),
+            metrics=V2BacktestMetrics(
+                sharpe=3.0,
+                annualized_return=0.2,
+                annual_return=0.2,
+                max_drawdown=0.1,
+                ic_mean=0.04,
+                ic_std=0.03,
+                icir=0.6,
+                turnover_rate=0.18,
+                turnover=0.18,
+                coverage=1.0,
+            ),
+            passed=True,
+            execution_time_seconds=1.0,
+            qlib_output_raw="{}",
+        )
+        verdict = CriticVerdict(
+            report_id="report-1",
+            factor_id="factor-1",
+            note_id="note-1",
+            overall_passed=True,
+            decision="promote",
+            score=0.92,
+            checks=[],
+            register_to_pool=True,
+            pool_tags=["passed", "decision:promote"],
+            reason_codes=[],
+        )
+        risk = RiskAuditReport(
+            factor_id="factor-1",
+            overfitting_score=0.1,
+            overfitting_flag=False,
+            correlation_flags=[],
+            recommendation="clear",
+            audit_notes="ok",
+        )
+
+        pool.register_factor(report=report, verdict=verdict, risk_report=risk)
+
+        rows = pool._collection.get(where={"island": "momentum"}, include=["metadatas"])
+        assert len(rows["metadatas"]) == 1
+        meta = rows["metadatas"][0]
+        assert meta["note_id"] == "note-1"
+        assert meta["backtest_report_id"] == "report-1"
+        assert meta["decision"] == "promote"
+        assert meta["score"] == 0.92
+        assert meta["coverage"] == 1.0
+        assert meta["economic_rationale"] == "资金流和惯性共同驱动。"

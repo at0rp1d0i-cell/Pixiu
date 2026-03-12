@@ -6,8 +6,11 @@ from datetime import datetime
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, HistoricalInsight
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion, SynthesisInsight
 from src.schemas.exploration import ExplorationRequest, ExplorationResult
-from src.schemas.backtest import BacktestReport, BacktestMetrics
+from src.schemas.backtest import BacktestReport, BacktestMetrics, ExecutionMeta, FactorSpecSnapshot, ArtifactRefs
 from src.schemas.judgment import CriticVerdict, ThresholdCheck, RiskAuditReport, CorrelationFlag, PortfolioAllocation, FactorWeight, CIOReport
+from src.schemas.factor_pool import FactorPoolRecord
+from src.schemas.factor_pool_record import FactorPoolRecord as LegacyFactorPoolRecord
+from src.schemas.control_plane import RunRecord, RunSnapshot, ArtifactRecord, HumanDecisionRecord
 from src.schemas.state import AgentState
 
 def test_market_context_memo_creation():
@@ -92,11 +95,14 @@ def test_backtest_report_metrics():
     metrics = BacktestMetrics(
         sharpe=2.8,
         annualized_return=0.25,
+        annual_return=0.25,
         max_drawdown=0.1,
         ic_mean=0.035,
         ic_std=0.05,
         icir=0.7,
-        turnover_rate=0.2
+        turnover_rate=0.2,
+        turnover=0.2,
+        coverage=1.0,
     )
     
     report = BacktestReport(
@@ -109,11 +115,27 @@ def test_backtest_report_metrics():
         passed=True,
         execution_time_seconds=120.5,
         qlib_output_raw="stdout...",
-        error_message=None
+        error_message=None,
+        execution_meta=ExecutionMeta(
+            universe="csi300",
+            benchmark="csi300",
+            start_date="2021-01-01",
+            end_date="2025-01-01",
+            runtime_seconds=120.5,
+            timestamp_utc=datetime.utcnow(),
+        ),
+        factor_spec=FactorSpecSnapshot(
+            formula="$pe",
+            hypothesis="估值回归",
+            economic_rationale="低估值回归均值",
+        ),
+        artifacts=ArtifactRefs(),
     )
     
     assert report.passed is True
     assert report.metrics.sharpe == 2.8
+    assert report.metrics.annual_return == 0.25
+    assert report.factor_spec is not None
 
 def test_critic_verdict():
     """测试 Stage 5 Critic 的判定报告 Schema"""
@@ -127,18 +149,56 @@ def test_critic_verdict():
     verdict = CriticVerdict(
         report_id="rep-123",
         factor_id="factor-123",
+        note_id="note-123",
         overall_passed=False,
+        decision="reject",
+        score=0.25,
         checks=[check],
+        passed_checks=[],
+        failed_checks=["sharpe"],
         failure_mode="low_sharpe",
         failure_explanation="Sharpe 小于基线",
         suggested_fix="增加动量过滤",
+        summary="Sharpe 未通过",
+        reason_codes=["LOW_SHARPE"],
         register_to_pool=True,
         pool_tags=["failed:low_sharpe", "island:valuation"]
     )
     
     assert verdict.overall_passed is False
+    assert verdict.decision == "reject"
     assert len(verdict.checks) == 1
     assert verdict.failure_mode == "low_sharpe"
+    assert verdict.verdict_id
+
+
+def test_factor_pool_record_schema():
+    record = FactorPoolRecord(
+        factor_id="factor-1",
+        note_id="note-1",
+        formula="$close",
+        hypothesis="趋势延续",
+        economic_rationale="资金流驱动。",
+        backtest_report_id="report-1",
+        verdict_id="verdict-1",
+        decision="promote",
+        score=0.91,
+        sharpe=3.0,
+        ic_mean=0.04,
+        icir=0.6,
+        turnover=0.18,
+        max_drawdown=0.1,
+        coverage=1.0,
+        tags=["passed"],
+    )
+
+    assert record.factor_id == "factor-1"
+    assert record.coverage == 1.0
+    assert isinstance(record.created_at, datetime)
+
+
+def test_legacy_factor_pool_record_import_points_to_canonical_schema():
+    assert LegacyFactorPoolRecord is FactorPoolRecord
 
 def test_agent_state_defaults():
     """测试 AgentState 初始化状态"""
@@ -148,3 +208,56 @@ def test_agent_state_defaults():
     assert state.iteration == 0
     assert state.research_notes == []
     assert state.awaiting_human_approval is False
+
+
+def test_control_plane_schemas():
+    """测试控制平面基础 schema 可创建并具备关键字段。"""
+    now = datetime.utcnow()
+    run = RunRecord(
+        run_id="r1",
+        mode="single",
+        status="running",
+        current_round=1,
+        current_stage="coder",
+        started_at=now,
+    )
+    snapshot = RunSnapshot(
+        run_id="r1",
+        approved_notes_count=1,
+        backtest_reports_count=0,
+        verdicts_count=0,
+        awaiting_human_approval=False,
+        updated_at=now,
+    )
+    artifact = ArtifactRecord(
+        run_id="r1",
+        kind="cio_report",
+        ref_id="rep1",
+        path="/tmp/report.md",
+    )
+    decision = HumanDecisionRecord(run_id="r1", action="approve")
+
+    assert run.run_id == "r1"
+    assert run.current_stage == "coder"
+    assert isinstance(run.created_at, datetime)
+    assert isinstance(run.started_at, datetime)
+    assert run.finished_at is None
+    assert snapshot.approved_notes_count == 1
+    assert isinstance(snapshot.created_at, datetime)
+    assert isinstance(snapshot.updated_at, datetime)
+    assert artifact.kind == "cio_report"
+    assert isinstance(artifact.created_at, datetime)
+    assert decision.action == "approve"
+    assert isinstance(decision.created_at, datetime)
+
+
+def test_control_plane_forbid_extra_fields():
+    """测试控制平面模型继承 forbid-extra 约束。"""
+    with pytest.raises(ValidationError):
+        RunRecord(
+            run_id="r1",
+            mode="single",
+            status="running",
+            started_at=datetime.utcnow(),
+            extra_field="should-fail",
+        )

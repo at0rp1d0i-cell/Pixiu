@@ -14,6 +14,7 @@ Typer + Rich 命令行界面：启动系统、审批因子、查看状态
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -27,6 +28,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _get_state_store():
+    from src.control_plane.state_store import get_state_store
+
+    return get_state_store()
 
 
 @app.command()
@@ -60,43 +67,35 @@ def run(
 
 @app.command()
 def status():
-    """查看当前系统状态（从持久化 AgentState 读取）。"""
-    from src.factor_pool.pool import get_factor_pool
+    """查看当前系统状态（优先从 control-plane state_store 读取）。"""
+    try:
+        store = _get_state_store()
+        run = store.get_latest_run()
+        snapshot = store.get_snapshot(run.run_id) if run else None
+    except Exception as e:
+        console.print(f"[red]读取状态失败: {e}[/red]")
+        return
 
-    pool = get_factor_pool()
-    stats = pool.get_stats()
+    if run is None:
+        console.print("[yellow]暂无运行中的实验记录[/yellow]")
+        return
 
     table = Table(title="Pixiu 运行状态", border_style="cyan")
     table.add_column("项目", style="bold")
     table.add_column("值", style="green")
 
-    table.add_row("总实验因子数", str(stats.get("total_factors", 0)))
-    table.add_row("突破基线因子数", str(stats.get("beats_baseline_count", 0)))
-    table.add_row("全局最优 Sharpe", f"{stats.get('global_best_sharpe', 0):.2f}")
-    table.add_row("全局平均 Sharpe", f"{stats.get('global_avg_sharpe', 0):.2f}")
+    table.add_row("Run ID", run.run_id)
+    table.add_row("模式", run.mode)
+    table.add_row("状态", run.status)
+    table.add_row("当前阶段", run.current_stage)
+    table.add_row("当前轮次", str(run.current_round))
+    table.add_row("等待审批", "是" if snapshot and snapshot.awaiting_human_approval else "否")
+    table.add_row("已批准 Notes", str(snapshot.approved_notes_count if snapshot else 0))
+    table.add_row("回测报告数", str(snapshot.backtest_reports_count if snapshot else 0))
+    table.add_row("Verdict 数", str(snapshot.verdicts_count if snapshot else 0))
+    table.add_row("最后错误", run.last_error or "—")
 
     console.print(table)
-
-    # Island 排行榜
-    leaderboard = pool.get_island_leaderboard()
-    if leaderboard:
-        lb_table = Table(title="Island 排行榜", border_style="green")
-        lb_table.add_column("排名")
-        lb_table.add_column("Island")
-        lb_table.add_column("因子数")
-        lb_table.add_column("Best Sharpe")
-        lb_table.add_column("Avg Sharpe")
-        lb_table.add_column("最优因子")
-        for i, item in enumerate(leaderboard, 1):
-            lb_table.add_row(
-                str(i),
-                f"{item['island_display_name']} ({item['island']})",
-                str(item["factor_count"]),
-                f"{item['best_sharpe']:.2f}",
-                f"{item['avg_sharpe']:.2f}",
-                item.get("best_factor_name", "—"),
-            )
-        console.print(lb_table)
 
 
 @app.command()
@@ -164,35 +163,36 @@ def stop():
 @app.command()
 def report():
     """查看最新 CIO 报告（Markdown 格式）。"""
-    from src.factor_pool.pool import get_factor_pool
+    try:
+        reports = _get_state_store().list_reports(limit=1)
+    except Exception as e:
+        console.print(f"[red]读取报告失败: {e}[/red]")
+        return
 
-    # 尝试从 FactorPool 或持久化读取最新报告
-    console.print("[yellow]（CIO 报告查看功能依赖 Orchestrator 运行，暂时从 FactorPool 摘要生成）[/yellow]")
+    if not reports:
+        console.print("[yellow]暂无 CIO 报告[/yellow]")
+        return
 
-    pool = get_factor_pool()
-    leaderboard = pool.get_island_leaderboard()
-    stats = pool.get_stats()
+    report_path = Path(reports[0].path)
+    if not report_path.exists():
+        console.print(f"[red]报告文件不存在: {report_path}[/red]")
+        return
 
-    report_md = f"""# Pixiu v2 当前因子库摘要报告
-
-## 全局统计
-- 总实验因子：{stats.get('total_factors', 0)}
-- 突破基线因子：{stats.get('beats_baseline_count', 0)}
-- 全局最优 Sharpe：{stats.get('global_best_sharpe', 0):.2f}
-
-## Island 排行榜
-| Island | 因子数 | Best Sharpe | 最优因子公式 |
-|--------|--------|-------------|------------|
-"""
-    for item in leaderboard:
-        report_md += f"| {item['island']} | {item['factor_count']} | {item['best_sharpe']:.2f} | {item.get('best_factor_formula', '—')[:50]} |\n"
-
-    console.print(Markdown(report_md))
+    console.print(Markdown(report_path.read_text(encoding="utf-8")))
 
 
 def _inject_human_decision(decision: str):
     """将 human_decision 注入 LangGraph checkpoint。"""
     try:
+        store = _get_state_store()
+        run = store.get_latest_run()
+        if run is not None:
+            from src.schemas.control_plane import HumanDecisionRecord
+
+            store.append_human_decision(
+                HumanDecisionRecord(run_id=run.run_id, action=decision)
+            )
+
         from src.core.orchestrator import get_graph, get_latest_config
         graph = get_graph()
         config = get_latest_config()

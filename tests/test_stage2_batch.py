@@ -1,6 +1,6 @@
 """
 Stage 2: AlphaResearcher Batch Generation TDD Tests
-按照 v2_stage2_hypothesis_generation.md Section 5 的测试要求编写。
+按照 `docs/design/stage-2-hypothesis-expansion.md` 的测试要求编写。
 """
 import pytest
 import asyncio

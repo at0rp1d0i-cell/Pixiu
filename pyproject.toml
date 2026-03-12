@@ -32,3 +32,14 @@ pixiu = "src.cli.main:main"
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "smoke: fast, deterministic smoke checks for core functionality",
+    "unit: pure unit tests without external dependencies",
+    "integration: local integration tests with isolated dependencies",
+    "live: tests that hit live external services or data sources",
+    "e2e: end-to-end workflow tests in full runtime environments",
+    "asyncio: async tests running on an asyncio event loop",
+]

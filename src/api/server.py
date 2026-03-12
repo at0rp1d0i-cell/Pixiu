@@ -19,6 +19,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+
+def _get_state_store():
+    from src.control_plane.state_store import get_state_store
+
+    return get_state_store()
+
 api = FastAPI(
     title="Pixiu v2 API",
     version="2.0.0",
@@ -42,15 +48,23 @@ api.add_middleware(
 def get_status():
     """获取系统运行状态和全局统计。"""
     try:
-        from src.factor_pool.pool import get_factor_pool
-        pool = get_factor_pool()
-        stats = pool.get_stats()
+        store = _get_state_store()
+        run = store.get_latest_run()
+        if run is None:
+            return {"status": "idle"}
+
+        snapshot = store.get_snapshot(run.run_id)
         return {
-            "status": "running",
-            "total_factors": stats.get("total_factors", 0),
-            "beats_baseline_count": stats.get("beats_baseline_count", 0),
-            "global_best_sharpe": stats.get("global_best_sharpe", 0.0),
-            "global_avg_sharpe": stats.get("global_avg_sharpe", 0.0),
+            "status": run.status,
+            "run_id": run.run_id,
+            "mode": run.mode,
+            "current_round": run.current_round,
+            "current_stage": run.current_stage,
+            "awaiting_human_approval": snapshot.awaiting_human_approval if snapshot else False,
+            "approved_notes_count": snapshot.approved_notes_count if snapshot else 0,
+            "backtest_reports_count": snapshot.backtest_reports_count if snapshot else 0,
+            "verdicts_count": snapshot.verdicts_count if snapshot else 0,
+            "last_error": run.last_error,
         }
     except Exception as e:
         return {"status": "idle", "error": str(e)}
@@ -102,27 +116,21 @@ def get_islands():
 # ─────────────────────────────────────────────
 @api.get("/api/reports")
 def get_reports():
-    """获取 CIO 报告列表（暂时从 FactorPool 摘要生成）。"""
-    from src.factor_pool.pool import get_factor_pool
-    pool = get_factor_pool()
-    stats = pool.get_stats()
-    leaderboard = pool.get_island_leaderboard()
-
-    return [{
-        "id": "latest",
-        "title": "Pixiu v2 因子库摘要报告",
-        "total_factors": stats.get("total_factors", 0),
-        "beats_baseline": stats.get("beats_baseline_count", 0),
-        "best_sharpe": stats.get("global_best_sharpe", 0.0),
-        "island_summary": [
+    """获取 CIO 报告列表（从 control-plane state_store 读取）。"""
+    try:
+        reports = _get_state_store().list_reports(limit=20)
+        return [
             {
-                "island": item["island"],
-                "best_sharpe": item["best_sharpe"],
-                "factor_count": item["factor_count"],
+                "id": report.ref_id,
+                "run_id": report.run_id,
+                "title": f"CIO Report {report.ref_id}",
+                "path": report.path,
+                "created_at": report.created_at.isoformat(),
             }
-            for item in leaderboard
-        ],
-    }]
+            for report in reports
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────
@@ -142,6 +150,15 @@ def post_approve(body: ApproveRequest):
         raise HTTPException(status_code=400, detail=f"无效的 action: {action}")
 
     try:
+        store = _get_state_store()
+        run = store.get_latest_run()
+        if run is not None:
+            from src.schemas.control_plane import HumanDecisionRecord
+
+            store.append_human_decision(
+                HumanDecisionRecord(run_id=run.run_id, action=action)
+            )
+
         from src.core.orchestrator import get_graph, get_latest_config
         graph = get_graph()
         config = get_latest_config()

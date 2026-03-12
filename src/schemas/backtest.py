@@ -1,60 +1,70 @@
-from typing import Optional, Literal
-from datetime import datetime, date
+from datetime import date, datetime
+from typing import Literal, Optional
 from src.schemas import PixiuBase
 
+
 class ExecutionMeta(PixiuBase):
-    """执行上下文元数据，确保指标可比较"""
     engine: Literal["qlib"] = "qlib"
-    engine_version: str = "0.9.0"
-    template_version: str = "v2.0"
+    engine_version: str = "unknown"
+    template_version: str = "qlib_backtest.py.tpl"
     universe: str
-    benchmark: str = "csi300"
+    benchmark: str
     freq: str = "day"
     start_date: date
     end_date: date
     runtime_seconds: float
     timestamp_utc: datetime
 
+
 class FactorSpecSnapshot(PixiuBase):
-    """因子规格快照，保留语义锚点"""
     formula: str
     hypothesis: str
     economic_rationale: str
 
-class BacktestMetrics(PixiuBase):
-    """回测指标 - 最小充分集"""
-    sharpe: Optional[float] = None
-    annual_return: Optional[float] = None
-    max_drawdown: Optional[float] = None
-    ic_mean: Optional[float] = None
-    ic_std: Optional[float] = None
-    icir: Optional[float] = None
-    turnover: Optional[float] = None
-    coverage: Optional[float] = None
 
 class ArtifactRefs(PixiuBase):
-    """产物引用，用于排障和审计"""
-    stdout_path: str
-    stderr_path: str
-    script_path: str
+    stdout_path: Optional[str] = None
+    stderr_path: Optional[str] = None
+    script_path: Optional[str] = None
     raw_result_path: Optional[str] = None
     equity_curve_path: Optional[str] = None
 
-class BacktestReport(PixiuBase):
-    """Stage 4 的唯一标准输出"""
-    # 标识
-    report_id: str
-    run_id: str
-    note_id: str
-    island_id: str
 
-    # 状态
-    status: Literal["success", "failed", "partial"]
-    failure_stage: Optional[str] = None  # "compile" | "run" | "parse" | "judge"
+class BacktestMetrics(PixiuBase):
+    sharpe: float
+    annualized_return: float
+    annual_return: Optional[float] = None
+    max_drawdown: float
+    ic_mean: float
+    ic_std: float
+    icir: float                 # IC / IC_std
+    turnover_rate: float        # 日均换手率
+    turnover: Optional[float] = None
+    coverage: Optional[float] = None
+    win_rate: Optional[float] = None
+    long_short_spread: Optional[float] = None
+
+class BacktestReport(PixiuBase):
+    # 标识
+    report_id: str             # UUID
+    run_id: Optional[str] = None
+    note_id: str               # 对应的 FactorResearchNote
+    factor_id: str             # 格式：{island}_{date}_{seq}（进入 FactorPool 的 key）
+    island: str
+    island_id: Optional[str] = None
+    formula: str               # 实际回测的 Qlib 公式
+
+    # 结果
+    metrics: BacktestMetrics
+    passed: bool               # 是否通过 Critic 阈值
+    status: Literal["success", "failed", "partial"] = "success"
+    failure_stage: Optional[str] = None
     failure_reason: Optional[str] = None
 
-    # 核心内容
-    execution_meta: ExecutionMeta
-    factor_spec: FactorSpecSnapshot
-    metrics: BacktestMetrics
-    artifacts: ArtifactRefs
+    # 执行元数据
+    execution_time_seconds: float
+    qlib_output_raw: str       # 原始 stdout（调试用）
+    error_message: Optional[str] = None
+    execution_meta: Optional[ExecutionMeta] = None
+    factor_spec: Optional[FactorSpecSnapshot] = None
+    artifacts: Optional[ArtifactRefs] = None

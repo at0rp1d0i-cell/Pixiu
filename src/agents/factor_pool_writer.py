@@ -1,11 +1,15 @@
 """
-FactorPool 写回逻辑（v2 Golden Path）
+Compatibility utility for writing a `FactorPoolRecord`.
+
+Canonical Stage 5 runtime writes through `src.agents.judgment` +
+`FactorPool.register_factor`. This helper remains for tests and narrow
+standalone flows that already operate on `report + verdict`.
 """
 import logging
 from datetime import datetime
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict
-from src.schemas.factor_pool_record import FactorPoolRecord
+from src.schemas.factor_pool import FactorPoolRecord
 from src.factor_pool.pool import FactorPool
 
 logger = logging.getLogger(__name__)

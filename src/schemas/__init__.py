@@ -10,3 +10,19 @@ class PixiuBase(BaseModel):
 
     class Config:
         extra = "forbid"  # 禁止额外字段，强制接口显式
+
+
+from src.schemas.control_plane import (
+    ArtifactRecord,
+    HumanDecisionRecord,
+    RunRecord,
+    RunSnapshot,
+)
+
+__all__ = [
+    "PixiuBase",
+    "RunRecord",
+    "RunSnapshot",
+    "ArtifactRecord",
+    "HumanDecisionRecord",
+]

@@ -1,5 +1,8 @@
 """
-CIOReport 最小化模板生成器（v2 Golden Path）
+Compatibility Markdown renderer for single-factor CIO views.
+
+Canonical Stage 5 report generation lives in `src.agents.judgment.ReportWriter`.
+This renderer remains for focused tests and standalone report export.
 """
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict

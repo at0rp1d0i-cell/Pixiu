@@ -1,131 +1,109 @@
-"""
-Stage 4b: Coder - 确定性 Qlib 回测执行器
-按照 v2_stage45_golden_path.md 规格实现
-"""
-import uuid
 import json
-import os
+import uuid
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, date
-from src.schemas.research_note import FactorResearchNote
-from src.schemas.backtest import (
-    BacktestReport, BacktestMetrics, ExecutionMeta,
-    FactorSpecSnapshot, ArtifactRefs
-)
-from src.execution.docker_runner import DockerRunner
-import logging
 
-logger = logging.getLogger(__name__)
+from src.execution.docker_runner import DockerRunner
+from src.schemas.backtest import (
+    ArtifactRefs,
+    BacktestMetrics,
+    BacktestReport,
+    ExecutionMeta,
+    FactorSpecSnapshot,
+)
+from src.schemas.research_note import FactorResearchNote
+from src.schemas.thresholds import THRESHOLDS
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "qlib_backtest.py.tpl"
-ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "data" / "artifacts"
+ARTIFACTS_DIR = Path(__file__).resolve().parents[2] / "data" / "artifacts"
+
 
 class Coder:
     """
-    确定性 Qlib 回测执行器（v2 Golden Path）
+    Deterministic Stage 4 executor.
 
-    职责：
-    1. 接收 FactorResearchNote.final_formula
-    2. 填充标准回测模板
-    3. 在 Docker 沙箱执行
-    4. 解析为结构化 BacktestReport
-
-    不调用任何 LLM，不做任何推理。
+    Input: FactorResearchNote.final_formula
+    Output: BacktestReport
     """
+
     def __init__(self):
         self.runner = DockerRunner()
         self.template = TEMPLATE_PATH.read_text(encoding="utf-8")
+        self.template_version = TEMPLATE_PATH.name
         ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     async def run_backtest(self, note: FactorResearchNote) -> BacktestReport:
-        """执行回测的唯一入口"""
+        formula = note.final_formula or note.proposed_formula
+        if not formula:
+            return self._failure_report(
+                report_id=str(uuid.uuid4()),
+                run_id=str(uuid.uuid4()),
+                note=note,
+                formula="",
+                factor_id=note.note_id,
+                failure_stage="compile",
+                failure_reason="missing_formula",
+                error_message="final_formula 和 proposed_formula 均为空",
+            )
+
         run_id = str(uuid.uuid4())
         report_id = str(uuid.uuid4())
+        factor_id = note.note_id
 
-        # Step 1: Compile - 准备执行包
         try:
-            execution_bundle = self._compile(note, run_id)
-        except Exception as e:
-            logger.error(f"[Coder] Compile 失败: {e}")
-            return self._create_failure_report(
+            script = self._compile(note, formula)
+        except Exception as exc:
+            return self._failure_report(
                 report_id=report_id,
                 run_id=run_id,
                 note=note,
+                formula=formula,
+                factor_id=factor_id,
                 failure_stage="compile",
-                failure_reason=str(e),
+                failure_reason="template_render_failed",
+                error_message=str(exc),
             )
 
-        # Step 2: Run - Docker 执行
-        try:
-            exec_result = await self.runner.run_python(
-                script=execution_bundle["script"],
-                timeout_seconds=600,
-            )
-        except Exception as e:
-            logger.error(f"[Coder] Run 失败: {e}")
-            return self._create_failure_report(
-                report_id=report_id,
-                run_id=run_id,
-                note=note,
-                failure_stage="run",
-                failure_reason=str(e),
-            )
+        exec_result = await self.runner.run_python(script=script, timeout_seconds=600)
+        artifacts = self._save_artifacts(run_id, script, exec_result.stdout, exec_result.stderr)
 
-        # Step 3: 落盘原始产物
-        artifacts = self._save_artifacts(run_id, execution_bundle, exec_result)
-
-        # Step 4: Parse - 解析为 BacktestReport
         return self._parse_result(
+            exec_result=exec_result,
+            note=note,
+            factor_id=factor_id,
+            formula=formula,
             report_id=report_id,
             run_id=run_id,
-            note=note,
-            exec_result=exec_result,
             artifacts=artifacts,
         )
 
-    def _compile(self, note: FactorResearchNote, run_id: str) -> dict:
-        """Step 1: 编译执行包（确定性）"""
-        formula = note.final_formula or note.proposed_formula
+    def _compile(self, note: FactorResearchNote, formula: str) -> str:
+        escaped_formula = formula.replace("\\", "\\\\").replace('"', '\\"')
+        return (
+            self.template.replace("{formula}", escaped_formula)
+            .replace("{universe}", note.universe)
+            .replace("{start_date}", note.backtest_start)
+            .replace("{end_date}", note.backtest_end)
+            .replace("{topk}", "50")
+        )
 
-        if not formula:
-            raise ValueError("final_formula 和 proposed_formula 均为空")
-
-        # 填充模板（防御性处理特殊字符）
-        script = self.template.replace("{formula}", formula) \
-                              .replace("{universe}", note.universe) \
-                              .replace("{start_date}", note.backtest_start) \
-                              .replace("{end_date}", note.backtest_end) \
-                              .replace("{topk}", "50")
-
-        return {
-            "run_id": run_id,
-            "note_id": note.note_id,
-            "formula": formula,
-            "script": script,
-            "config": {
-                "universe": note.universe,
-                "start_date": note.backtest_start,
-                "end_date": note.backtest_end,
-                "topk": 50,
-            }
-        }
-
-    def _save_artifacts(self, run_id: str, bundle: dict, exec_result) -> ArtifactRefs:
-        """Step 3: 落盘原始产物"""
+    def _save_artifacts(
+        self,
+        run_id: str,
+        script: str,
+        stdout: str,
+        stderr: str,
+    ) -> ArtifactRefs:
         run_dir = ARTIFACTS_DIR / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # 保存脚本
         script_path = run_dir / "script.py"
-        script_path.write_text(bundle["script"], encoding="utf-8")
-
-        # 保存 stdout
         stdout_path = run_dir / "stdout.txt"
-        stdout_path.write_text(exec_result.stdout, encoding="utf-8")
-
-        # 保存 stderr
         stderr_path = run_dir / "stderr.txt"
-        stderr_path.write_text(exec_result.stderr, encoding="utf-8")
+
+        script_path.write_text(script, encoding="utf-8")
+        stdout_path.write_text(stdout or "", encoding="utf-8")
+        stderr_path.write_text(stderr or "", encoding="utf-8")
 
         return ArtifactRefs(
             stdout_path=str(stdout_path),
@@ -135,139 +113,173 @@ class Coder:
 
     def _parse_result(
         self,
-        report_id: str,
-        run_id: str,
-        note: FactorResearchNote,
         exec_result,
-        artifacts: ArtifactRefs,
+        note: FactorResearchNote,
+        factor_id: str,
+        formula: str,
+        report_id: str | None = None,
+        run_id: str | None = None,
+        artifacts: ArtifactRefs | None = None,
     ) -> BacktestReport:
-        """Step 4: 解析为 BacktestReport"""
+        report_id = report_id or str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
+        artifacts = artifacts or ArtifactRefs()
 
-        # 执行失败
         if not exec_result.success:
-            return self._create_failure_report(
+            return self._failure_report(
                 report_id=report_id,
                 run_id=run_id,
                 note=note,
+                formula=formula,
+                factor_id=factor_id,
                 failure_stage="run",
-                failure_reason=exec_result.stderr[:500] if exec_result.stderr else "Unknown error",
+                failure_reason="execution_failed",
+                error_message=f"执行失败: {(exec_result.stderr or exec_result.stdout)[:500]}",
+                execution_time_seconds=exec_result.duration_seconds,
+                qlib_output_raw=exec_result.stderr[:2000] if exec_result.stderr else (exec_result.stdout or ""),
                 artifacts=artifacts,
-                runtime_seconds=exec_result.duration_seconds,
             )
 
-        # 解析 JSON 输出
-        raw_metrics = None
-        for line in exec_result.stdout.split("\n"):
-            if line.startswith("BACKTEST_RESULT_JSON:"):
-                try:
-                    raw_metrics = json.loads(line.replace("BACKTEST_RESULT_JSON:", ""))
-                    break
-                except json.JSONDecodeError as e:
-                    logger.error(f"[Coder] JSON 解析失败: {e}")
+        raw = None
+        for line in exec_result.stdout.splitlines():
+            if not line.startswith("BACKTEST_RESULT_JSON:"):
+                continue
+            try:
+                raw = json.loads(line.replace("BACKTEST_RESULT_JSON:", "", 1))
+                break
+            except json.JSONDecodeError as exc:
+                return self._failure_report(
+                    report_id=report_id,
+                    run_id=run_id,
+                    note=note,
+                    formula=formula,
+                    factor_id=factor_id,
+                    failure_stage="parse",
+                    failure_reason="invalid_backtest_result_json",
+                    error_message=f"输出 JSON 解析失败: {exc}",
+                    execution_time_seconds=exec_result.duration_seconds,
+                    qlib_output_raw=exec_result.stdout[:2000],
+                    artifacts=artifacts,
+                )
 
-        if raw_metrics is None:
-            return self._create_failure_report(
+        if raw is None:
+            return self._failure_report(
                 report_id=report_id,
                 run_id=run_id,
                 note=note,
+                formula=formula,
+                factor_id=factor_id,
                 failure_stage="parse",
-                failure_reason="输出中未找到 BACKTEST_RESULT_JSON 标记",
+                failure_reason="missing_backtest_result_json",
+                error_message="输出中未找到 BACKTEST_RESULT_JSON 标记",
+                execution_time_seconds=exec_result.duration_seconds,
+                qlib_output_raw=exec_result.stdout[:2000],
                 artifacts=artifacts,
-                runtime_seconds=exec_result.duration_seconds,
             )
 
-        # 检查执行错误
-        if raw_metrics.get("error"):
-            return self._create_failure_report(
-                report_id=report_id,
-                run_id=run_id,
-                note=note,
-                failure_stage="run",
-                failure_reason=raw_metrics["error"],
-                artifacts=artifacts,
-                runtime_seconds=exec_result.duration_seconds,
-            )
-
-        # 构建成功的 BacktestReport
+        error_message = raw.get("error")
         metrics = BacktestMetrics(
-            sharpe=raw_metrics.get("sharpe"),
-            annual_return=raw_metrics.get("annualized_return"),
-            max_drawdown=raw_metrics.get("max_drawdown"),
-            ic_mean=raw_metrics.get("ic_mean"),
-            ic_std=raw_metrics.get("ic_std"),
-            icir=raw_metrics.get("icir"),
-            turnover=raw_metrics.get("turnover_rate"),
-            coverage=None,  # 当前模板未计算
+            sharpe=raw.get("sharpe", 0.0),
+            annualized_return=raw.get("annualized_return", 0.0),
+            annual_return=raw.get("annualized_return"),
+            max_drawdown=raw.get("max_drawdown", 0.0),
+            ic_mean=raw.get("ic_mean", 0.0),
+            ic_std=raw.get("ic_std", 0.0),
+            icir=raw.get("icir", 0.0),
+            turnover_rate=raw.get("turnover_rate", 0.0),
+            turnover=raw.get("turnover_rate", 0.0),
+            coverage=1.0 if error_message is None else 0.0,
         )
 
-        execution_meta = ExecutionMeta(
-            universe=note.universe,
-            start_date=date.fromisoformat(note.backtest_start),
-            end_date=date.fromisoformat(note.backtest_end),
-            runtime_seconds=exec_result.duration_seconds,
-            timestamp_utc=datetime.utcnow(),
-        )
-
-        factor_spec = FactorSpecSnapshot(
-            formula=note.final_formula or note.proposed_formula,
-            hypothesis=note.hypothesis,
-            economic_rationale=note.economic_intuition,
+        passed = (
+            metrics.sharpe >= THRESHOLDS.min_sharpe
+            and metrics.ic_mean >= THRESHOLDS.min_ic_mean
+            and metrics.icir >= THRESHOLDS.min_icir
+            and metrics.turnover_rate <= THRESHOLDS.max_turnover_rate
+            and error_message is None
         )
 
         return BacktestReport(
             report_id=report_id,
             run_id=run_id,
             note_id=note.note_id,
+            factor_id=factor_id,
+            island=note.island,
             island_id=note.island,
-            status="success",
-            execution_meta=execution_meta,
-            factor_spec=factor_spec,
+            formula=formula,
             metrics=metrics,
+            passed=passed,
+            status="success" if error_message is None else "failed",
+            failure_stage=None if error_message is None else "run",
+            failure_reason=None if error_message is None else "backtest_error",
+            execution_time_seconds=exec_result.duration_seconds,
+            qlib_output_raw=exec_result.stdout[:2000],
+            error_message=error_message,
+            execution_meta=self._execution_meta(note, exec_result.duration_seconds),
+            factor_spec=self._factor_spec(note, formula),
             artifacts=artifacts,
         )
 
-    def _create_failure_report(
+    def _failure_report(
         self,
         report_id: str,
         run_id: str,
         note: FactorResearchNote,
+        formula: str,
+        factor_id: str,
         failure_stage: str,
         failure_reason: str,
-        artifacts: ArtifactRefs = None,
-        runtime_seconds: float = 0.0,
+        error_message: str,
+        execution_time_seconds: float = 0.0,
+        qlib_output_raw: str = "",
+        artifacts: ArtifactRefs | None = None,
     ) -> BacktestReport:
-        """创建失败报告"""
-
-        if artifacts is None:
-            # 创建空的 artifacts
-            run_dir = ARTIFACTS_DIR / run_id
-            run_dir.mkdir(parents=True, exist_ok=True)
-            artifacts = ArtifactRefs(
-                stdout_path=str(run_dir / "stdout.txt"),
-                stderr_path=str(run_dir / "stderr.txt"),
-                script_path=str(run_dir / "script.py"),
-            )
-
         return BacktestReport(
             report_id=report_id,
             run_id=run_id,
             note_id=note.note_id,
+            factor_id=factor_id,
+            island=note.island,
             island_id=note.island,
+            formula=formula,
+            metrics=BacktestMetrics(
+                sharpe=0.0,
+                annualized_return=0.0,
+                annual_return=0.0,
+                max_drawdown=0.0,
+                ic_mean=0.0,
+                ic_std=0.0,
+                icir=0.0,
+                turnover_rate=0.0,
+                turnover=0.0,
+                coverage=0.0,
+            ),
+            passed=False,
             status="failed",
             failure_stage=failure_stage,
             failure_reason=failure_reason,
-            execution_meta=ExecutionMeta(
-                universe=note.universe,
-                start_date=date.fromisoformat(note.backtest_start),
-                end_date=date.fromisoformat(note.backtest_end),
-                runtime_seconds=runtime_seconds,
-                timestamp_utc=datetime.utcnow(),
-            ),
-            factor_spec=FactorSpecSnapshot(
-                formula=note.final_formula or note.proposed_formula or "",
-                hypothesis=note.hypothesis,
-                economic_rationale=note.economic_intuition,
-            ),
-            metrics=BacktestMetrics(),
-            artifacts=artifacts,
+            execution_time_seconds=execution_time_seconds,
+            qlib_output_raw=qlib_output_raw,
+            error_message=error_message,
+            execution_meta=self._execution_meta(note, execution_time_seconds),
+            factor_spec=self._factor_spec(note, formula),
+            artifacts=artifacts or ArtifactRefs(),
+        )
+
+    def _execution_meta(self, note: FactorResearchNote, runtime_seconds: float) -> ExecutionMeta:
+        return ExecutionMeta(
+            universe=note.universe,
+            benchmark=note.universe,
+            start_date=note.backtest_start,
+            end_date=note.backtest_end,
+            runtime_seconds=runtime_seconds,
+            timestamp_utc=datetime.utcnow(),
+            template_version=self.template_version,
+        )
+
+    def _factor_spec(self, note: FactorResearchNote, formula: str) -> FactorSpecSnapshot:
+        return FactorSpecSnapshot(
+            formula=formula,
+            hypothesis=note.hypothesis,
+            economic_rationale=note.economic_intuition,
         )

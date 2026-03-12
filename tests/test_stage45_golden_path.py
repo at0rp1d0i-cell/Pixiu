@@ -1,336 +1,134 @@
-"""
-Stage 4→5 Golden Path 集成测试
-按照 v2_stage45_golden_path.md 规格实现
-"""
-import pytest
 import asyncio
-from datetime import datetime
-from src.schemas.research_note import FactorResearchNote
-from src.execution.coder_v2 import Coder
-from src.agents.critic_v2 import Critic
-from src.agents.factor_pool_writer import FactorPoolWriter
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
 from src.agents.cio_report_renderer import CIOReportRenderer
+from src.agents.factor_pool_writer import FactorPoolWriter
+from src.agents.judgment import Critic, PortfolioManager, ReportWriter, RiskAuditor
+from src.execution.coder import Coder
+from src.execution.docker_runner import ExecutionResult
 from src.factor_pool.pool import FactorPool
-from src.schemas.thresholds import THRESHOLDS
+from src.schemas.research_note import FactorResearchNote
+from src.schemas.state import AgentState
 
 
-@pytest.fixture
-def sample_note():
-    """创建测试用的 FactorResearchNote"""
+def _make_note() -> FactorResearchNote:
     return FactorResearchNote(
-        note_id="test_momentum_20260311_001",
+        note_id="momentum_20260312_01",
         island="momentum",
         iteration=1,
-        hypothesis="近20日动量因子在A股市场具有显著的预测能力",
-        economic_intuition="动量效应源于投资者的羊群行为和信息传播的滞后性",
+        hypothesis="近20日价格动量在高流动性股票池中延续。",
+        economic_intuition="资金持续流入会强化短期趋势。",
         proposed_formula="Ref($close, 20) / $close - 1",
         final_formula="Ref($close, 20) / $close - 1",
+        exploration_questions=[],
+        risk_factors=["市场风格切换"],
+        market_context_date="2026-03-12",
         universe="csi300",
         backtest_start="2021-06-01",
         backtest_end="2023-12-31",
-        expected_ic_min=0.02,
-        risk_factors=["市场regime切换", "极端行情下失效"],
-        market_context_date="2026-03-11",
     )
 
 
-@pytest.fixture
-def factor_pool(tmp_path):
-    """创建临时 FactorPool"""
-    return FactorPool(db_path=str(tmp_path / "test_pool"))
-
-
-class TestStage45GoldenPath:
-    """Stage 4→5 确定性闭环集成测试"""
-
-    @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        True,  # 默认跳过，需要 Docker 环境
-        reason="需要 Docker 环境和 Qlib 数据"
+def _make_exec_result() -> ExecutionResult:
+    stdout = "BACKTEST_RESULT_JSON:" + json.dumps(
+        {
+            "sharpe": 3.1,
+            "annualized_return": 0.22,
+            "max_drawdown": 0.12,
+            "ic_mean": 0.04,
+            "ic_std": 0.03,
+            "icir": 0.65,
+            "turnover_rate": 0.18,
+            "error": None,
+        }
     )
-    async def test_full_pipeline_success(self, sample_note, factor_pool):
-        """
-        测试完整的成功路径：
-        FactorResearchNote → Coder → BacktestReport → Critic → FactorPool → CIOReport
-        """
-        # Step 1: Coder 执行回测
-        coder = Coder()
-        report = await coder.run_backtest(sample_note)
+    return ExecutionResult(
+        success=True,
+        stdout=stdout,
+        stderr="",
+        returncode=0,
+        duration_seconds=1.2,
+    )
 
-        # 验证 BacktestReport 结构
-        assert report.report_id is not None
-        assert report.run_id is not None
-        assert report.note_id == sample_note.note_id
-        assert report.island_id == sample_note.island
-        assert report.status in ["success", "failed", "partial"]
-        assert report.execution_meta is not None
-        assert report.factor_spec is not None
-        assert report.metrics is not None
-        assert report.artifacts is not None
 
-        # Step 2: Critic 判定
-        critic = Critic()
-        verdict = critic.evaluate(report)
+def test_stage45_golden_path_runs_end_to_end(tmp_path):
+    note = _make_note()
+    pool = FactorPool(db_path=str(tmp_path / "pool"))
+    exec_result = _make_exec_result()
 
-        # 验证 CriticVerdict 结构
-        assert verdict.verdict_id is not None
-        assert verdict.report_id == report.report_id
-        assert verdict.note_id == sample_note.note_id
-        assert verdict.decision in ["promote", "archive", "reject", "retry"]
-        assert 0.0 <= verdict.score <= 1.0
-        assert isinstance(verdict.passed_checks, list)
-        assert isinstance(verdict.failed_checks, list)
-        assert isinstance(verdict.reason_codes, list)
-        assert verdict.summary is not None
+    with patch("src.execution.coder.DockerRunner.run_python", new=AsyncMock(return_value=exec_result)):
+        report = asyncio.run(Coder().run_backtest(note))
 
-        # Step 3: FactorPool 写回
-        writer = FactorPoolWriter(factor_pool)
-        factor_id = writer.write_record(report, verdict)
+    assert report.run_id is not None
+    assert report.factor_id == note.note_id
+    assert report.passed is True
+    assert report.status == "success"
+    assert report.execution_meta is not None
+    assert report.factor_spec is not None
+    assert report.artifacts is not None
+    assert Path(report.artifacts.stdout_path).exists()
+    assert Path(report.artifacts.stderr_path).exists()
+    assert Path(report.artifacts.script_path).exists()
 
-        assert factor_id is not None
-        assert factor_id.startswith(sample_note.island)
+    verdict = asyncio.run(Critic().evaluate(report))
+    assert verdict.overall_passed is True
+    assert verdict.decision == "promote"
+    assert verdict.factor_id == report.factor_id
 
-        # Step 4: CIOReport 渲染
-        renderer = CIOReportRenderer()
-        cio_report = renderer.render(report, verdict, factor_id)
+    risk_report = asyncio.run(RiskAuditor(pool).audit(report))
+    assert risk_report.factor_id == report.factor_id
 
-        assert "# CIO Review:" in cio_report
-        assert sample_note.note_id in cio_report
-        assert sample_note.island in cio_report
-        assert verdict.decision.upper() in cio_report
+    pool.register_factor(report=report, verdict=verdict, risk_report=risk_report, hypothesis=note.hypothesis)
+    passed_factors = pool.get_passed_factors(island=note.island, limit=10)
+    assert len(passed_factors) == 1
+    assert passed_factors[0]["formula"] == report.formula
 
-    def test_critic_deterministic(self):
-        """测试 Critic 的确定性：相同输入产生相同输出"""
-        from src.schemas.backtest import (
-            BacktestReport, BacktestMetrics, ExecutionMeta,
-            FactorSpecSnapshot, ArtifactRefs
-        )
-        from datetime import date
-
-        # 创建固定的 BacktestReport
-        report = BacktestReport(
-            report_id="test_report_001",
-            run_id="test_run_001",
-            note_id="test_note_001",
-            island_id="momentum",
-            status="success",
-            execution_meta=ExecutionMeta(
-                universe="csi300",
-                start_date=date(2021, 6, 1),
-                end_date=date(2023, 12, 31),
-                runtime_seconds=120.5,
-                timestamp_utc=datetime(2026, 3, 11, 10, 0, 0),
-            ),
-            factor_spec=FactorSpecSnapshot(
-                formula="Ref($close, 20) / $close - 1",
-                hypothesis="测试假设",
-                economic_rationale="测试逻辑",
-            ),
-            metrics=BacktestMetrics(
-                sharpe=1.5,
-                annual_return=0.25,
-                max_drawdown=-0.15,
-                ic_mean=0.03,
-                ic_std=0.05,
-                icir=0.6,
-                turnover=0.3,
-                coverage=0.85,
-            ),
-            artifacts=ArtifactRefs(
-                stdout_path="/tmp/stdout.txt",
-                stderr_path="/tmp/stderr.txt",
-                script_path="/tmp/script.py",
-            ),
-        )
-
-        # 多次判定
-        critic = Critic()
-        verdict1 = critic.evaluate(report)
-        verdict2 = critic.evaluate(report)
-        verdict3 = critic.evaluate(report)
-
-        # 验证确定性（除了 verdict_id 外，其他字段应该相同）
-        assert verdict1.decision == verdict2.decision == verdict3.decision
-        assert verdict1.score == verdict2.score == verdict3.score
-        assert verdict1.passed_checks == verdict2.passed_checks == verdict3.passed_checks
-        assert verdict1.failed_checks == verdict2.failed_checks == verdict3.failed_checks
-        assert verdict1.reason_codes == verdict2.reason_codes == verdict3.reason_codes
-        assert verdict1.summary == verdict2.summary == verdict3.summary
-
-    def test_critic_threshold_boundaries(self):
-        """测试 Critic 的阈值边界行为"""
-        from src.schemas.backtest import (
-            BacktestReport, BacktestMetrics, ExecutionMeta,
-            FactorSpecSnapshot, ArtifactRefs
-        )
-        from datetime import date
-
-        def create_report(sharpe, ic_mean, icir, turnover):
-            return BacktestReport(
-                report_id="test_report",
-                run_id="test_run",
-                note_id="test_note",
-                island_id="momentum",
-                status="success",
-                execution_meta=ExecutionMeta(
-                    universe="csi300",
-                    start_date=date(2021, 6, 1),
-                    end_date=date(2023, 12, 31),
-                    runtime_seconds=120.0,
-                    timestamp_utc=datetime.utcnow(),
-                ),
-                factor_spec=FactorSpecSnapshot(
-                    formula="test",
-                    hypothesis="test",
-                    economic_rationale="test",
-                ),
-                metrics=BacktestMetrics(
-                    sharpe=sharpe,
-                    ic_mean=ic_mean,
-                    icir=icir,
-                    turnover=turnover,
-                ),
-                artifacts=ArtifactRefs(
-                    stdout_path="/tmp/stdout.txt",
-                    stderr_path="/tmp/stderr.txt",
-                    script_path="/tmp/script.py",
-                ),
+    allocation = asyncio.run(
+        PortfolioManager(factor_pool=pool).rebalance(
+            AgentState(
+                current_round=1,
+                backtest_reports=[report],
+                critic_verdicts=[verdict],
+                risk_audit_reports=[risk_report],
             )
-
-        critic = Critic()
-
-        # 测试：所有指标刚好达标 → promote
-        report_pass = create_report(
-            sharpe=THRESHOLDS.min_sharpe,
-            ic_mean=THRESHOLDS.min_ic_mean,
-            icir=THRESHOLDS.min_icir,
-            turnover=THRESHOLDS.max_turnover,
         )
-        verdict_pass = critic.evaluate(report_pass)
-        assert verdict_pass.decision == "promote"
-        assert len(verdict_pass.failed_checks) == 0
+    )
+    assert allocation.total_factors == 1
 
-        # 测试：Sharpe 略低于阈值 → reject 或 archive
-        report_fail = create_report(
-            sharpe=THRESHOLDS.min_sharpe - 0.01,
-            ic_mean=THRESHOLDS.min_ic_mean,
-            icir=THRESHOLDS.min_icir,
-            turnover=THRESHOLDS.max_turnover,
-        )
-        verdict_fail = critic.evaluate(report_fail)
-        assert verdict_fail.decision in ["reject", "archive"]
-        assert "sharpe" in verdict_fail.failed_checks
+    state = AgentState(
+        current_round=1,
+        backtest_reports=[report],
+        critic_verdicts=[verdict],
+        risk_audit_reports=[risk_report],
+        portfolio_allocation=allocation,
+    )
+    cio_report = asyncio.run(ReportWriter().generate_cio_report(state))
+    assert "CIO Review" in cio_report.full_report_markdown
+    assert report.factor_id in cio_report.full_report_markdown
+    assert "decision=promote" in cio_report.full_report_markdown
 
-    def test_failure_stage_classification(self):
-        """测试错误分类的正确性"""
-        from src.schemas.backtest import (
-            BacktestReport, BacktestMetrics, ExecutionMeta,
-            FactorSpecSnapshot, ArtifactRefs
-        )
-        from datetime import date
 
-        def create_failure_report(failure_stage):
-            return BacktestReport(
-                report_id="test_report",
-                run_id="test_run",
-                note_id="test_note",
-                island_id="momentum",
-                status="failed",
-                failure_stage=failure_stage,
-                failure_reason="测试失败",
-                execution_meta=ExecutionMeta(
-                    universe="csi300",
-                    start_date=date(2021, 6, 1),
-                    end_date=date(2023, 12, 31),
-                    runtime_seconds=0.0,
-                    timestamp_utc=datetime.utcnow(),
-                ),
-                factor_spec=FactorSpecSnapshot(
-                    formula="test",
-                    hypothesis="test",
-                    economic_rationale="test",
-                ),
-                metrics=BacktestMetrics(),
-                artifacts=ArtifactRefs(
-                    stdout_path="/tmp/stdout.txt",
-                    stderr_path="/tmp/stderr.txt",
-                    script_path="/tmp/script.py",
-                ),
-            )
+def test_teammate_writer_and_renderer_stay_compatible_with_current_contract(tmp_path):
+    note = _make_note()
+    pool = FactorPool(db_path=str(tmp_path / "pool"))
+    exec_result = _make_exec_result()
 
-        critic = Critic()
+    with patch("src.execution.coder.DockerRunner.run_python", new=AsyncMock(return_value=exec_result)):
+        report = asyncio.run(Coder().run_backtest(note))
 
-        # 测试各种失败阶段
-        for stage in ["compile", "run", "parse", "judge"]:
-            report = create_failure_report(stage)
-            verdict = critic.evaluate(report)
-            assert verdict.decision == "retry"
-            assert len(verdict.reason_codes) > 0
+    verdict = asyncio.run(Critic().evaluate(report))
 
-    def test_cio_report_rendering(self):
-        """测试 CIOReport 模板渲染"""
-        from src.schemas.backtest import (
-            BacktestReport, BacktestMetrics, ExecutionMeta,
-            FactorSpecSnapshot, ArtifactRefs
-        )
-        from src.schemas.judgment import CriticVerdict
-        from datetime import date
+    writer = FactorPoolWriter(pool)
+    factor_id = writer.write_record(report, verdict)
+    assert factor_id.startswith(note.island)
 
-        report = BacktestReport(
-            report_id="test_report_001",
-            run_id="test_run_001",
-            note_id="test_note_001",
-            island_id="momentum",
-            status="success",
-            execution_meta=ExecutionMeta(
-                universe="csi300",
-                start_date=date(2021, 6, 1),
-                end_date=date(2023, 12, 31),
-                runtime_seconds=120.5,
-                timestamp_utc=datetime(2026, 3, 11, 10, 0, 0),
-            ),
-            factor_spec=FactorSpecSnapshot(
-                formula="Ref($close, 20) / $close - 1",
-                hypothesis="测试假设",
-                economic_rationale="测试逻辑",
-            ),
-            metrics=BacktestMetrics(
-                sharpe=1.5,
-                annual_return=0.25,
-                max_drawdown=-0.15,
-                ic_mean=0.03,
-                icir=0.6,
-                turnover=0.3,
-            ),
-            artifacts=ArtifactRefs(
-                stdout_path="/tmp/stdout.txt",
-                stderr_path="/tmp/stderr.txt",
-                script_path="/tmp/script.py",
-            ),
-        )
+    rows = pool._collection.get(ids=[factor_id], include=["metadatas", "documents"])
+    assert rows["ids"] == [factor_id]
+    assert rows["metadatas"][0]["decision"] == verdict.decision
 
-        verdict = CriticVerdict(
-            verdict_id="test_verdict_001",
-            report_id="test_report_001",
-            note_id="test_note_001",
-            decision="promote",
-            score=0.85,
-            passed_checks=["sharpe", "ic_mean", "icir"],
-            failed_checks=[],
-            summary="因子通过所有检查",
-            reason_codes=[],
-        )
-
-        renderer = CIOReportRenderer()
-        cio_report = renderer.render(report, verdict, "momentum_test_001")
-
-        # 验证报告包含关键信息
-        assert "# CIO Review:" in cio_report
-        assert "momentum_test_001" in cio_report
-        assert "## Factor Summary" in cio_report
-        assert "## Backtest Context" in cio_report
-        assert "## Core Metrics" in cio_report
-        assert "## Verdict" in cio_report
-        assert "## Artifact References" in cio_report
-        assert "PROMOTE" in cio_report
-        assert "0.850" in cio_report
+    markdown = CIOReportRenderer.render(report, verdict, factor_id)
+    assert "# CIO Review:" in markdown
+    assert factor_id in markdown
+    assert verdict.decision.upper() in markdown

@@ -24,8 +24,7 @@ def mock_note():
         market_context_date="2026-03-07"
     )
 
-@pytest.mark.asyncio
-async def test_coder_valid_formula(mock_note):
+def test_coder_valid_formula(mock_note):
     """合法 Qlib 公式应返回 BacktestReport(passed=True 或 False，无 error)"""
     coder = Coder()
     
@@ -50,16 +49,25 @@ async def test_coder_valid_formula(mock_note):
     )
     
     with patch.object(coder.runner, "run_python", return_value=mock_exec_result):
-        report = await coder.run_backtest(mock_note)
+        report = asyncio.run(coder.run_backtest(mock_note))
         
     assert isinstance(report, BacktestReport)
     assert report.error_message is None
+    assert report.status == "success"
+    assert report.failure_stage is None
+    assert report.execution_meta is not None
+    assert report.execution_meta.engine == "qlib"
+    assert report.factor_spec is not None
+    assert report.factor_spec.hypothesis == mock_note.hypothesis
+    assert report.artifacts is not None
     # 2.8 >= 2.67 (默认)，IC 等也满足条件
     assert report.passed is True
     assert report.metrics.sharpe == 2.8
+    assert report.metrics.annual_return == 0.3
+    assert report.metrics.turnover == 0.2
+    assert report.metrics.coverage == 1.0
 
-@pytest.mark.asyncio
-async def test_coder_invalid_formula(mock_note):
+def test_coder_invalid_formula(mock_note):
     """语法错误公式应返回 BacktestReport(passed=False, error_message 非空)"""
     coder = Coder()
     
@@ -84,10 +92,14 @@ async def test_coder_invalid_formula(mock_note):
     )
     
     with patch.object(coder.runner, "run_python", return_value=mock_exec_result):
-        report = await coder.run_backtest(mock_note)
+        report = asyncio.run(coder.run_backtest(mock_note))
         
     assert report.passed is False
+    assert report.status == "failed"
+    assert report.failure_stage == "run"
     assert "SyntaxError" in report.error_message
+    assert report.factor_spec is not None
+    assert report.metrics.coverage == 0.0
 
 def test_coder_output_parsing(mock_note):
     """BACKTEST_RESULT_JSON 解析逻辑单元测试（不需要 Docker）"""
@@ -104,8 +116,13 @@ def test_coder_output_parsing(mock_note):
     
     report = coder._parse_result(mock_exec_result, mock_note, "test_factor", "$close")
     assert report.passed is False
+    assert report.status == "failed"
+    assert report.failure_stage == "run"
+    assert report.failure_reason == "execution_failed"
     assert "执行失败" in report.error_message
     assert "OOM" in report.error_message
+    assert report.execution_meta is not None
+    assert report.factor_spec is not None
 
 def test_exploration_agent_script_extraction():
     """LLM 输出代码块提取逻辑单元测试"""
@@ -122,8 +139,7 @@ def test_exploration_agent_script_extraction():
     content_raw = "import pandas as pd\nprint('hello')"
     assert agent._extract_script(content_raw).strip() == content_raw
 
-@pytest.mark.asyncio
-async def test_docker_runner_timeout():
+def test_docker_runner_timeout():
     """超时处理：运行 sleep(9999) 应在 timeout 后被我们拦截并返回失败状态"""
     runner = DockerRunner()
     
@@ -136,7 +152,7 @@ async def test_docker_runner_timeout():
         mock_proc = MagicMock()
         mock_exec.return_value = mock_proc
         
-        result = await runner.run_python(script, timeout_seconds=1)
+        result = asyncio.run(runner.run_python(script, timeout_seconds=1))
         
         assert result.success is False
         assert "执行超时" in result.stderr

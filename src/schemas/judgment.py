@@ -1,21 +1,38 @@
-from typing import List, Optional, Literal
+import uuid
+from typing import List, Optional
+from pydantic import Field
 from src.schemas import PixiuBase
 
+class ThresholdCheck(PixiuBase):
+    metric: str
+    value: float
+    threshold: float
+    passed: bool
+
 class CriticVerdict(PixiuBase):
-    """Stage 5 确定性判定结果"""
-    verdict_id: str
+    verdict_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     report_id: str
-    note_id: str
+    factor_id: str
+    note_id: Optional[str] = None
+    overall_passed: bool
+    decision: Optional[str] = None
+    score: float = 0.0
 
-    # 决策（确定性状态机）
-    decision: Literal["promote", "archive", "reject", "retry"]
-    score: float
-    passed_checks: List[str]
-    failed_checks: List[str]
+    # 逐项检查
+    checks: List[ThresholdCheck] = []
+    passed_checks: List[str] = []
+    failed_checks: List[str] = []
 
-    # 摘要和原因码
-    summary: str
-    reason_codes: List[str]  # "LOW_SHARPE" | "LOW_IC" | "LOW_ICIR" | "HIGH_TURNOVER" | etc.
+    # 失败归因（overall_passed=False 时必填）
+    failure_mode: Optional[str] = None
+    failure_explanation: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    summary: str = ""
+    reason_codes: List[str] = []
+
+    # FactorPool 写入决策
+    register_to_pool: bool
+    pool_tags: List[str] = []
 
 class CorrelationFlag(PixiuBase):
     existing_factor_id: str

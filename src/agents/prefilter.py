@@ -9,7 +9,7 @@ Pixiu v2 Stage 3：前置过滤层（PreFilter）
   B - NoveltyFilter     ：AST Token Jaccard 相似度，防重复探索
   C - AlignmentChecker  ：LLM 快速调用，检验公式与经济假设语义一致性
 
-参考 spec：docs/specs/v2_stage3_prefilter.md
+参考设计：docs/design/stage-3-prefilter.md
 """
 import asyncio
 import json

@@ -10,11 +10,12 @@ Pixiu v2 Orchestrator（完全重写）
   Human Gate: interrupt() 等待 CIO 审批
   Loop Control: 调度下一轮
 
-依赖规格：docs/specs/v2_orchestrator.md
+依赖设计：docs/design/orchestrator.md
 """
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from langgraph.graph import StateGraph, START, END
@@ -56,11 +57,13 @@ NODE_PORTFOLIO       = "portfolio"
 NODE_REPORT          = "report"
 NODE_HUMAN_GATE      = "human_gate"
 NODE_LOOP_CONTROL    = "loop_control"
+REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 # ─────────────────────────────────────────────────────────
 # 模块级调度器（跨轮次复用）
 # ─────────────────────────────────────────────────────────
 _scheduler: Optional[IslandScheduler] = None
+_current_run_id: Optional[str] = None
 
 def get_scheduler() -> IslandScheduler:
     global _scheduler
@@ -68,6 +71,88 @@ def get_scheduler() -> IslandScheduler:
         pool = get_factor_pool()
         _scheduler = IslandScheduler(pool=pool)
     return _scheduler
+
+
+def get_state_store():
+    from src.control_plane.state_store import get_state_store as _get_state_store
+
+    return _get_state_store()
+
+
+def _ensure_run_record(mode: str = "adhoc") -> Optional[str]:
+    global _current_run_id
+    if _current_run_id:
+        return _current_run_id
+
+    try:
+        record = get_state_store().create_run(mode=mode)
+        _current_run_id = record.run_id
+        return _current_run_id
+    except Exception as e:
+        logger.warning("[ControlPlane] 创建 run 记录失败: %s", e)
+        return None
+
+
+def _update_run_record(stage: str, **fields) -> None:
+    run_id = _ensure_run_record()
+    if not run_id:
+        return
+
+    try:
+        get_state_store().update_run(run_id, current_stage=stage, **fields)
+    except Exception as e:
+        logger.warning("[ControlPlane] 更新 run 记录失败: %s", e)
+
+
+def _write_snapshot(state: AgentState, stage: str, awaiting_human_approval: Optional[bool] = None) -> None:
+    from src.schemas.control_plane import RunSnapshot
+
+    run_id = _ensure_run_record()
+    if not run_id:
+        return
+
+    try:
+        snapshot = RunSnapshot(
+            run_id=run_id,
+            approved_notes_count=len(state.approved_notes),
+            backtest_reports_count=len(state.backtest_reports),
+            verdicts_count=len(state.critic_verdicts),
+            awaiting_human_approval=(
+                state.awaiting_human_approval
+                if awaiting_human_approval is None
+                else awaiting_human_approval
+            ),
+            updated_at=datetime.utcnow(),
+        )
+        get_state_store().write_snapshot(snapshot)
+        _update_run_record(stage)
+    except Exception as e:
+        logger.warning("[ControlPlane] 写 snapshot 失败: %s", e)
+
+
+def _persist_cio_report(cio_report) -> None:
+    from src.schemas.control_plane import ArtifactRecord
+
+    run_id = _ensure_run_record()
+    if not run_id:
+        return
+
+    try:
+        report_dir = REPORTS_DIR / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"{cio_report.report_id}.md"
+        report_path.write_text(cio_report.full_report_markdown, encoding="utf-8")
+
+        get_state_store().append_artifact(
+            ArtifactRecord(
+                run_id=run_id,
+                kind="cio_report",
+                ref_id=cio_report.report_id,
+                path=str(report_path),
+            )
+        )
+    except Exception as e:
+        logger.warning("[ControlPlane] 持久化 CIO 报告失败: %s", e)
 
 
 # ─────────────────────────────────────────────────────────
@@ -222,14 +307,16 @@ def note_refinement_node(state: AgentState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 4b：回测执行（v2 Golden Path）
+# Stage 4b：回测执行
 # ─────────────────────────────────────────────────────────
 def coder_node(state: AgentState) -> dict:
-    """Stage 4b: 对每个 approved_note 调用 Coder v2 执行确定性回测。
+    """Stage 4b: 对每个 approved_note 调用 Coder 执行 Qlib 回测。
 
-    使用新的 Coder v2 实现，遵循 v2_stage45_golden_path.md 规格。
+    串行执行（Docker 资源限制），每个 note 生成一个 BacktestReport。
     """
     from src.execution.coder import Coder
+    from src.schemas.backtest import BacktestReport, BacktestMetrics
+    import uuid
 
     notes = state.approved_notes
     if not notes:
@@ -238,53 +325,55 @@ def coder_node(state: AgentState) -> dict:
 
     logger.info("[Stage 4b] 开始回测 %d 个因子...", len(notes))
 
-    async def _run_all_backtests():
+    async def _run_all():
         coder = Coder()
         reports = []
+        updated_notes = []
+
         for note in notes:
+            formula = note.final_formula or note.proposed_formula
+            factor_id = note.note_id
+            logger.info("[Stage 4b] 回测: %s → %s", factor_id, formula[:60])
+
             try:
-                logger.info("[Stage 4b] 回测: %s → %s", note.note_id, (note.final_formula or note.proposed_formula)[:60])
                 report = await coder.run_backtest(note)
                 reports.append(report)
-                logger.info("[Stage 4b] %s 完成 (status=%s)", note.note_id, report.status)
-            except Exception as e:
-                logger.error("[Stage 4b] %s 失败: %s", note.note_id, e)
-        return reports
+                updated_notes.append(note.model_copy(update={"status": "completed"}))
+                logger.info("[Stage 4b] %s 完成 (passed=%s)", report.factor_id, report.passed)
 
-    reports = asyncio.run(_run_all_backtests())
-    logger.info("[Stage 4b] 回测完成，生成 %d 个报告", len(reports))
+            except Exception as e:
+                logger.error("[Stage 4b] %s 失败: %s", factor_id, e)
+                reports.append(BacktestReport(
+                    report_id=str(uuid.uuid4()),
+                    note_id=note.note_id,
+                    factor_id=factor_id,
+                    island=note.island,
+                    formula=formula,
+                    passed=False,
+                    status="failed",
+                    failure_stage="run",
+                    failure_reason="orchestrator_execution_exception",
+                    execution_time_seconds=0.0,
+                    qlib_output_raw="",
+                    error_message=str(e),
+                    metrics=BacktestMetrics(
+                        sharpe=0.0, annualized_return=0.0, max_drawdown=0.0,
+                        ic_mean=0.0, ic_std=0.0, icir=0.0, turnover_rate=0.0,
+                    ),
+                ))
+                updated_notes.append(note.model_copy(update={"status": "completed"}))
+
+        return reports, updated_notes
+
+    reports, updated_notes = asyncio.run(_run_all())
 
     logger.info("[Stage 4b] 回测完成：%d/%d 成功", sum(1 for r in reports if r.passed), len(reports))
-    return {"backtest_reports": reports}
-
-
-def _parse_metrics_from_output(output: str):
-    """解析回测输出的指标（转发给 BacktestMetrics）。"""
-    import re
-    from src.schemas.backtest import BacktestMetrics
-    import json
-
-    # 优先 JSON 格式
-    m = re.search(r'BACKTEST_METRICS_JSON:\s*(\{.*?\})', output, re.DOTALL)
-    if m:
-        try:
-            data = json.loads(m.group(1))
-            return BacktestMetrics(
-                sharpe=float(data.get("sharpe", 0.0)),
-                annualized_return=float(data.get("annualized_return", 0.0)),
-                max_drawdown=float(data.get("max_drawdown", 0.0)),
-                ic_mean=float(data.get("ic", data.get("ic_mean", 0.0))),
-                ic_std=float(data.get("ic_std", 0.0)),
-                icir=float(data.get("icir", 0.0)),
-                turnover_rate=float(data.get("turnover", data.get("turnover_rate", 0.0))),
-            )
-        except Exception:
-            pass
-
-    return BacktestMetrics(
-        sharpe=0.0, annualized_return=0.0, max_drawdown=0.0,
-        ic_mean=0.0, ic_std=0.0, icir=0.0, turnover_rate=0.0,
-    )
+    result = {
+        "backtest_reports": list(state.backtest_reports) + reports,
+        "approved_notes": updated_notes,
+    }
+    _write_snapshot(state.model_copy(update=result), NODE_CODER)
+    return result
 
 
 # ─────────────────────────────────────────────────────────
@@ -297,118 +386,100 @@ def judgment_node(state: AgentState) -> dict:
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
         return {"critic_verdicts": [], "risk_audit_reports": []}
-    return {"backtest_reports": reports}
-
-
-# ─────────────────────────────────────────────────────────
-# Stage 5：判断与综合（v2 Golden Path）
-# ─────────────────────────────────────────────────────────
-def judgment_node(state: AgentState) -> dict:
-    """Stage 5: Critic v2 确定性判定 + FactorPool 写回。
-
-    使用新的 Critic v2 实现，遵循 v2_stage45_golden_path.md 规格。
-    """
-    from src.agents.critic import Critic
-    from src.agents.factor_pool_writer import FactorPoolWriter
-
-    if not state.backtest_reports:
-        logger.warning("[Stage 5] 无回测报告，跳过判定")
-        return {"critic_verdicts": []}
 
     logger.info("[Stage 5] 评判 %d 个回测报告...", len(state.backtest_reports))
 
     pool = get_factor_pool()
-    critic = Critic()
-    writer = FactorPoolWriter(pool)
-
     verdicts = []
-    for report in state.backtest_reports:
-        try:
-            # Critic 确定性判定
-            verdict = critic.evaluate(report)
+    risk_reports = []
+
+    async def _run_judgment():
+        critic = Critic()
+        auditor = RiskAuditor(factor_pool=pool)
+        for report in state.backtest_reports:
+            # Critic 评判
+            verdict = await critic.evaluate(report)
             verdicts.append(verdict)
-
             logger.info(
-                "[Stage 5] %s → decision=%s, score=%.3f",
-                report.note_id, verdict.decision, verdict.score,
+                "[Stage 5] %s → passed=%s, failure=%s",
+                report.factor_id, verdict.overall_passed, verdict.failure_mode or "—",
             )
+            # RiskAuditor
+            risk_report = await auditor.audit(report)
+            risk_reports.append(risk_report)
+            # FactorPool 写入
+            if verdict.register_to_pool:
+                try:
+                    pool.register_factor(
+                        report=report,
+                        verdict=verdict,
+                        risk_report=risk_report,
+                    )
+                except Exception as e:
+                    logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
 
-            # FactorPool 写回
-            try:
-                factor_id = writer.write_record(report, verdict)
-                logger.info("[Stage 5] 写入 FactorPool: %s", factor_id)
-            except Exception as e:
-                logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
+    asyncio.run(_run_judgment())
 
-        except Exception as e:
-            logger.error("[Stage 5] 判定失败 %s: %s", report.note_id, e)
-
-    promoted_count = sum(1 for v in verdicts if v.decision == "promote")
-    logger.info("[Stage 5] 判定完成: %d promoted, %d total", promoted_count, len(verdicts))
-
-    return {"critic_verdicts": verdicts}
+    passed_count = sum(1 for v in verdicts if v.overall_passed)
+    logger.info("[Stage 5] 通过: %d/%d", passed_count, len(verdicts))
+    result = {"critic_verdicts": verdicts, "risk_audit_reports": risk_reports}
+    _write_snapshot(state.model_copy(update=result), NODE_JUDGMENT)
+    return result
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 5b：Portfolio Manager（暂时简化）
+# Stage 5b：Portfolio Manager
 # ─────────────────────────────────────────────────────────
 def portfolio_node(state: AgentState) -> dict:
-    """Stage 5b: Portfolio 更新（当前版本简化为 pass-through）。
+    """Stage 5b: PortfolioManager 更新组合权重。"""
+    from src.agents.judgment import PortfolioManager
 
-    完整的 PortfolioManager 不在 v2 Golden Path 范围内。
-    """
-    logger.info("[Stage 5b] Portfolio 更新（简化版）...")
+    logger.info("[Stage 5b] 更新组合权重...")
 
-    # TODO: 实现完整的 PortfolioManager
-    # 当前版本：直接返回空的 allocation
-    return {}
+    async def _run():
+        pm = PortfolioManager(factor_pool=get_factor_pool())
+        allocation = await pm.rebalance(state)
+        return allocation
+
+    try:
+        allocation = asyncio.run(_run())
+        logger.info("[Stage 5b] 组合更新完成：%d 个因子", len(allocation.factor_weights))
+        return {"portfolio_allocation": allocation}
+    except Exception as e:
+        logger.error("[Stage 5b] Portfolio 更新失败: %s", e)
+        return {"last_error": str(e), "error_stage": "portfolio"}
 
 
 # ─────────────────────────────────────────────────────────
-# Stage 5c：CIO 报告生成（v2 Golden Path）
+# Stage 5c：CIO 报告生成
 # ─────────────────────────────────────────────────────────
 def report_node(state: AgentState) -> dict:
-    """Stage 5c: 生成最小化 CIO 报告。
-
-    使用确定性模板渲染器，不调用 LLM。
-    """
-    from src.agents.cio_report_renderer import CIOReportRenderer
-    from pathlib import Path
+    """Stage 5c: ReportWriter 生成 CIOReport，标记等待人类审批。"""
+    from src.agents.judgment import ReportWriter
 
     logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
 
-    if not state.backtest_reports or not state.critic_verdicts:
-        logger.warning("[Stage 5c] 无报告或判定结果，跳过")
-        return {}
+    async def _run():
+        writer = ReportWriter()
+        return await writer.generate_cio_report(state)
 
     try:
-        renderer = CIOReportRenderer()
-        reports_dir = Path(__file__).parent.parent.parent / "data" / "cio_reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
-
-        # 为每个因子生成报告
-        report_paths = []
-        for report, verdict in zip(state.backtest_reports, state.critic_verdicts):
-            factor_id = f"{report.island_id}_{report.note_id}"
-            cio_markdown = renderer.render(report, verdict, factor_id)
-
-            # 保存到文件
-            report_path = reports_dir / f"{factor_id}_round{state.current_round}.md"
-            report_path.write_text(cio_markdown, encoding="utf-8")
-            report_paths.append(str(report_path))
-
-            logger.info("[Stage 5c] CIO 报告已保存: %s", report_path.name)
-
-        logger.info("[Stage 5c] 生成 %d 个 CIO 报告", len(report_paths))
-
-        return {
+        cio_report = asyncio.run(_run())
+        logger.info("[Stage 5c] CIO 报告生成完成，等待审批...")
+        result = {
+            "cio_report": cio_report,
             "awaiting_human_approval": True,
             "human_decision": None,
         }
-
+        next_state = state.model_copy(update=result)
+        _persist_cio_report(cio_report)
+        _update_run_record(NODE_REPORT, status="awaiting_human_approval")
+        _write_snapshot(next_state, NODE_REPORT, awaiting_human_approval=True)
+        return result
     except Exception as e:
         logger.error("[Stage 5c] 报告生成失败: %s", e)
-        return {"last_error": str(e), "error_stage": "report"}
+        _update_run_record(NODE_REPORT, status="failed", last_error=str(e))
+        return {"last_error": str(e), "error_stage": "report", "awaiting_human_approval": True}
 
 
 # ─────────────────────────────────────────────────────────
@@ -609,15 +680,18 @@ def get_latest_config() -> dict:
 # ─────────────────────────────────────────────────────────
 async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
     """进化模式：多 Island 轮换，持续运行 rounds 轮。"""
-    global _graph_config
+    global _graph_config, _current_run_id
 
     if islands:
         global ACTIVE_ISLANDS
         ACTIVE_ISLANDS = islands
 
+    _current_run_id = None
     graph = get_graph()
     thread_id = f"pixiu_evolve_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     _graph_config = {"configurable": {"thread_id": thread_id}}
+    run_id = _ensure_run_record(mode="evolve")
+    _current_run_id = run_id
 
     logger.info("\n%s", "=" * 60)
     logger.info("🚀 Pixiu v2 启动（进化模式，最大 %d 轮）", rounds)
@@ -625,22 +699,27 @@ async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
     logger.info("%s\n", "=" * 60)
 
     initial_state = AgentState(current_round=0)
+    _update_run_record(NODE_MARKET_CONTEXT, status="running", current_round=0)
     await graph.ainvoke(initial_state.model_dump(), config=_graph_config)
 
 
 async def run_single(island: str):
     """单次模式：指定 Island，单轮调试。"""
-    global _graph_config
+    global _graph_config, _current_run_id
 
+    _current_run_id = None
     graph = get_graph()
     thread_id = f"pixiu_single_{island}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     _graph_config = {"configurable": {"thread_id": thread_id}}
+    run_id = _ensure_run_record(mode="single")
+    _current_run_id = run_id
 
     logger.info("\n%s", "=" * 60)
     logger.info("🔍 Pixiu v2 启动（单次模式，Island=%s）", island)
     logger.info("%s\n", "=" * 60)
 
     initial_state = AgentState(current_round=0, current_island=island)
+    _update_run_record(NODE_MARKET_CONTEXT, status="running", current_round=0)
     await graph.ainvoke(initial_state.model_dump(), config=_graph_config)
 
 

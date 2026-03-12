@@ -9,6 +9,7 @@ Pixiu: FactorPool — 因子实验历史库
 import json
 import logging
 import os
+from difflib import SequenceMatcher
 from datetime import datetime
 from typing import Optional
 
@@ -20,7 +21,7 @@ from src.schemas.thresholds import THRESHOLDS
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.research_note import FactorResearchNote
-from src.schemas.factor_pool_record import FactorPoolRecord
+from src.schemas.factor_pool import FactorPoolRecord
 from .islands import ISLANDS
 
 
@@ -35,15 +36,110 @@ _DEFAULT_DB_PATH = os.path.abspath(
 COLLECTION_NAME = "factor_experiments"
 
 
+def _match_where(metadata: dict, where: Optional[dict]) -> bool:
+    if not where:
+        return True
+    if "$and" in where:
+        return all(_match_where(metadata, clause) for clause in where["$and"])
+    return all(metadata.get(key) == value for key, value in where.items())
+
+
+class _InMemoryCollection:
+    def __init__(self, name: str):
+        self.name = name
+        self._items: dict[str, dict] = {}
+
+    def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict]):
+        for item_id, document, metadata in zip(ids, documents, metadatas):
+            self._items[item_id] = {
+                "id": item_id,
+                "document": document,
+                "metadata": metadata,
+            }
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def get(
+        self,
+        ids: Optional[list[str]] = None,
+        where: Optional[dict] = None,
+        include: Optional[list[str]] = None,
+    ):
+        records = list(self._items.values())
+        if ids is not None:
+            wanted = set(ids)
+            records = [record for record in records if record["id"] in wanted]
+        records = [
+            record for record in records
+            if _match_where(record["metadata"], where)
+        ]
+        return {
+            "ids": [record["id"] for record in records],
+            "documents": [record["document"] for record in records] if not include or "documents" in include else [],
+            "metadatas": [record["metadata"] for record in records] if not include or "metadatas" in include else [],
+        }
+
+    def query(
+        self,
+        query_texts: list[str],
+        n_results: int,
+        where: Optional[dict] = None,
+        include: Optional[list[str]] = None,
+    ):
+        query_text = query_texts[0] if query_texts else ""
+        records = [
+            record for record in self._items.values()
+            if _match_where(record["metadata"], where)
+        ]
+        scored = []
+        for record in records:
+            if query_text:
+                similarity = SequenceMatcher(None, query_text, record["document"]).ratio()
+                distance = 1.0 - similarity
+            else:
+                distance = 0.0
+            scored.append((distance, record))
+
+        scored.sort(key=lambda item: item[0])
+        top = scored[:n_results]
+
+        return {
+            "ids": [[record["id"] for _, record in top]],
+            "documents": [[record["document"] for _, record in top]] if include and "documents" in include else [[]],
+            "metadatas": [[record["metadata"] for _, record in top]] if include and "metadatas" in include else [[]],
+            "distances": [[distance for distance, _ in top]] if include and "distances" in include else [[]],
+        }
+
+
+class _InMemoryClient:
+    def __init__(self):
+        self._collections: dict[str, _InMemoryCollection] = {}
+
+    def get_or_create_collection(self, name: str):
+        if name not in self._collections:
+            self._collections[name] = _InMemoryCollection(name)
+        return self._collections[name]
+
+
 class FactorPool:
     """因子实验历史库，支持 Island 分组和向量相似检索。"""
 
     def __init__(self, db_path: str = _DEFAULT_DB_PATH):
         os.makedirs(db_path, exist_ok=True)
-        self._client = chromadb.PersistentClient(
-            path=db_path,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        self._storage_mode = "persistent"
+        try:
+            self._client = chromadb.PersistentClient(
+                path=db_path,
+                settings=Settings(anonymized_telemetry=False),
+            )
+        except Exception as e:
+            logger.warning(
+                "[FactorPool] PersistentClient 初始化失败，降级为 in-memory client: %s",
+                e,
+            )
+            self._client = _InMemoryClient()
+            self._storage_mode = "in_memory"
         # v1 已有：因子回测结果
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
@@ -56,7 +152,7 @@ class FactorPool:
         self._explorations_collection = self._client.get_or_create_collection(
             name="exploration_results",
         )
-        logger.info("[FactorPool] 初始化完成，数据库路径：%s", db_path)
+        logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", db_path, self._storage_mode)
         logger.info("[FactorPool] 当前存储因子数量：%d", self._collection.count())
 
     # ─────────────────────────────────────────────
@@ -285,28 +381,60 @@ class FactorPool:
         hypothesis: str = "",
     ) -> None:
         """将完整执行结果（BacktestReport + CriticVerdict + RiskAuditReport）写入 factors collection。"""
+        factor_spec = report.factor_spec
+        turnover = report.metrics.turnover if report.metrics.turnover is not None else report.metrics.turnover_rate
+        coverage = report.metrics.coverage
+        record = FactorPoolRecord(
+            factor_id=report.factor_id,
+            note_id=report.note_id,
+            formula=factor_spec.formula if factor_spec else report.formula,
+            hypothesis=factor_spec.hypothesis if factor_spec else hypothesis,
+            economic_rationale=factor_spec.economic_rationale if factor_spec else "",
+            backtest_report_id=report.report_id,
+            verdict_id=verdict.verdict_id,
+            decision=verdict.decision or "",
+            score=verdict.score,
+            sharpe=report.metrics.sharpe,
+            ic_mean=report.metrics.ic_mean,
+            icir=report.metrics.icir,
+            turnover=turnover,
+            max_drawdown=report.metrics.max_drawdown,
+            coverage=coverage,
+            created_at=datetime.utcnow(),
+            tags=verdict.pool_tags,
+        )
         self._collection.upsert(
             ids=[report.factor_id],
-            documents=[report.formula],
+            documents=[record.formula],
             metadatas=[{
                 "island": report.island,
-                "formula": report.formula,
-                "hypothesis": hypothesis,
+                "note_id": record.note_id,
+                "formula": record.formula,
+                "hypothesis": record.hypothesis,
+                "economic_rationale": record.economic_rationale,
+                "backtest_report_id": record.backtest_report_id,
+                "verdict_id": record.verdict_id,
                 "passed": verdict.overall_passed,
-                "sharpe": report.metrics.sharpe,
-                "ic_mean": report.metrics.ic_mean,
-                "icir": report.metrics.icir,
-                "turnover_rate": report.metrics.turnover_rate,
+                "decision": record.decision,
+                "score": record.score,
+                "sharpe": record.sharpe,
+                "ic_mean": record.ic_mean,
+                "icir": record.icir,
+                "turnover_rate": turnover,
+                "turnover": record.turnover,
+                "max_drawdown": record.max_drawdown,
+                "coverage": record.coverage if record.coverage is not None else 0.0,
                 "failure_mode": verdict.failure_mode or "",
+                "reason_codes": json.dumps(verdict.reason_codes),
                 "overfitting_score": risk_report.overfitting_score,
                 "date": datetime.now().strftime("%Y-%m-%d"),
-                "tags": json.dumps(verdict.pool_tags),
+                "tags": json.dumps(record.tags),
                 # 向后兼容旧字段
                 "beats_baseline": verdict.overall_passed,
                 "parse_success": report.passed,
                 "ic": report.metrics.ic_mean,
                 "icir": report.metrics.icir,
-                "turnover": report.metrics.turnover_rate,
+                "turnover": record.turnover,
                 "sharpe": report.metrics.sharpe,
             }],
         )

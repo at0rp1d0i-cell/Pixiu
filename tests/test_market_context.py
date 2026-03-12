@@ -1,6 +1,6 @@
 """
 Stage 1 Market Context TDD Tests
-按照 v2_stage1_market_context.md Section 3 的测试要求编写。
+按照 `docs/design/stage-1-market-context.md` 的测试要求编写。
 """
 import pytest
 import asyncio

@@ -1,6 +1,6 @@
 """
 Stage 3 PreFilter TDD Tests
-按照 v2_stage3_prefilter.md Section 4 的测试要求编写。
+按照 `docs/design/stage-3-prefilter.md` 的测试要求编写。
 """
 import pytest
 import asyncio
