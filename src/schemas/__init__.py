@@ -19,10 +19,23 @@ from src.schemas.control_plane import (
     RunSnapshot,
 )
 
+from src.schemas.hypothesis import (
+    Hypothesis,
+    StrategySpec,
+    ExplorationSubspace,
+    MutationOperator,
+    RegimeCondition,
+)
+
 __all__ = [
     "PixiuBase",
     "RunRecord",
     "RunSnapshot",
     "ArtifactRecord",
     "HumanDecisionRecord",
+    "Hypothesis",
+    "StrategySpec",
+    "ExplorationSubspace",
+    "MutationOperator",
+    "RegimeCondition",
 ]
