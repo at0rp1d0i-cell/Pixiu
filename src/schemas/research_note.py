@@ -1,5 +1,6 @@
 from typing import Optional, List
 from src.schemas import PixiuBase
+from src.schemas.hypothesis import Hypothesis, StrategySpec
 
 class ExplorationQuestion(PixiuBase):
     """Researcher 提出的探索性问题，由 ExplorationAgent 在 Stage 4a 执行"""
@@ -38,6 +39,61 @@ class FactorResearchNote(PixiuBase):
 
     # 状态
     status: str = "draft"  # "draft" | "exploring" | "ready_for_backtest" | "completed"
+
+    def to_hypothesis(self) -> Hypothesis:
+        """
+        将 FactorResearchNote 转换为 Hypothesis
+        按照 docs/design/interface-contracts.md §4 Runtime Bridge 设计
+        """
+        return Hypothesis(
+            hypothesis_id=f"hyp_{self.note_id}",
+            island=self.island,
+            mechanism=self.hypothesis,
+            economic_rationale=self.economic_intuition,
+            inspirations=[self.inspired_by] if self.inspired_by else [],
+            failure_priors=self.risk_factors,
+        )
+
+    def to_strategy_spec(self, benchmark: str = "SH000300", freq: str = "day") -> StrategySpec:
+        """
+        将 FactorResearchNote 转换为 StrategySpec
+        按照 docs/design/interface-contracts.md §4 Runtime Bridge 设计
+
+        Args:
+            benchmark: 基准指数，默认 SH000300（沪深300）
+            freq: 频率，默认 day
+        """
+        # 使用 final_formula 如果存在，否则使用 proposed_formula
+        formula = self.final_formula or self.proposed_formula
+
+        # 从公式中提取需要的字段（简单实现）
+        required_fields = self._extract_required_fields(formula)
+
+        return StrategySpec(
+            spec_id=f"spec_{self.note_id}",
+            hypothesis_id=f"hyp_{self.note_id}",
+            factor_expression=formula,
+            universe=self.universe,
+            benchmark=benchmark,
+            freq=freq,
+            holding_period=self.holding_period,
+            required_fields=required_fields,
+        )
+
+    def _extract_required_fields(self, formula: str) -> List[str]:
+        """从公式中提取需要的数据字段"""
+        import re
+        # 匹配 $field_name 模式
+        fields = re.findall(r'\$(\w+)', formula)
+        # 去重并保持顺序
+        seen = set()
+        unique_fields = []
+        for field in fields:
+            field_with_dollar = f"${field}"
+            if field_with_dollar not in seen:
+                seen.add(field_with_dollar)
+                unique_fields.append(field_with_dollar)
+        return unique_fields if unique_fields else ["$close"]  # 默认至少需要 $close
 
 class SynthesisInsight(PixiuBase):
     """SynthesisAgent 发现的跨 Island 关联"""
