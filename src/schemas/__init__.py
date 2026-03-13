@@ -27,6 +27,13 @@ from src.schemas.hypothesis import (
     RegimeCondition,
 )
 
+from src.schemas.exploration import (
+    PrimitiveCategory,
+    SubspaceConfig,
+    ExplorationStrategy,
+    SubspaceRegistry,
+)
+
 __all__ = [
     "PixiuBase",
     "RunRecord",
@@ -38,4 +45,8 @@ __all__ = [
     "ExplorationSubspace",
     "MutationOperator",
     "RegimeCondition",
+    "PrimitiveCategory",
+    "SubspaceConfig",
+    "ExplorationStrategy",
+    "SubspaceRegistry",
 ]
