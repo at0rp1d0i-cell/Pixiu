@@ -21,6 +21,10 @@ FILE_TIER_MARKERS = {
     "test_state_store.py": ("integration",),
     "test_orchestrator_state_store.py": ("integration",),
     "test_api_state_store.py": ("integration",),
+    "test_scheduler_pool_integration.py": ("integration",),
+    "test_orchestrator_routing.py": ("integration",),
+    "test_judgment_pool_writeback.py": ("integration",),
+    "test_pipeline_stage3_to_stage5.py": ("integration",),
     "test_akshare_mcp.py": ("live",),
 }
 

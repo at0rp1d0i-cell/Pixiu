@@ -396,6 +396,11 @@ def judgment_node(state: AgentState) -> dict:
     async def _run_judgment():
         critic = Critic()
         auditor = RiskAuditor(factor_pool=pool)
+        # 构建 note_id → hypothesis 映射，用于写入 pool 时携带语义锚点
+        note_hypothesis: dict[str, str] = {
+            note.note_id: note.hypothesis
+            for note in state.approved_notes
+        }
         for report in state.backtest_reports:
             # Critic 评判
             verdict = await critic.evaluate(report)
@@ -410,10 +415,12 @@ def judgment_node(state: AgentState) -> dict:
             # FactorPool 写入
             if verdict.register_to_pool:
                 try:
+                    hypothesis = note_hypothesis.get(report.note_id, "")
                     pool.register_factor(
                         report=report,
                         verdict=verdict,
                         risk_report=risk_report,
+                        hypothesis=hypothesis,
                     )
                 except Exception as e:
                     logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
@@ -508,12 +515,18 @@ def loop_control_node(state: AgentState) -> dict:
     """轮次控制：更新调度器，清空本轮状态，递增 current_round。"""
     scheduler = get_scheduler()
 
-    # 更新调度器（基于本轮结果做退火）
+    # 更新调度器：对通过的因子记录 island，用于 leaderboard 更新
+    epoch_island: str | None = None
     for verdict in state.critic_verdicts:
         if verdict.overall_passed:
             matching = [r for r in state.backtest_reports if r.factor_id == verdict.factor_id]
             if matching:
-                scheduler.on_epoch_done(matching[0].island, state.current_round)
+                epoch_island = matching[0].island
+                break
+
+    # 无论本轮是否有因子通过，都调用一次 on_epoch_done，确保温度退火正常进行
+    island_for_epoch = epoch_island or (state.current_island or "unknown")
+    scheduler.on_epoch_done(island_for_epoch, state.current_round)
 
     next_round = state.current_round + 1
     logger.info("[Loop Control] 进入第 %d 轮", next_round)
@@ -564,7 +577,7 @@ def route_after_judgment(state: AgentState) -> str:
 
 def route_after_portfolio(state: AgentState) -> str:
     """每 N 轮或有重大新发现时生成报告。"""
-    if state.current_round % REPORT_EVERY_N_ROUNDS == 0:
+    if state.current_round > 0 and state.current_round % REPORT_EVERY_N_ROUNDS == 0:
         return NODE_REPORT
     # 有超越基线的因子，立即报告
     from src.schemas.thresholds import THRESHOLDS

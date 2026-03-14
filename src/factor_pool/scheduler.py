@@ -104,6 +104,10 @@ class IslandScheduler:
         if self._should_reset(island_name):
             self._reset_island(island_name)
 
+    def get_active_islands(self) -> list[str]:
+        """返回当前激活的 Island 列表（供 orchestrator 的 hypothesis_gen_node 使用）。"""
+        return list(self._active_islands)
+
     def get_status(self) -> dict:
         """返回调度器当前状态（用于日志和 CIO 面板）。"""
         sharpes = self._get_island_sharpes()

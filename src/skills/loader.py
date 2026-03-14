@@ -3,9 +3,7 @@ Pixiu: SkillLoader — 统一管理 Skill 文档的加载与条件注入
 """
 import logging
 import os
-from typing import Optional
-
-from src.agents.state import AgentState
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,7 @@ class SkillLoader:
       Type C (Context)— 按 AgentState 条件注入
     """
 
-    def load_for_researcher(self, state: AgentState) -> str:
+    def load_for_researcher(self, state: Any) -> str:
         """为 Researcher Agent 加载完整的 Skill 上下文。"""
         parts = []
 

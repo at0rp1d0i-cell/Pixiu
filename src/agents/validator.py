@@ -6,8 +6,7 @@ to prevent obvious syntax errors from wasting Sandbox execution time.
 """
 import logging
 import re
-from typing import Dict
-from .state import AgentState
+from typing import Any, Dict
 
 def _check_no_future_leak(formula: str) -> tuple[bool, str]:
     """检查 Ref() 是否使用了负数偏移（未来数据）。"""
@@ -34,7 +33,7 @@ def _check_log_safety(formula: str) -> tuple[bool, str]:
         return False, "[Validator 拦截] Log() 的参数可能为负数，请改用 Log($close / Ref($close, N)) 形式。"
     return True, ""
 
-def validator_node(state: AgentState) -> dict:
+def validator_node(state: Any) -> dict:
     logging.info("\n[Validator Node] 对生成的 Qlib 公式进行轻量级静态语法检测...")
     proposal = state.get("factor_proposal", "")
     
@@ -83,7 +82,7 @@ def validator_node(state: AgentState) -> dict:
         "error_message": "" # Clear previous errors
     }
 
-def route_validation(state: AgentState) -> str:
+def route_validation(state: Any) -> str:
     """
     决定流程是走向 Coder 还是打回给 Researcher
     """
