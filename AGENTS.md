@@ -1,32 +1,74 @@
 # AGENTS.md
 
-Repository guidance for coding agents working in this project.
+Repository guidance for AI agents working in this project.
 
 ## Canonical Docs
 
 Before making architectural decisions, read these in order:
 
-1. `docs/README.md`
-2. `docs/overview/README.md`
-3. `docs/overview/architecture-overview.md`
-4. `docs/overview/spec-execution-audit.md`
-5. `docs/design/test-pipeline.md`
-6. `docs/plans/agent_team_operating_model.md`
+1. `CLAUDE.md` — 项目定义、技术栈、AI Team 设计、Stage 2 五子空间方向
+2. `docs/README.md` — 文档体系入口
+3. `docs/overview/architecture-overview.md` — 系统总览
+4. `docs/overview/spec-execution-audit.md` — 设计与实现一致性审计
+5. `docs/design/test-pipeline.md` — 测试分层规范
 
 Do not treat `docs/archive/` as the source of truth for current implementation.
 
 ## Project State
 
-The project has evolved from early `EvoQuant` / v1 material into `Pixiu v2`, an LLM-native alpha research funnel for A-shares.
+Pixiu v2 — LLM-native alpha research OS for A-shares.
 
-Current realities:
+- Schema 真相：`src/schemas/`
+- 主编排：`src/core/orchestrator.py`
+- 控制平面：`src/control_plane/state_store.py`
+- Stage 5 canonical runtime：`src/agents/judgment.py`
+- 设计与实现偏差以 `docs/overview/spec-execution-audit.md` 为准
+- 当前架构重心：扩大 hypothesis space，不扩大 execution power
 
-- `src/schemas/` is the closest thing to the current interface truth.
-- `docs/overview/spec-execution-audit.md` is the authoritative summary of what is implemented, partial, drifting, or archived.
-- Stage 4 and Stage 5 are currently the highest-drift areas.
-- CLI and API exist in minimum form; Web Dashboard is not implemented yet.
-- Test workflow is now normalized around `docs/design/test-pipeline.md`.
-- Agent-team dispatch rules live in `docs/plans/agent_team_operating_model.md`.
+### 架构灵魂
+
+- 上游极强探索（Stage 1-2），中游严格收缩（Stage 3），下游只输出可审计对象（Stage 4-5）
+- Pixiu = alpha research infrastructure，不是投顾团队
+- 因子是 research object / compressed hypothesis，不只是选股分数
+
+## Environment
+
+```bash
+# 环境管理统一使用 uv（不使用 pip / conda / poetry）
+uv sync --dev          # 同步全部依赖
+uv run pytest ...      # 运行测试
+uv add <pkg>           # 添加依赖
+uv add --group dev <pkg>  # 添加开发依赖
+```
+
+关键文件：`pyproject.toml`、`uv.lock`、`.python-version`
+
+## AI Team
+
+详细 team 设计见 `CLAUDE.md` 的 "AI Team 设计" 章节。
+
+### 角色速查
+
+| 角色 | 身份 | 模型 | 适合任务 |
+|------|------|------|----------|
+| **Coordinator** | Claude 主对话 | Claude Opus | 架构决策、设计讨论、brainstorming、集成验证、schema 变更 |
+| **codex** | Codex CLI worker | — | 单模块实现、重构、debug、测试编写 |
+| **coworker** | Codex CLI reviewer | GPT-5.4 xhigh | 设计审阅、代码 review、spec 一致性审计、跨文件质量检查 |
+
+### 派单规则
+
+1. 每个 worker 任务必须明确：Task / Context / Constraints / Output / Done When
+2. 写集不重叠时才可并行
+3. 默认拓扑 `coordinator + 1-2 workers`，不搞大团队
+4. 超时无产出 → coordinator 接管或拆小
+
+### 不可外包给 worker 的事
+
+- 架构决策和跨模块判断
+- Schema / contract 设计变更
+- Stage 间接口定义
+- spec-execution-audit 更新
+- 与用户的设计讨论和 brainstorming
 
 ## Working Rules
 
@@ -34,44 +76,57 @@ Current realities:
 - Prefer `docs/overview/` + `docs/design/` over legacy design notes.
 - Treat `docs/research/` as context and historical discussion, not as implementation truth.
 - Treat `docs/reference/` as supporting material only.
-- Root agent keeps ownership of architecture truth, integration, and final verification.
-- Dispatch `worker` agents only with explicit write sets and success criteria.
-- Use `reviewer` only after a diff and at least one concrete verification result exist.
-- Use `explorer` for short, evidence-driven audits only; do not leave it as a long-running background thread.
+- Schema changes must update `src/schemas/` first, then runtime.
+- New modules must have corresponding smoke/unit tests.
+- Do not bypass the Stage 3 prefilter hard gate.
+- Do not add "smart" logic to the execution layer — intelligence belongs in Stage 2.
+- Environment: use `uv` exclusively. Never use `pip install` or `conda`.
 
 ## Useful Commands
 
 ```bash
+# sync environment
+uv sync --dev
+
+# default test entry
+uv run pytest -q tests -m "smoke or unit"
+
+# local integration tests
+uv run pytest -q tests -m integration
+
 # baseline
-python -m src.core.run_baseline
+uv run python -m src.core.run_baseline
 
 # single-island debug run
-python -m src.core.orchestrator --mode single --island momentum
+uv run python -m src.core.orchestrator --mode single --island momentum
 
 # evolve loop
-python -m src.core.orchestrator --mode evolve --rounds 20
+uv run python -m src.core.orchestrator --mode evolve --rounds 20
 
-# tests
-pytest -q tests -m "smoke or unit"
+# CLI
+uv run pixiu --help
+
+# API
+uv run uvicorn src.api.server:app --reload
 ```
 
 ## Current Design Focus
 
-If you are asked to advance the architecture, the recommended order is:
+Recommended execution order:
 
-1. Keep docs/spec status accurate.
-2. Normalize the test pipeline.
-3. Converge Stage 4 on a single execution path.
-4. Implement Stage 5 runtime components to match the schemas.
-5. Only then expand Dashboard and data-source surface area.
+1. Upgrade Stage 2 into a real Hypothesis Expansion Engine (5 subspaces: Factor Algebra Search, Symbolic Mutation, Cross-Market Mining, Narrative Mining, Regime Conditional)
+2. Converge richer contracts (`BacktestReport / CriticVerdict / FactorPoolRecord`)
+3. Expand control plane to stable data plane
+4. Complete live / e2e test loops
+5. Only then expand Dashboard and data-source surface area
 
-## Agent Team Rules
+## Worker Output Requirements
 
-- Prefer `root + 1-2 workers` over a large always-on team.
-- Parallelize only when write sets do not overlap.
-- If an agent exceeds its timebox without useful output, root should take over or split the task smaller.
-- Worker outputs must include:
-  - what changed
-  - why
-  - test results
-  - changed file list
+Every worker must return:
+
+1. **What changed** — file list + change summary
+2. **Why** — decision rationale
+3. **Verification** — commands run + results
+4. **Open items** — anything unfinished, explicitly listed
+
+No verification result = task not complete.
