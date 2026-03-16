@@ -31,3 +31,12 @@ results/
 
 # Qlib
 ~/.qlib/
+
+# egg-info
+*.egg-info/
+
+# omccache
+.omc/
+
+# claude
+.claude/
