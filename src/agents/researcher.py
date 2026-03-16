@@ -18,10 +18,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
-from src.schemas.hypothesis import Hypothesis, StrategySpec
+from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
+from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.skills.loader import SkillLoader
 
 
@@ -74,6 +75,9 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 ## 当前 Island：{island}
 {island_description}
 
+## 探索方法偏好
+{subspace_hint}
+
 ## 市场上下文
 {market_context}
 
@@ -85,7 +89,28 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 
 请提出 2-3 个差异化的 FactorResearchNote，输出 AlphaResearcherBatch JSON。
 每个假设应捕捉 {island} 方向下不同的市场机制，而非同一思路的变体。
+每个假设必须声明 applicable_regimes（适用市场环境）和 invalid_regimes（失效环境）。
 """
+
+# 子空间到 prompt 指令的映射
+_SUBSPACE_PROMPTS = {
+    ExplorationSubspace.FACTOR_ALGEBRA: (
+        "本轮优先使用【因子代数搜索】方法：基于价量/基本面原语的受约束组合，"
+        "关注时间变换、截面算子、交互项构造。"
+    ),
+    ExplorationSubspace.NARRATIVE_MINING: (
+        "本轮优先使用【经济叙事挖掘】方法：从政策口径、产业链叙事、"
+        "市场预期错位中抽取机制假设，将定性洞察转化为可测因子。"
+    ),
+    ExplorationSubspace.SYMBOLIC_MUTATION: (
+        "本轮优先使用【符号变异】方法：对已知因子做结构化变异——"
+        "添加/移除算子、交换时间窗口、改变归一化、修改交互项。"
+    ),
+    ExplorationSubspace.CROSS_MARKET: (
+        "本轮优先使用【跨市场模式迁移】方法：从美股/港股/商品/利率的"
+        "已知 alpha 机制中提取逻辑骨架，适配 A 股市场特征。"
+    ),
+}
 
 
 def _today_str() -> str:
@@ -114,9 +139,11 @@ class AlphaResearcher:
         iteration: int,
         last_verdict: Optional[CriticVerdict] = None,
         failed_formulas: Optional[list] = None,
+        subspace_hint: Optional[ExplorationSubspace] = None,
     ) -> AlphaResearcherBatch:
         """
         调用 LLM 一次，生成 2-3 个差异化的 FactorResearchNote。
+        subspace_hint: 建议的探索方法，注入 prompt 引导生成方向。
         """
         from src.factor_pool.islands import ISLANDS
         island_info = ISLANDS.get(self.island, {})
@@ -142,9 +169,13 @@ class AlphaResearcher:
             f"- {f}" for f in (failed_formulas or [])[:5]
         )
 
+        # 子空间探索方法提示
+        hint_text = _SUBSPACE_PROMPTS.get(subspace_hint, "不限定探索方法，自由发挥。") if subspace_hint else "不限定探索方法，自由发挥。"
+
         user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
             island=self.island,
             island_description=island_info.get("description", ""),
+            subspace_hint=hint_text,
             market_context=mkt_ctx,
             feedback_section=fb,
             failed_factors_section=failed_section,
@@ -189,9 +220,34 @@ class AlphaResearcher:
 # ====================================================
 # LangGraph 节点：hypothesis_gen_node
 # ====================================================
+def _build_island_subspace_assignments(
+    allocations: list,
+    active_islands: list[str],
+) -> list[tuple[str, ExplorationSubspace]]:
+    """
+    将 subspace 配额分配到 island 调用。
+
+    策略：按配额展开 subspace 列表，round-robin 分配给 islands。
+    例：allocations=[algebra:4, narrative:3, mutation:3, cross_market:2], 6 islands
+    → 12 个 (island, subspace) 任务对
+    """
+    # 展开为 subspace 列表（按配额重复）
+    subspace_slots: list[ExplorationSubspace] = []
+    for alloc in allocations:
+        subspace_slots.extend([alloc.subspace] * alloc.quota)
+
+    # Round-robin 分配到 islands
+    assignments = []
+    for i, subspace in enumerate(subspace_slots):
+        island = active_islands[i % len(active_islands)]
+        assignments.append((island, subspace))
+
+    return assignments
+
+
 async def _hypothesis_gen_async(state: dict) -> dict:
     """
-    并行运行所有激活 Island 的 AlphaResearcher，
+    使用 SubspaceScheduler 分配配额，并行运行 AlphaResearcher，
     展开 Batch → 收集所有 notes 进入 Stage 3 过滤。
     """
     from src.factor_pool.islands import ISLANDS
@@ -200,27 +256,53 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     context: Optional[MarketContextMemo] = state.get("market_context")
     iteration: int = state.get("iteration", 0)
 
+    # ── Scheduler 分配 ──
+    scheduler = SubspaceScheduler()
+    scheduler_state = state.get("scheduler_state", SchedulerState())
+    if isinstance(scheduler_state, dict):
+        scheduler_state = SchedulerState(**scheduler_state)
+
+    allocations = scheduler.allocate(scheduler_state)
+    warnings = scheduler.get_warnings(scheduler_state)
+    for w in warnings:
+        logger.warning("SubspaceScheduler: %s", w)
+
+    logger.info(
+        "Stage 2 调度器分配: %s",
+        {a.subspace.value: a.quota for a in allocations},
+    )
+
+    # ── 构建 (island, subspace) 任务对 ──
+    assignments = _build_island_subspace_assignments(allocations, active_islands)
+
+    # ── 并行生成（按 island 分组，每组带 subspace hint） ──
     tasks = [
         AlphaResearcher(island=island).generate_batch(
             context=context,
             iteration=iteration,
+            subspace_hint=subspace,
         )
-        for island in active_islands
+        for island, subspace in assignments
     ]
 
     batches: list = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # 展开：每个 Island 的 batch 包含 2-3 个 notes，汇总为一个大列表
+    # 展开：每个 batch 包含 2-3 个 notes，汇总为一个大列表
     all_notes: list[FactorResearchNote] = []
-    for island, batch in zip(active_islands, batches):
+    subspace_results: dict[ExplorationSubspace, list[int, int]] = {
+        s: [0, 0] for s in ExplorationSubspace
+    }
+
+    for (island, subspace), batch in zip(assignments, batches):
         if isinstance(batch, Exception):
-            logger.warning("AlphaResearcher[%s] 失败（跳过）: %s", island, batch)
+            logger.warning("AlphaResearcher[%s/%s] 失败（跳过）: %s", island, subspace.value, batch)
         else:
             all_notes.extend(batch.notes)
+            subspace_results[subspace][0] += len(batch.notes)  # generated
 
     logger.info(
-        "Stage 2 生成 %d 个候选（来自 %d 个 Island）",
-        len(all_notes), len(active_islands)
+        "Stage 2 生成 %d 个候选（%d 个任务，%d 个 Island）",
+        len(all_notes), len(assignments), len(active_islands),
     )
 
     # Bridge：将 FactorResearchNote 转换为 Hypothesis + StrategySpec
@@ -232,6 +314,9 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         "research_notes": all_notes,
         "hypotheses": hypotheses,
         "strategy_specs": strategy_specs,
+        "scheduler_state": scheduler_state.model_dump(),
+        "scheduler_allocations": {a.subspace.value: a.quota for a in allocations},
+        "subspace_generated": {s.value: v[0] for s, v in subspace_results.items()},
     }
 
 

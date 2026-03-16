@@ -11,6 +11,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec
+from src.scheduling.subspace_scheduler import SubspaceScheduler
 
 
 # ─────────────────────────────────────────────────────────
@@ -160,19 +161,22 @@ class TestHypothesisGenNodeOutput:
             assert spec.universe == note.universe
 
     def test_single_island(self):
-        """单个 Island 场景也应正常工作。"""
+        """单个 Island 场景：所有配额映射到同一 island。"""
         result = _patch_researcher_and_run(["momentum"])
 
-        assert len(result["research_notes"]) == 2
-        assert len(result["hypotheses"]) == 2
-        assert len(result["strategy_specs"]) == 2
+        # scheduler 分配 TOTAL_QUOTA=12 个任务，每个 batch 2 notes
+        expected = SubspaceScheduler.TOTAL_QUOTA * 2
+        assert len(result["research_notes"]) == expected
+        assert len(result["hypotheses"]) == expected
+        assert len(result["strategy_specs"]) == expected
 
     def test_many_islands(self):
-        """多 Island 场景下数量应正确累加。"""
+        """多 Island 场景：配额 round-robin 分配到各 island。"""
         islands = ["momentum", "volatility", "volume", "value"]
         result = _patch_researcher_and_run(islands)
 
-        expected = len(islands) * 2  # 每个 island batch 有 2 个 notes
+        # scheduler 分配 TOTAL_QUOTA=12 个任务，每个 batch 2 notes
+        expected = SubspaceScheduler.TOTAL_QUOTA * 2
         assert len(result["research_notes"]) == expected
         assert len(result["hypotheses"]) == expected
         assert len(result["strategy_specs"]) == expected
