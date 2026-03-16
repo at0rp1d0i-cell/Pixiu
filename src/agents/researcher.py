@@ -18,6 +18,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
+from src.schemas.hypothesis import Hypothesis, StrategySpec
 from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
@@ -222,7 +223,16 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         len(all_notes), len(active_islands)
     )
 
-    return {**state, "research_notes": all_notes}
+    # Bridge：将 FactorResearchNote 转换为 Hypothesis + StrategySpec
+    hypotheses: list[Hypothesis] = [note.to_hypothesis() for note in all_notes]
+    strategy_specs: list[StrategySpec] = [note.to_strategy_spec() for note in all_notes]
+
+    return {
+        **state,
+        "research_notes": all_notes,
+        "hypotheses": hypotheses,
+        "strategy_specs": strategy_specs,
+    }
 
 
 def hypothesis_gen_node(state: dict) -> dict:

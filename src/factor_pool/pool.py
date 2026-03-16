@@ -433,9 +433,6 @@ class FactorPool:
                 "beats_baseline": verdict.overall_passed,
                 "parse_success": report.passed,
                 "ic": report.metrics.ic_mean,
-                "icir": report.metrics.icir,
-                "turnover": record.turnover,
-                "sharpe": report.metrics.sharpe,
             }],
         )
         logger.info(
