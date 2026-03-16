@@ -151,9 +151,8 @@ class AlphaResearcher:
         # 构建市场上下文字符串
         if context:
             mkt_ctx = (
-                f"市场 Regime：{context.regime}\n"
-                f"风险评分：{context.risk_score:.1f}/10\n"
-                f"摘要：{context.summary}"
+                f"市场 Regime：{context.market_regime}\n"
+                f"摘要：{context.raw_summary}"
             )
         else:
             mkt_ctx = "（无市场上下文，请基于通用 A 股规律提出假设）"

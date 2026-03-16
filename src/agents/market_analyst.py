@@ -53,6 +53,7 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
     "market_regime": "trending_up",
     "raw_summary": "今日北向净流入..."
 }}
+注意：historical_insights 必须是空列表 []，该字段由下游 LiteratureMiner 填充，你不需要生成。
 不需要解释，直接输出 JSON。"""
 
 
@@ -75,6 +76,22 @@ class MarketAnalyst:
             temperature=0.1,
         ).bind_tools(mcp_tools)
 
+    @staticmethod
+    def _extract_tool_text(result) -> str:
+        """从 MCP 工具返回值中提取纯文本。
+
+        langchain-mcp-adapters content_and_artifact 模式返回 list[dict]，
+        每个 dict 含 type='text' + text='...'。需要提取 text 字段，
+        否则 LLM 收到的是 Python repr 而非可解析的数据。
+        """
+        if isinstance(result, str):
+            return result
+        if isinstance(result, list) and result:
+            first = result[0]
+            if isinstance(first, dict) and "text" in first:
+                return first["text"]
+        return str(result)
+
     async def analyze(self) -> MarketContextMemo:
         """执行 ReAct 循环生成今日 MarketContextMemo。"""
         messages = [
@@ -83,6 +100,7 @@ class MarketAnalyst:
         ]
 
         # ReAct 循环（最多 5 轮工具调用）
+        used_all_rounds = False
         for _ in range(5):
             response = await self.llm.ainvoke(messages)
             messages.append(response)
@@ -94,10 +112,29 @@ class MarketAnalyst:
                 tool = self.tools.get(call["name"])
                 if tool:
                     try:
-                        tool_result = await tool.ainvoke(call["args"])
+                        raw_result = await tool.ainvoke(call["args"])
                     except Exception as e:
-                        tool_result = f"工具调用失败: {e}"
-                    messages.append(ToolMessage(content=str(tool_result), tool_call_id=call["id"]))
+                        raw_result = f"工具调用失败: {e}"
+                    messages.append(ToolMessage(
+                        content=self._extract_tool_text(raw_result),
+                        tool_call_id=call["id"],
+                    ))
+        else:
+            used_all_rounds = True
+
+        # 如果 5 轮用完 LLM 还在调工具，追加一轮无工具调用让它输出 JSON
+        if used_all_rounds and not response.content.strip():
+            logger.info("[MarketAnalyst] 工具轮次用尽，追加 final call")
+            messages.append(HumanMessage(
+                content="工具调用轮次已用完。请根据已获取的数据，直接输出 MarketContextMemo JSON。"
+            ))
+            llm_no_tools = ChatOpenAI(
+                model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
+                base_url=os.getenv("RESEARCHER_BASE_URL"),
+                api_key=os.getenv("RESEARCHER_API_KEY"),
+                temperature=0.1,
+            )
+            response = await llm_no_tools.ainvoke(messages)
 
         return self._parse_memo(response.content)
 
@@ -107,6 +144,11 @@ class MarketAnalyst:
         if match:
             try:
                 data = json.loads(match.group())
+                # historical_insights 由 LiteratureMiner 填充，LLM 可能填错格式，强制清空
+                if "historical_insights" in data:
+                    hi = data["historical_insights"]
+                    if not isinstance(hi, list) or (hi and not isinstance(hi[0], dict)):
+                        data["historical_insights"] = []
                 return MarketContextMemo(**data)
             except Exception as e:
                 logger.warning("[MarketAnalyst] JSON 解析失败: %s", e)
