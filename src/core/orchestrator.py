@@ -251,7 +251,7 @@ def prefilter_node(state: AgentState) -> dict:
 # ─────────────────────────────────────────────────────────
 def exploration_node(state: AgentState) -> dict:
     """Stage 4a: 对有 exploration_questions 的 Note 执行 EDA。"""
-    from src.agents.exploration import ExplorationAgent
+    from src.execution.exploration_agent import ExplorationAgent
 
     notes_needing_exploration = [
         n for n in state.approved_notes

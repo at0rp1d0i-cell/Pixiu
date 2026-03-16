@@ -32,11 +32,18 @@ logger = logging.getLogger(__name__)
 # Filter A：Validator（A 股硬约束，扩展自 v1 validator.py）
 # ─────────────────────────────────────────────────────────
 
-APPROVED_FIELDS = {
+_BASE_FIELDS = {
     "$close", "$open", "$high", "$low", "$volume", "$factor", "$amount", "$vwap",
+}
+
+_FUNDAMENTAL_FIELDS = {
     "$pe_ttm", "$pb", "$roe", "$revenue_yoy", "$profit_yoy",
     "$turnover_rate", "$float_mv",
 }
+
+FUNDAMENTAL_FIELDS_ENABLED = os.getenv("FUNDAMENTAL_FIELDS_ENABLED", "false").lower() == "true"
+
+APPROVED_FIELDS = _BASE_FIELDS | (_FUNDAMENTAL_FIELDS if FUNDAMENTAL_FIELDS_ENABLED else set())
 
 APPROVED_OPERATORS = {
     "Mean", "Std", "Var", "Max", "Min", "Sum",

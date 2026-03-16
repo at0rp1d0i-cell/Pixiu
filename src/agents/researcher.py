@@ -158,6 +158,7 @@ class AlphaResearcher:
         if context:
             mkt_ctx = (
                 f"市场 Regime：{context.market_regime}\n"
+                f"建议 Islands：{', '.join(context.suggested_islands)}\n"
                 f"摘要：{context.raw_summary}"
             )
         else:

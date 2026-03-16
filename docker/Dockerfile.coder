@@ -1,44 +1,36 @@
-# EvoQuant Sandbox for OpenCode Agent
-# 基于 Python 3.12 (与宿主机一致) 构建安全的隔离计算环境
+# Pixiu-coder: Sandboxed backtest execution environment
+# Build: docker build -t Pixiu-coder:latest -f docker/Dockerfile.coder .
+# Usage: DockerRunner mounts scripts and qlib data, runs with --network=none
+#
+# Runtime mounts (by DockerRunner):
+#   -v <qlib_data>:/data/qlib_bin:ro   — Qlib binary data (read-only)
+#   -v <script>:/tmp/script.py:ro      — Backtest script (read-only)
+
 FROM python:3.12-slim
 
-# 设置工作目录
-WORKDIR /app
+LABEL maintainer="Pixiu Team"
+LABEL description="Sandboxed Python environment for Qlib factor backtesting"
 
-# 安装必要的系统库和 Node.js (OpenCode 依赖 Node 环境)
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
+# System dependencies for numpy/scipy/lightgbm
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 全局安装 Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
-
-# 安装 Qlib 和基础科学计算库 (与宿主机保持对齐)
-# 绕过 PEP 668，因为我们在独立的 Docker 容器内
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --no-cache-dir --break-system-packages \
-    numpy \
-    pandas \
-    scipy \
-    scikit-learn \
+# Install Python packages needed for backtesting
+RUN pip install --no-cache-dir \
+    numpy>=1.24 \
+    pandas>=2.0 \
+    scipy>=1.10 \
+    pyqlib \
     lightgbm \
-    yfinance \
-    tqdm \
-    matplotlib \
-    pyqlib
+    scikit-learn \
+    && pip cache purge
 
-# /app/data        -> 宿主机的 qlib_bin 数据 (只读挂载)
-# /app/workspace   -> 宿主机的策略代码目录 (读写挂载)
-# /app/skills      -> 代理专属系统编程法则 (只读挂载)
-VOLUME ["/app/data", "/app/workspace", "/app/skills"]
+# Non-root user for security
+RUN useradd -m -s /bin/bash coder
+USER coder
 
-# 设置运行环境变量 (将在外部被 override)
-ENV ANTHROPIC_API_KEY="placeholder"
-ENV ANTHROPIC_BASE_URL="placeholder"
+WORKDIR /tmp
 
-# 默认运行 bash，防止容器秒退
-CMD ["/bin/bash"]
+CMD ["python", "--version"]
