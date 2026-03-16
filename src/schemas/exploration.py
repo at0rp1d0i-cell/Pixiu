@@ -109,13 +109,6 @@ class SubspaceRegistry(PixiuBase):
                 description="经济叙事挖掘 - 从政策、产业链等叙事中抽取机制",
                 narrative_sources=["policy", "industry", "macro"],
             ),
-            "regime_conditional": SubspaceConfig(
-                subspace=ExplorationSubspace.REGIME_CONDITIONAL,
-                enabled=True,
-                priority=2,
-                description="Regime 条件因子 - 只在特定市场环境下有效的因子",
-                regime_types=["bull", "bear", "high_vol", "low_vol", "crisis"],
-            ),
         }
         return cls(configs=configs, strategies={})
 

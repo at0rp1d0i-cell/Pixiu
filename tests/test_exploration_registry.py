@@ -74,12 +74,11 @@ def test_default_registry():
     """测试默认注册表"""
     registry = SubspaceRegistry.get_default_registry()
     
-    assert len(registry.configs) == 5
+    assert len(registry.configs) == 4
     assert "factor_algebra" in registry.configs
     assert "symbolic_mutation" in registry.configs
     assert "cross_market" in registry.configs
     assert "narrative_mining" in registry.configs
-    assert "regime_conditional" in registry.configs
 
 
 def test_get_enabled_subspaces():
@@ -87,7 +86,7 @@ def test_get_enabled_subspaces():
     registry = SubspaceRegistry.get_default_registry()
     enabled = registry.get_enabled_subspaces()
     
-    assert len(enabled) == 5
+    assert len(enabled) == 4
     assert ExplorationSubspace.FACTOR_ALGEBRA in enabled
     assert ExplorationSubspace.SYMBOLIC_MUTATION in enabled
 
@@ -109,7 +108,7 @@ def test_get_subspaces_for_island_all():
     subspaces = registry.get_subspaces_for_island("momentum")
     
     # 默认配置中所有子空间都适用于所有 Island
-    assert len(subspaces) == 5
+    assert len(subspaces) == 4
 
 
 def test_get_subspaces_for_island_specific():
@@ -132,7 +131,7 @@ def test_get_sorted_subspaces():
     sorted_subspaces = registry.get_sorted_subspaces()
     
     # 应该按优先级降序排列
-    assert len(sorted_subspaces) == 5
+    assert len(sorted_subspaces) == 4
     assert sorted_subspaces[0] == ExplorationSubspace.FACTOR_ALGEBRA  # priority=5
     assert sorted_subspaces[1] == ExplorationSubspace.SYMBOLIC_MUTATION  # priority=4
 
@@ -146,7 +145,6 @@ def test_get_sorted_subspaces_for_island():
     registry.configs["symbolic_mutation"].applicable_islands = ["momentum"]
     registry.configs["cross_market"].applicable_islands = ["valuation"]
     registry.configs["narrative_mining"].applicable_islands = ["valuation"]
-    registry.configs["regime_conditional"].applicable_islands = ["volatility"]
     
     sorted_subspaces = registry.get_sorted_subspaces(island="momentum")
     
@@ -163,7 +161,7 @@ def test_disable_subspace():
     registry.configs["cross_market"].enabled = False
     
     enabled = registry.get_enabled_subspaces()
-    assert len(enabled) == 4
+    assert len(enabled) == 3
     assert ExplorationSubspace.CROSS_MARKET not in enabled
 
 
@@ -187,12 +185,20 @@ def test_subspace_config_narrative_sources():
     assert "industry" in config.narrative_sources
 
 
-def test_subspace_config_regime_types():
-    """测试 Regime 类型配置"""
+def test_regime_is_infrastructure_not_subspace():
+    """验证 regime 已从子空间移除，作为基础设施层存在"""
     registry = SubspaceRegistry.get_default_registry()
-    config = registry.get_subspace_config(ExplorationSubspace.REGIME_CONDITIONAL)
-    
-    assert config is not None
-    assert "bull" in config.regime_types
-    assert "bear" in config.regime_types
-    assert "crisis" in config.regime_types
+    assert "regime_conditional" not in registry.configs
+
+    # regime 字段现在在 Hypothesis 上作为基础设施
+    from src.schemas.hypothesis import Hypothesis
+    h = Hypothesis(
+        hypothesis_id="hyp_test",
+        island="test",
+        mechanism="test",
+        economic_rationale="test",
+        applicable_regimes=["bull"],
+        invalid_regimes=["crisis"],
+        regime_switch_rule="VIX > 30 进入 crisis",
+    )
+    assert h.regime_switch_rule == "VIX > 30 进入 crisis"

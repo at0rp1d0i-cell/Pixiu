@@ -11,12 +11,11 @@ from src.schemas import PixiuBase
 
 
 class ExplorationSubspace(str, Enum):
-    """五个探索子空间（docs/design/stage-2-hypothesis-expansion.md §4）"""
+    """四个探索子空间 — Regime 已升级为基础设施层，不再作为独立子空间"""
     FACTOR_ALGEBRA = "factor_algebra"           # 原语空间搜索
     SYMBOLIC_MUTATION = "symbolic_mutation"     # 符号变异
     CROSS_MARKET = "cross_market"               # 跨市场模式挖掘
     NARRATIVE_MINING = "narrative_mining"       # 经济叙事挖掘
-    REGIME_CONDITIONAL = "regime_conditional"   # Regime 条件因子
 
 
 class MutationOperator(str, Enum):
@@ -47,10 +46,13 @@ class Hypothesis(PixiuBase):
     mechanism: str                              # 市场机制描述
     economic_rationale: str                     # 经济学原理
 
+    # Regime 基础设施层 — 每个 hypothesis 必须声明 regime 适用性
+    applicable_regimes: List[str] = []          # 适用的 regime（如 bull, low_vol）
+    invalid_regimes: List[str] = []             # 失效的 regime（如 crisis, bear）
+    regime_switch_rule: Optional[str] = None    # regime 切换规则（如何判断进入/退出）
+
     # 可选字段
     candidate_driver: Optional[str] = None      # 潜在驱动因素
-    applicable_regimes: List[str] = []          # 适用的 regime
-    invalid_regimes: List[str] = []             # 失效的 regime
     inspirations: List[str] = []                # 启发来源
     failure_priors: List[str] = []              # 已知失败前提
 

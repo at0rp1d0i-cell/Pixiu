@@ -152,7 +152,7 @@ def test_exploration_subspace_enum():
     assert ExplorationSubspace.SYMBOLIC_MUTATION == "symbolic_mutation"
     assert ExplorationSubspace.CROSS_MARKET == "cross_market"
     assert ExplorationSubspace.NARRATIVE_MINING == "narrative_mining"
-    assert ExplorationSubspace.REGIME_CONDITIONAL == "regime_conditional"
+    # REGIME_CONDITIONAL 已移除 — regime 现在是基础设施层
 
 
 # ─────────────────────────────────────────────────────────

@@ -29,6 +29,11 @@ class FactorResearchNote(PixiuBase):
     backtest_start: str = "2021-06-01"
     backtest_end: str = "2025-03-31"
 
+    # Regime 基础设施层 — 每个 research note 必须声明 regime 适用性
+    applicable_regimes: List[str] = []          # 适用的 regime
+    invalid_regimes: List[str] = []             # 失效的 regime
+    regime_switch_rule: Optional[str] = None    # regime 切换规则
+
     # 预期与风险
     expected_ic_min: float = 0.02
     risk_factors: List[str]      # 可能导致失败的因素
@@ -50,6 +55,9 @@ class FactorResearchNote(PixiuBase):
             island=self.island,
             mechanism=self.hypothesis,
             economic_rationale=self.economic_intuition,
+            applicable_regimes=self.applicable_regimes,
+            invalid_regimes=self.invalid_regimes,
+            regime_switch_rule=self.regime_switch_rule,
             inspirations=[self.inspired_by] if self.inspired_by else [],
             failure_priors=self.risk_factors,
         )
