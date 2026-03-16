@@ -14,7 +14,7 @@ Pixiu v2 Orchestrator（完全重写）
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -122,7 +122,7 @@ def _write_snapshot(state: AgentState, stage: str, awaiting_human_approval: Opti
                 if awaiting_human_approval is None
                 else awaiting_human_approval
             ),
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(UTC),
         )
         get_state_store().write_snapshot(snapshot)
         _update_run_record(stage)

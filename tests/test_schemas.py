@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from datetime import datetime
+from datetime import UTC, datetime
 
 # 这里我们先导入虽然还不存在的模块，TDD 模式下这里会报错直到我们实现它们
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, HistoricalInsight
@@ -122,7 +122,7 @@ def test_backtest_report_metrics():
             start_date="2021-01-01",
             end_date="2025-01-01",
             runtime_seconds=120.5,
-            timestamp_utc=datetime.utcnow(),
+            timestamp_utc=datetime.now(UTC),
         ),
         factor_spec=FactorSpecSnapshot(
             formula="$pe",
@@ -212,7 +212,7 @@ def test_agent_state_defaults():
 
 def test_control_plane_schemas():
     """测试控制平面基础 schema 可创建并具备关键字段。"""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     run = RunRecord(
         run_id="r1",
         mode="single",
@@ -258,6 +258,6 @@ def test_control_plane_forbid_extra_fields():
             run_id="r1",
             mode="single",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
             extra_field="should-fail",
         )

@@ -1,15 +1,14 @@
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
+from datetime import datetime, UTC
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
 class PixiuBase(BaseModel):
     """所有 Pixiu schema 的基类"""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    version: str = Field(default="2.0")
+    model_config = ConfigDict(extra="forbid")
 
-    class Config:
-        extra = "forbid"  # 禁止额外字段，强制接口显式
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    version: str = Field(default="2.0")
 
 
 from src.schemas.control_plane import (

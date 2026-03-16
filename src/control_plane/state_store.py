@@ -3,7 +3,7 @@ import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -114,7 +114,7 @@ class StateStore:
             status="running",
             current_round=0,
             current_stage="pending",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         with self._conn() as conn:
             conn.execute(

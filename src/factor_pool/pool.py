@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 import chromadb
@@ -400,7 +400,7 @@ class FactorPool:
             turnover=turnover,
             max_drawdown=report.metrics.max_drawdown,
             coverage=coverage,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             tags=verdict.pool_tags,
         )
         self._collection.upsert(

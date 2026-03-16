@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.control_plane.state_store import StateStore
 from src.schemas.control_plane import ArtifactRecord, HumanDecisionRecord, RunSnapshot
@@ -18,7 +18,7 @@ def test_create_update_and_get_latest_run(tmp_path):
         status="completed",
         current_round=3,
         current_stage="report",
-        finished_at=datetime.utcnow(),
+        finished_at=datetime.now(UTC),
         last_error=None,
     )
     assert updated.status == "completed"
@@ -43,7 +43,7 @@ def test_write_snapshot_and_get_snapshot(tmp_path):
         backtest_reports_count=1,
         verdicts_count=1,
         awaiting_human_approval=True,
-        updated_at=datetime.utcnow(),
+        updated_at=datetime.now(UTC),
     )
     store.write_snapshot(snapshot)
 
@@ -59,7 +59,7 @@ def test_write_snapshot_and_get_snapshot(tmp_path):
         backtest_reports_count=2,
         verdicts_count=2,
         awaiting_human_approval=False,
-        updated_at=datetime.utcnow() + timedelta(seconds=1),
+        updated_at=datetime.now(UTC) + timedelta(seconds=1),
     )
     store.write_snapshot(updated_snapshot)
 
@@ -74,7 +74,7 @@ def test_append_and_list_artifacts_and_reports_order(tmp_path):
     db_path = tmp_path / "state_store.sqlite"
     store = StateStore(db_path)
     run = store.create_run(mode="evolve")
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     store.append_artifact(
         ArtifactRecord(

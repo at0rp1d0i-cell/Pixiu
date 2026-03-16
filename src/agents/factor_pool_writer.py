@@ -6,7 +6,7 @@ Canonical Stage 5 runtime writes through `src.agents.judgment` +
 standalone flows that already operate on `report + verdict`.
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict
 from src.schemas.factor_pool import FactorPoolRecord
@@ -50,7 +50,7 @@ class FactorPoolWriter:
             turnover=report.metrics.turnover,
             max_drawdown=report.metrics.max_drawdown,
             coverage=report.metrics.coverage,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             tags=self._build_tags(report, verdict),
         )
 

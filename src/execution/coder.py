@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.execution.docker_runner import DockerRunner
@@ -273,7 +273,7 @@ class Coder:
             start_date=note.backtest_start,
             end_date=note.backtest_end,
             runtime_seconds=runtime_seconds,
-            timestamp_utc=datetime.utcnow(),
+            timestamp_utc=datetime.now(UTC),
             template_version=self.template_version,
         )
 

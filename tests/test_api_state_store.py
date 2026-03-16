@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.api import server
 from src.control_plane.state_store import StateStore
@@ -21,7 +21,7 @@ def test_api_status_reads_latest_run_and_snapshot(tmp_path, monkeypatch):
             backtest_reports_count=1,
             verdicts_count=1,
             awaiting_human_approval=True,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(UTC),
         )
     )
 
