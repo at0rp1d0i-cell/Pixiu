@@ -23,6 +23,8 @@ from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
+from src.scheduling.subspace_context import build_subspace_context
+from src.schemas.exploration import SubspaceRegistry
 from src.skills.loader import SkillLoader
 
 
@@ -75,7 +77,7 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 ## 当前 Island：{island}
 {island_description}
 
-## 探索方法偏好
+## 探索子空间上下文
 {subspace_hint}
 
 ## 市场上下文
@@ -123,9 +125,13 @@ FUNDAMENTAL_FIELDS_ENABLED = os.getenv("FUNDAMENTAL_FIELDS_ENABLED", "false").lo
 class AlphaResearcher:
     """单 Island 的 Alpha 因子批量生成器。"""
 
-    def __init__(self, island: str, skill_loader: Optional[SkillLoader] = None):
+    def __init__(self, island: str, skill_loader: Optional[SkillLoader] = None,
+                 registry: Optional[SubspaceRegistry] = None,
+                 factor_pool: Optional[FactorPool] = None):
         self.island = island
         self.skill_loader = skill_loader or _SKILL_LOADER
+        self.registry = registry or SubspaceRegistry.get_default_registry()
+        self.factor_pool = factor_pool
         self.llm = ChatOpenAI(
             model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
             base_url=os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE")),
@@ -168,8 +174,16 @@ class AlphaResearcher:
             f"- {f}" for f in (failed_formulas or [])[:5]
         )
 
-        # 子空间探索方法提示
-        hint_text = _SUBSPACE_PROMPTS.get(subspace_hint, "不限定探索方法，自由发挥。") if subspace_hint else "不限定探索方法，自由发挥。"
+        # 子空间探索上下文（结构化注入）
+        if subspace_hint:
+            hint_text = build_subspace_context(
+                subspace=subspace_hint,
+                registry=self.registry,
+                factor_pool=self.factor_pool,
+                island=self.island,
+            )
+        else:
+            hint_text = "不限定探索方法，自由发挥。"
 
         user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
             island=self.island,
@@ -185,9 +199,10 @@ class AlphaResearcher:
             HumanMessage(content=user_msg),
         ])
 
-        return self._parse_batch(response.content, iteration)
+        return self._parse_batch(response.content, iteration, subspace_hint)
 
-    def _parse_batch(self, content: str, iteration: int) -> AlphaResearcherBatch:
+    def _parse_batch(self, content: str, iteration: int,
+                     subspace_hint: Optional[ExplorationSubspace] = None) -> AlphaResearcherBatch:
         """
         解析 LLM 输出为 AlphaResearcherBatch。
         支持降级：若 LLM 只输出单个 Note，包装为长度为 1 的 Batch。
@@ -207,6 +222,9 @@ class AlphaResearcher:
             note_data.setdefault("exploration_questions", [])
             note_data.setdefault("risk_factors", [])
             note_data.setdefault("market_context_date", _today_str())
+            # 子空间溯源：优先使用 LLM 输出的值，fallback 到调度器分配的 hint
+            if "exploration_subspace" not in note_data and subspace_hint:
+                note_data["exploration_subspace"] = subspace_hint.value
             notes.append(FactorResearchNote(**note_data))
 
         return AlphaResearcherBatch(

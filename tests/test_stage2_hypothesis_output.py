@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
-from src.schemas.hypothesis import Hypothesis, StrategySpec
+from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 from src.scheduling.subspace_scheduler import SubspaceScheduler
 
 
@@ -30,6 +30,7 @@ def _make_note(island: str, suffix: str) -> FactorResearchNote:
         risk_factors=["市场反转"],
         market_context_date="2026-03-16",
         inspired_by=f"来源_{suffix}",
+        exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
     )
 
 
@@ -47,7 +48,7 @@ def _patch_researcher_and_run(active_islands: list[str]) -> dict:
     from src.agents.researcher import hypothesis_gen_node
 
     with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
-        def make_instance(island):
+        def make_instance(island, **kwargs):
             instance = MagicMock()
             instance.generate_batch = AsyncMock(return_value=_make_batch(island))
             return instance
@@ -195,3 +196,10 @@ class TestHypothesisGenNodeOutput:
 
         for hyp, note in zip(result["hypotheses"], result["research_notes"]):
             assert hyp.failure_priors == note.risk_factors
+
+    def test_exploration_subspace_preserved_in_hypothesis(self):
+        """FactorResearchNote 的 exploration_subspace 应传递到 Hypothesis。"""
+        result = _patch_researcher_and_run(self.ISLANDS)
+
+        for hyp, note in zip(result["hypotheses"], result["research_notes"]):
+            assert hyp.exploration_subspace == note.exploration_subspace

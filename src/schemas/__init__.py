@@ -31,6 +31,10 @@ from src.schemas.exploration import (
     SubspaceConfig,
     ExplorationStrategy,
     SubspaceRegistry,
+    FactorPrimitive,
+    MarketMechanismTemplate,
+    NarrativeCategory,
+    MutationRecord,
 )
 
 __all__ = [
@@ -48,4 +52,8 @@ __all__ = [
     "SubspaceConfig",
     "ExplorationStrategy",
     "SubspaceRegistry",
+    "FactorPrimitive",
+    "MarketMechanismTemplate",
+    "NarrativeCategory",
+    "MutationRecord",
 ]

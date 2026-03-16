@@ -184,7 +184,7 @@ def test_hypothesis_gen_node_note_count():
         return AlphaResearcherBatch(island=island, notes=[note, note], generation_rationale="test")
 
     with patch('src.agents.researcher.AlphaResearcher') as MockResearcher:
-        def make_instance(island):
+        def make_instance(island, **kwargs):
             instance = MagicMock()
             instance.generate_batch = AsyncMock(return_value=mock_batch_factory(island))
             return instance
@@ -199,3 +199,35 @@ def test_hypothesis_gen_node_note_count():
 
     # 3 islands × 2 notes = 6 notes minimum
     assert len(result["research_notes"]) >= 3 * 2
+
+
+def test_batch_notes_carry_exploration_subspace():
+    """当 subspace_hint 传入时，生成的 notes 应带 exploration_subspace 字段"""
+    from src.agents.researcher import AlphaResearcher
+    from src.schemas.hypothesis import ExplorationSubspace
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [
+            {
+                "note_id": "a", "island": "momentum", "iteration": 1,
+                "hypothesis": "动量1", "economic_intuition": "趋势",
+                "proposed_formula": "Ref($close, -5) / Ref($close, -20) - 1",
+                "risk_factors": [], "market_context_date": "2026-03-08"
+            }
+        ],
+        "generation_rationale": "测试子空间溯源"
+    }'''
+
+    with patch('src.agents.researcher.ChatOpenAI') as MockLLM:
+        mock_chat = MockLLM.return_value
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(researcher.generate_batch(
+                context=None,
+                iteration=1,
+                subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+            ))
+
+    assert batch.notes[0].exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA

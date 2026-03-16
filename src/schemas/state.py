@@ -3,6 +3,7 @@ from pydantic import Field
 from src.schemas import PixiuBase
 from src.schemas.market_context import MarketContextMemo
 from src.schemas.research_note import FactorResearchNote, SynthesisInsight
+from src.schemas.hypothesis import Hypothesis, StrategySpec
 from src.schemas.exploration import ExplorationResult
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport, PortfolioAllocation, CIOReport
@@ -21,6 +22,8 @@ class AgentState(PixiuBase):
     # Stage 2 输出
     research_notes: List[FactorResearchNote] = Field(default_factory=list)
     synthesis_insights: List[SynthesisInsight] = Field(default_factory=list)
+    hypotheses: List[Hypothesis] = Field(default_factory=list)
+    strategy_specs: List[StrategySpec] = Field(default_factory=list)
 
     # Stage 3 输出（过滤后）
     approved_notes: List[FactorResearchNote] = Field(default_factory=list)

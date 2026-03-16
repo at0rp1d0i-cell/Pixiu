@@ -46,6 +46,37 @@ class PrimitiveCategory(str, Enum):
     REGIME_SWITCH = "regime_switch"
 
 
+class FactorPrimitive(PixiuBase):
+    """因子原语 — Factor Algebra Search 的最小构建块"""
+    name: str                                      # 原语名称（如 "$close"）
+    category: PrimitiveCategory                    # 所属类别
+    qlib_syntax: str                               # Qlib 表达式片段
+    description: str                               # 中文说明
+
+
+class MarketMechanismTemplate(PixiuBase):
+    """跨市场机制模板 — Cross-Market Pattern Mining 的逻辑骨架"""
+    name: str                                      # 模板名称
+    source_market: str                             # 来源市场（US/HK/commodity/rates）
+    transmission_path: str                         # 传导路径描述
+    skeleton: str                                  # 逻辑骨架（可适配 A 股的抽象表达）
+
+
+class NarrativeCategory(PixiuBase):
+    """叙事类别 — Narrative Mining 的抽取框架"""
+    category: str                                  # 类别名称
+    extraction_targets: List[str]                  # 抽取目标列表
+    example_patterns: List[str]                    # 示例模式
+
+
+class MutationRecord(PixiuBase):
+    """变异记录 — Symbolic Mutation 的审计追踪"""
+    source_factor_id: str                          # 源因子 ID
+    operator: MutationOperator                     # 使用的变异算子
+    parameter_change: str                          # 参数变更描述
+    result_formula: str                            # 变异后的公式
+
+
 class SubspaceConfig(PixiuBase):
     """探索子空间配置"""
     subspace: ExplorationSubspace
@@ -73,13 +104,16 @@ class ExplorationStrategy(PixiuBase):
 
 
 class SubspaceRegistry(PixiuBase):
-    """探索子空间注册表 - 管理所有子空间配置"""
+    """探索子空间注册表 - 管理所有子空间配置和结构化上下文"""
     configs: Dict[str, SubspaceConfig] = {}
     strategies: Dict[str, ExplorationStrategy] = {}
+    primitives: List[FactorPrimitive] = []
+    mechanism_templates: List[MarketMechanismTemplate] = []
+    narrative_categories: List[NarrativeCategory] = []
 
     @classmethod
     def get_default_registry(cls) -> "SubspaceRegistry":
-        """获取默认注册表配置"""
+        """获取默认注册表配置（含原语词汇表、机制模板、叙事类别）"""
         configs = {
             "factor_algebra": SubspaceConfig(
                 subspace=ExplorationSubspace.FACTOR_ALGEBRA,
@@ -110,7 +144,105 @@ class SubspaceRegistry(PixiuBase):
                 narrative_sources=["policy", "industry", "macro"],
             ),
         }
-        return cls(configs=configs, strategies={})
+
+        # ── 因子原语词汇表（15+ 个） ──
+        primitives = [
+            # Price-Volume
+            FactorPrimitive(name="$close", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$close", description="收盘价"),
+            FactorPrimitive(name="$open", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$open", description="开盘价"),
+            FactorPrimitive(name="$high", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$high", description="最高价"),
+            FactorPrimitive(name="$low", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$low", description="最低价"),
+            FactorPrimitive(name="$volume", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$volume", description="成交量"),
+            FactorPrimitive(name="$vwap", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$vwap", description="成交量加权均价"),
+            FactorPrimitive(name="$amount", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$amount", description="成交额"),
+            FactorPrimitive(name="$turn", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$turn", description="换手率"),
+            FactorPrimitive(name="$factor", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$factor", description="复权因子"),
+            # Fundamental
+            FactorPrimitive(name="$pe_ttm", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$pe_ttm", description="滚动市盈率"),
+            FactorPrimitive(name="$pb", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$pb", description="市净率"),
+            FactorPrimitive(name="$roe", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$roe", description="净资产收益率"),
+            # Temporal Transforms
+            FactorPrimitive(name="Ref", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Ref($field, -N)", description="N 日前的值"),
+            FactorPrimitive(name="Mean", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Mean($field, N)", description="N 日均值"),
+            FactorPrimitive(name="Std", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Std($field, N)", description="N 日标准差"),
+            FactorPrimitive(name="Corr", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Corr($x, $y, N)", description="N 日相关系数"),
+            FactorPrimitive(name="Rank", category=PrimitiveCategory.CROSS_SECTIONAL, qlib_syntax="Rank($field)", description="截面排名"),
+            FactorPrimitive(name="Max", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Max($field, N)", description="N 日最大值"),
+            FactorPrimitive(name="Min", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Min($field, N)", description="N 日最小值"),
+            FactorPrimitive(name="Delta", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Ref($field, 0) - Ref($field, -N)", description="N 日变化量"),
+        ]
+
+        # ── 跨市场机制模板（5+ 个） ──
+        mechanism_templates = [
+            MarketMechanismTemplate(
+                name="库存周期传导",
+                source_market="commodity",
+                transmission_path="上游库存 → 中游成本 → 下游利润",
+                skeleton="当上游库存处于 {regime} 时，中游 {sector} 的利润率变化领先股价 {lag} 个交易日",
+            ),
+            MarketMechanismTemplate(
+                name="利率敏感度分层",
+                source_market="US",
+                transmission_path="联储利率 → 久期敏感资产 → 成长/价值轮动",
+                skeleton="利率变动 {direction} 时，高久期资产（成长股）相对低久期资产（价值股）的超额收益 {sign}",
+            ),
+            MarketMechanismTemplate(
+                name="波动率溢价收割",
+                source_market="US",
+                transmission_path="隐含波动率 → 已实现波动率 → 波动率风险溢价",
+                skeleton="当 IV-RV spread 处于 {quantile} 分位时，做空波动率策略的 Sharpe 为 {range}",
+            ),
+            MarketMechanismTemplate(
+                name="资金流跨市场传导",
+                source_market="HK",
+                transmission_path="北向资金 → A 股行业配置 → 个股超额",
+                skeleton="北向资金连续 {N} 日净流入 {sector} 时，该行业未来 {horizon} 日超额收益显著",
+            ),
+            MarketMechanismTemplate(
+                name="动量溢出效应",
+                source_market="US",
+                transmission_path="美股行业动量 → A 股对标行业 → 滞后跟随",
+                skeleton="美股 {sector} 过去 {lookback} 日涨幅 top decile 时，A 股对标行业未来 {horizon} 日有正超额",
+            ),
+            MarketMechanismTemplate(
+                name="汇率-出口链传导",
+                source_market="rates",
+                transmission_path="人民币汇率 → 出口企业利润 → 股价反应",
+                skeleton="人民币贬值 {magnitude} 后，出口占比高的企业未来 {horizon} 日超额收益为正",
+            ),
+        ]
+
+        # ── 叙事类别（4 个） ──
+        narrative_categories = [
+            NarrativeCategory(
+                category="政策口径",
+                extraction_targets=["产业政策方向", "监管态度变化", "财政/货币政策信号"],
+                example_patterns=["国常会提及'新质生产力'→科技板块预期升温", "央行MLF缩量→流动性收紧预期"],
+            ),
+            NarrativeCategory(
+                category="产业链叙事",
+                extraction_targets=["供需格局变化", "技术突破节点", "产能周期拐点"],
+                example_patterns=["光伏硅料产能过剩→组件降价→下游装机需求释放", "AI算力需求→光模块供不应求"],
+            ),
+            NarrativeCategory(
+                category="预期错位",
+                extraction_targets=["一致预期与现实偏差", "卖方预期修正方向", "事件冲击后的过度/不足反应"],
+                example_patterns=["市场一致预期降息但央行按兵不动→利率敏感股回调", "业绩超预期但股价不涨→隐含利空"],
+            ),
+            NarrativeCategory(
+                category="公告语言风格",
+                extraction_targets=["管理层措辞变化", "风险提示密度", "前瞻指引语气"],
+                example_patterns=["年报中'审慎'出现频率上升→盈利下修概率增加", "回购公告密集→底部信号"],
+            ),
+        ]
+
+        return cls(
+            configs=configs,
+            strategies={},
+            primitives=primitives,
+            mechanism_templates=mechanism_templates,
+            narrative_categories=narrative_categories,
+        )
 
     def get_enabled_subspaces(self) -> List[ExplorationSubspace]:
         """获取所有启用的子空间"""

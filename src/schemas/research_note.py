@@ -1,6 +1,6 @@
 from typing import Optional, List
 from src.schemas import PixiuBase
-from src.schemas.hypothesis import Hypothesis, StrategySpec
+from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 
 class ExplorationQuestion(PixiuBase):
     """Researcher 提出的探索性问题，由 ExplorationAgent 在 Stage 4a 执行"""
@@ -45,6 +45,10 @@ class FactorResearchNote(PixiuBase):
     # 状态
     status: str = "draft"  # "draft" | "exploring" | "ready_for_backtest" | "completed"
 
+    # Stage 2 子空间溯源
+    exploration_subspace: Optional[ExplorationSubspace] = None  # 生成此 note 的子空间
+    mutation_record: Optional[dict] = None                      # 变异记录（如有）
+
     def to_hypothesis(self) -> Hypothesis:
         """
         将 FactorResearchNote 转换为 Hypothesis
@@ -60,6 +64,8 @@ class FactorResearchNote(PixiuBase):
             regime_switch_rule=self.regime_switch_rule,
             inspirations=[self.inspired_by] if self.inspired_by else [],
             failure_priors=self.risk_factors,
+            exploration_subspace=self.exploration_subspace,
+            mutation_record=self.mutation_record,
         )
 
     def to_strategy_spec(self, benchmark: str = "SH000300", freq: str = "day") -> StrategySpec:

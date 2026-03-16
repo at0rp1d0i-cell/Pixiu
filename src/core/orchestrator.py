@@ -208,10 +208,14 @@ def hypothesis_gen_node(state: AgentState) -> dict:
         result = _gen_node(enriched)
         notes = result.get("research_notes", [])
         logger.info("[Stage 2] 生成 %d 个候选", len(notes))
-        return {"research_notes": notes}
+        return {
+            "research_notes": notes,
+            "hypotheses": result.get("hypotheses", []),
+            "strategy_specs": result.get("strategy_specs", []),
+        }
     except Exception as e:
         logger.error("[Stage 2] 假设生成失败: %s", e)
-        return {"research_notes": [], "last_error": str(e), "error_stage": "hypothesis_gen"}
+        return {"research_notes": [], "hypotheses": [], "strategy_specs": [], "last_error": str(e), "error_stage": "hypothesis_gen"}
 
 
 # ─────────────────────────────────────────────────────────

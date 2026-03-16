@@ -56,6 +56,11 @@ class Hypothesis(PixiuBase):
     inspirations: List[str] = []                # 启发来源
     failure_priors: List[str] = []              # 已知失败前提
 
+    # 溯源字段 — Stage 2 子空间追踪
+    exploration_subspace: Optional[ExplorationSubspace] = None  # 生成此假设的子空间
+    mutation_record: Optional[Dict] = None      # 变异记录（MutationRecord 序列化）
+    source_mechanism: Optional[str] = None      # 来源机制模板名称
+
 
 class StrategySpec(PixiuBase):
     """
