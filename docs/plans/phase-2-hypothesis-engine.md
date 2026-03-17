@@ -1,5 +1,10 @@
 # Phase 2: Hypothesis Expansion Engine 实施计划
 
+> ✅ **Phase 2 已完成** — 2026-03-17 | 327 smoke/unit tests 通过
+> 本文档作为历史执行计划保留，不再作为开发入口。
+
+---
+
 > 版本：1.1 | 更新：2026-03-17（同步队友 af35d1e 实现进度）
 > 前置：Phase 0+1 已完成（177 tests passed），主链端到端可运行
 > 目标：将 Stage 2 从 note generation 升级为结构化的 Hypothesis Expansion Engine

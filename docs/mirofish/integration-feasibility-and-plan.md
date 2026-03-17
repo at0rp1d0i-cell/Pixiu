@@ -1,6 +1,12 @@
 # Pixiu × MiroFish 集成可行性分析与落地方案（v1.1 对齐版）
 
-> 目标：在不破坏 Pixiu 当前主线收敛节奏的前提下，评估并设计 MiroFish 的可执行集成路径。  
+> ⚠️ **此文档已被 v2 设计取代**
+> 当前有效方案：参见 `docs/plans/current_implementation_plan.md` Phase 3D（MiroFish 协议层）
+> v1 定位（情绪管道）已被证明与 MiroFish 实际能力不符，保留仅供参考。
+
+---
+
+> 目标：在不破坏 Pixiu 当前主线收敛节奏的前提下，评估并设计 MiroFish 的可执行集成路径。
 > 结论先行：**可行性中高，推荐 v1 采用 offline-first（离线批处理特征）集成**。
 
 ---

@@ -1,6 +1,8 @@
 # Project Snapshot
 
-这是“用一个文件看懂整个项目”的入口。
+> 更新时间：2026-03-17
+
+这是”用一个文件看懂整个项目”的入口。
 
 ## 1. 项目定义
 
@@ -30,11 +32,11 @@ Pixiu 当前应当同时用两句话理解：
 
 ### 当前最大缺口
 
-- Stage 2 还没有真正成为 `Hypothesis Expansion Engine`
-- richer contracts 仍处于新旧字段双轨期
-- 控制平面还只是 MVP
-- 产品层仍停留在 CLI/API 最小可见实现
-- live / e2e 仍未形成稳定闭环
+- 数据源仍以 AKShare 宏观数据为主；Stage 2 子空间缺少专项数据支撑（Narrative Mining 缺新闻/公告；Regime Conditional 缺更丰富 regime 特征量）
+- 控制平面仍是 MVP（state_store 最小实现，无稳定读模型）
+- SubspaceScheduler Thompson Sampling 缺乏多轮 track record 积累（cold start 期）
+- FailureConstraint cold start：首轮无约束，Filter D 形同虚设
+- 产品层仍停留在 CLI/API 最小实现
 
 ## 3. 当前最重要的架构判断
 
@@ -87,8 +89,10 @@ Pixiu 当前应当同时用两句话理解：
 
 ## 7. 当前优先级
 
-1. 重构文档体系，保证 `overview -> design` 映射准确
-2. 将 Stage 2 从“并行假设生成”升级为 `Hypothesis Expansion Engine`
-3. 继续收紧 `BacktestReport / CriticVerdict / FactorPoolRecord`
-4. 扩展控制平面到更稳定的数据面
-5. 最后再补 live / e2e 和更完整的产品壳
+1. ~~重构文档体系，保证 `overview -> design` 映射准确~~ ✅ Phase A 已完成
+2. ~~将 Stage 2 从”并行假设生成”升级为 `Hypothesis Expansion Engine`~~ ✅ Phase 2 已完成（327 smoke/unit tests 通过）
+3. ~~继续收紧 `BacktestReport / CriticVerdict / FactorPoolRecord`~~ ✅ Phase 3A 已完成（FailureMode 对齐、regime_at_judgment 字段、decision 枚举、subspace_origin 溯源）
+4. 数据源扩展：NARRATIVE_MINING（新闻/公告）+ REGIME_CONDITIONAL（更多 regime 特征量）优先
+5. 代码清理：归档兼容层（critic.py / factor_pool_writer.py / cio_report_renderer.py），确认无独立消费者后迁至 archive
+6. MiroFish 协议层（NarrativePrediction schema + MiroFishAdapter）与控制平面扩展
+7. 最后再补 live / e2e 和更完整的产品壳

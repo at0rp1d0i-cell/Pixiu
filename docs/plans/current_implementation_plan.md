@@ -1,6 +1,6 @@
 # Current Implementation Plan
 
-> 更新时间：2026-03-09
+> 更新时间：2026-03-17
 > 来源：`docs/overview/spec-execution-audit.md`、`docs/design/stage-45-golden-path.md`
 
 ---
@@ -51,6 +51,46 @@
 - [x] 设计并落最小 `state_store`
 - [x] 收敛 CLI/API 到稳定数据面的最小读路径
 - [ ] 再考虑 Dashboard 落地
+
+### Phase 2: Hypothesis Expansion Engine ✅
+
+- [x] FailureConstraint schema（9 种 FailureMode：N_SHORT/N_MID/N_LONG/O_SHORT/O_MID/O_LONG/DRIFT/REGIME_MISMATCH/CONSTRAINT_VIOLATION）
+- [x] ConstraintExtractor（Stage 5 产生约束），ConstraintChecker/Filter D（Stage 3 消费）
+- [x] RegimeFilter / Filter E（invalid_regimes 检查，假设失效 regime 过滤）
+- [x] SynthesisAgent（TF-IDF 去重 threshold=0.85，scipy 因子家族聚类）
+- [x] SymbolicMutator（5 种算子：SWAP_HORIZON/CHANGE_NORMALIZATION/REMOVE_OPERATOR/ADD_OPERATOR/ALTER_INTERACTION，AST 运行时）
+- [x] RegimeDetector（5 种 regime 规则：BULL/BEAR/RANGING/HIGH_VOL/LIQUIDITY_CRISIS，detect/detect_from_signals 双入口）
+- [x] SubspaceScheduler Thompson Sampling 反馈回路（loop_control_node 调用 update_state，WARM_START_THRESHOLD=30）
+- [x] 327 smoke/unit tests 通过，现有 e2e 测试继续通过
+
+### Phase 3A: 合约收紧 ✅
+
+- [x] CriticVerdict.failure_mode → Optional[FailureMode]（field_validator 向后兼容未来 None 值）
+- [x] CriticVerdict.regime_at_judgment: Optional[str]（判断时的 market regime 上下文）
+- [x] CriticVerdict.decision → Literal["promote","archive","reject","retry"]（明确决策枚举）
+- [x] _diagnose_failure() 直接返回 Optional[FailureMode]（删除 _FAILURE_MODE_MAP bridge，消除二次解析）
+- [x] FactorPoolRecord.subspace_origin: Optional[str]（假设来源子空间溯源）
+- [x] pool.register_factor() 接受 note 参数，写入 subspace_origin
+- [x] factor_pool_writer.py factor_spec None guard（处理历史兼容对象）
+
+### Phase 3B（计划）: 代码清理
+
+- [ ] 归档兼容层文件（critic.py / factor_pool_writer.py / cio_report_renderer.py 确认无独立消费者后标注 deprecated 或迁至 archive）
+- [ ] 清理 src/agents/schemas.py 中的重复 BacktestMetrics 定义
+- [ ] 删除 src/schemas/factor_pool_record.py legacy re-export wrapper
+
+### Phase 3C（计划）: 数据源扩展
+
+- [ ] NARRATIVE_MINING 子空间：接入新闻/公告文本数据源（MCP 工具或 API）
+- [ ] REGIME_CONDITIONAL 子空间：扩展 regime 特征量（资金流向、估值分位、波动率结构等）
+- [ ] CROSS_MARKET：美股/港股/商品价格信号对齐与 pattern transfer
+
+### Phase 3D（计划）: MiroFish 协议层
+
+- [ ] NarrativePrediction schema（MiroFish 预测结果契约）
+- [ ] MiroFishAdapter（离线快照加载 + 两层解析，符合 point-in-time 防前视）
+- [ ] MarketContextMemo.narrative_predictions 字段注入
+- [ ] NARRATIVE_MINING 子空间注入 MiroFish 预测作为上下文增强
 
 ---
 
