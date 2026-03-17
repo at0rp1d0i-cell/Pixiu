@@ -70,6 +70,10 @@ ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于
   - hypothesis: 字符串（经济直觉，100-300字）
   - economic_intuition: 字符串（为何此因子有效）
   - proposed_formula: 字符串（合法 Qlib 公式）
+    关键规则（违反会被直接过滤）：
+    1. 必须是单行表达式，不能有换行、注释（#）、或变量赋值（=）
+    2. Ref(x, N) 中 N 必须为正整数：Ref($close, 1) = 昨日，Ref($close, 5) = 5日前（不能用负数）
+    3. 如果假设难以用单行公式表达，选择最核心部分用合法公式近似，hypothesis 字段描述完整逻辑
   - risk_factors: 字符串数组（可能失败的原因）
   - market_context_date: 字符串（今日日期，格式 YYYY-MM-DD）
 """

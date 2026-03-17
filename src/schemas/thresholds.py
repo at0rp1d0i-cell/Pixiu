@@ -11,6 +11,6 @@ class CriticThresholds(PixiuBase):
     min_coverage: float = 0.70
     max_overfitting_score: float = 0.40
     min_novelty_threshold: float = 0.30  # AST 相似度低于此值才通过 Novelty Filter
-    stage3_top_k: int = 5             # Stage 3 最多放行多少个候选进入回测
+    stage3_top_k: int = 10            # Stage 3 最多放行多少个候选进入回测
 
 THRESHOLDS = CriticThresholds()  # 全局单例

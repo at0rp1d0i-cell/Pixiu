@@ -29,6 +29,17 @@ from src.factor_pool.pool import FactorPool
 logger = logging.getLogger(__name__)
 
 
+def _load_dotenv_if_available():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+
+_load_dotenv_if_available()
+
+
 # ─────────────────────────────────────────────────────────
 # Filter A：Validator（A 股硬约束，扩展自 v1 validator.py）
 # ─────────────────────────────────────────────────────────
@@ -57,6 +68,11 @@ APPROVED_OPERATORS = {
     "Add", "Sub", "Mul", "Div",
     "IdxMax", "IdxMin", "Comb", "Count", "Mad",
     "WMA", "EMA",
+    # qlib Ts_* 时序算子
+    "Ts_Mean", "Ts_Std", "Ts_Max", "Ts_Min", "Ts_Sum",
+    "Ts_Rank", "Ts_Corr", "Ts_Cov", "Ts_WMA", "Ts_Slope",
+    # 其他合法 qlib 算子
+    "SignedPower", "Greater", "Less",
 }
 
 
