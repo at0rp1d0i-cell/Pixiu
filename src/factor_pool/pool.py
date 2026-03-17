@@ -389,11 +389,15 @@ class FactorPool:
         verdict: CriticVerdict,
         risk_report: RiskAuditReport,
         hypothesis: str = "",
+        note: Optional[FactorResearchNote] = None,
     ) -> None:
         """将完整执行结果（BacktestReport + CriticVerdict + RiskAuditReport）写入 factors collection。"""
         factor_spec = report.factor_spec
         turnover = report.metrics.turnover_rate
         coverage = report.metrics.coverage
+        subspace_origin = (
+            note.exploration_subspace.value if note and note.exploration_subspace else None
+        )
         record = FactorPoolRecord(
             factor_id=report.factor_id,
             note_id=report.note_id,
@@ -412,6 +416,7 @@ class FactorPool:
             coverage=coverage,
             created_at=datetime.now(UTC),
             tags=verdict.pool_tags,
+            subspace_origin=subspace_origin,
         )
         self._collection.upsert(
             ids=[report.factor_id],
@@ -438,6 +443,7 @@ class FactorPool:
                 "overfitting_score": risk_report.overfitting_score,
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "tags": json.dumps(record.tags),
+                "subspace_origin": record.subspace_origin or "",
                 # 向后兼容旧字段
                 "beats_baseline": verdict.overall_passed,
                 "parse_success": report.passed,
@@ -532,6 +538,7 @@ class FactorPool:
             "coverage": record.coverage or 0.0,
             "created_at": record.created_at.isoformat(),
             "tags": json.dumps(record.tags),
+            "subspace_origin": record.subspace_origin or "",
             # 向后兼容
             "passed": record.decision == "promote",
             "beats_baseline": record.decision == "promote",

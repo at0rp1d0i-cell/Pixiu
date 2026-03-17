@@ -1,7 +1,9 @@
 import uuid
-from typing import List, Optional
-from pydantic import Field
+from typing import List, Literal, Optional
+from pydantic import Field, field_validator
 from src.schemas import PixiuBase
+from src.schemas.failure_constraint import FailureMode
+
 
 class ThresholdCheck(PixiuBase):
     metric: str
@@ -9,13 +11,29 @@ class ThresholdCheck(PixiuBase):
     threshold: float
     passed: bool
 
+
+# 向后兼容：旧字符串 → FailureMode enum
+_LEGACY_FAILURE_MODE_MAP: dict[str, FailureMode] = {
+    "execution_error": FailureMode.EXECUTION_ERROR,
+    "low_sharpe": FailureMode.LOW_SHARPE,
+    "low_ic": FailureMode.NO_IC,
+    "negative_ic": FailureMode.NEGATIVE_IC,
+    "low_icir": FailureMode.NO_IC,
+    "high_turnover": FailureMode.HIGH_TURNOVER,
+    "high_drawdown": FailureMode.HIGH_DRAWDOWN,
+    "low_coverage": FailureMode.LOW_COVERAGE,
+    "overfitting": FailureMode.OVERFITTING,
+    "threshold_failure": FailureMode.LOW_SHARPE,
+}
+
+
 class CriticVerdict(PixiuBase):
     verdict_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     report_id: str
     factor_id: str
     note_id: Optional[str] = None
     overall_passed: bool
-    decision: Optional[str] = None
+    decision: Optional[Literal["promote", "archive", "reject", "retry"]] = None
     score: float = 0.0
 
     # 逐项检查
@@ -24,15 +42,35 @@ class CriticVerdict(PixiuBase):
     failed_checks: List[str] = []
 
     # 失败归因（overall_passed=False 时必填）
-    failure_mode: Optional[str] = None
+    failure_mode: Optional[FailureMode] = None
     failure_explanation: Optional[str] = None
     suggested_fix: Optional[str] = None
     summary: str = ""
     reason_codes: List[str] = []
 
+    # 判断时的市场 regime
+    regime_at_judgment: Optional[str] = None
+
     # FactorPool 写入决策
     register_to_pool: bool
     pool_tags: List[str] = []
+
+    @field_validator("failure_mode", mode="before")
+    @classmethod
+    def coerce_failure_mode(cls, v):
+        """向后兼容：接受旧字符串形式的 failure_mode。未知字符串返回 None，
+        由消费方（ConstraintExtractor）通过 checks 做 fallback。"""
+        if v is None or isinstance(v, FailureMode):
+            return v
+        if isinstance(v, str):
+            # 先尝试直接用 enum value 匹配
+            try:
+                return FailureMode(v)
+            except ValueError:
+                pass
+            # 再查旧字符串映射表；不在表中的未知字符串返回 None
+            return _LEGACY_FAILURE_MODE_MAP.get(v, None)
+        return v
 
 class CorrelationFlag(PixiuBase):
     existing_factor_id: str

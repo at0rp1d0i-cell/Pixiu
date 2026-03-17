@@ -69,10 +69,10 @@ def _build_threshold_checks(report: BacktestReport) -> list[ThresholdCheck]:
     ]
 
 
-def _diagnose_failure(report: BacktestReport, failed_checks: list[ThresholdCheck]) -> tuple[str | None, str, str | None]:
+def _diagnose_failure(report: BacktestReport, failed_checks: list[ThresholdCheck]) -> tuple[Optional[FailureMode], str, Optional[str]]:
     if report.error_message:
         return (
-            "execution_error",
+            FailureMode.EXECUTION_ERROR,
             f"回测执行失败：{report.error_message}",
             "检查公式语法、模板渲染和执行环境。",
         )
@@ -81,40 +81,37 @@ def _diagnose_failure(report: BacktestReport, failed_checks: list[ThresholdCheck
         return (None, "所有关键指标通过。", None)
 
     primary = failed_checks[0]
-    mode_map = {
-        "sharpe": "low_sharpe",
-        "ic_mean": "low_ic",
-        "icir": "low_icir",
-        "turnover": "high_turnover",
-        "max_drawdown": "high_drawdown",
-        "coverage": "low_coverage",
+    mode_map: dict[str, FailureMode] = {
+        "sharpe": FailureMode.LOW_SHARPE,
+        "ic_mean": FailureMode.NO_IC,
+        "icir": FailureMode.NO_IC,
+        "turnover": FailureMode.HIGH_TURNOVER,
+        "max_drawdown": FailureMode.HIGH_DRAWDOWN,
+        "coverage": FailureMode.LOW_COVERAGE,
     }
-    failure_mode = mode_map.get(primary.metric, "threshold_failure")
+    failure_mode: FailureMode = mode_map.get(primary.metric, FailureMode.LOW_SHARPE)
 
     # Refine IC failure: distinguish negative IC from near-zero IC
-    if failure_mode == "low_ic":
-        ic_val = primary.value
-        if ic_val < -0.01:
-            failure_mode = "negative_ic"
-        # else: ic_val is near-zero (|ic| <= 0.01 or small positive below threshold) → keep "low_ic"
+    if failure_mode == FailureMode.NO_IC and primary.metric == "ic_mean":
+        if primary.value < -0.01:
+            failure_mode = FailureMode.NEGATIVE_IC
+        # else: ic_val is near-zero (|ic| <= 0.01 or small positive below threshold) → keep NO_IC
 
-    explanations = {
-        "low_sharpe": f"Sharpe={primary.value:.2f}，低于门槛 {primary.threshold:.2f}。",
-        "low_ic": f"IC={primary.value:.4f}，低于门槛 {primary.threshold:.4f}（近零信号）。",
-        "negative_ic": f"IC={primary.value:.4f}，为明显负值，信号方向可能反转。",
-        "low_icir": f"ICIR={primary.value:.2f}，低于门槛 {primary.threshold:.2f}。",
-        "high_turnover": f"换手率={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
-        "high_drawdown": f"最大回撤={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
-        "low_coverage": f"覆盖率={primary.value:.2%}，低于门槛 {primary.threshold:.2%}。",
+    explanations: dict[FailureMode, str] = {
+        FailureMode.LOW_SHARPE: f"Sharpe={primary.value:.2f}，低于门槛 {primary.threshold:.2f}。",
+        FailureMode.NO_IC: f"IC={primary.value:.4f}，低于门槛 {primary.threshold:.4f}（近零信号）。",
+        FailureMode.NEGATIVE_IC: f"IC={primary.value:.4f}，为明显负值，信号方向可能反转。",
+        FailureMode.HIGH_TURNOVER: f"换手率={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
+        FailureMode.HIGH_DRAWDOWN: f"最大回撤={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
+        FailureMode.LOW_COVERAGE: f"覆盖率={primary.value:.2%}，低于门槛 {primary.threshold:.2%}。",
     }
-    suggestions = {
-        "low_sharpe": "考虑更换信号方向或延长窗口平滑噪声。",
-        "low_ic": "检查经济假设是否成立，或缩小适用股票池。",
-        "negative_ic": "信号方向与收益负相关，尝试对信号取反或重审经济逻辑。",
-        "low_icir": "检查不同市场状态下的稳定性。",
-        "high_turnover": "增大平滑窗口，降低信号抖动。",
-        "high_drawdown": "增加风险过滤或缩短暴露窗口。",
-        "low_coverage": "检查公式是否过度依赖稀疏字段或存在数据缺失。",
+    suggestions: dict[FailureMode, str] = {
+        FailureMode.LOW_SHARPE: "考虑更换信号方向或延长窗口平滑噪声。",
+        FailureMode.NO_IC: "检查经济假设是否成立，或缩小适用股票池。",
+        FailureMode.NEGATIVE_IC: "信号方向与收益负相关，尝试对信号取反或重审经济逻辑。",
+        FailureMode.HIGH_TURNOVER: "增大平滑窗口，降低信号抖动。",
+        FailureMode.HIGH_DRAWDOWN: "增加风险过滤或缩短暴露窗口。",
+        FailureMode.LOW_COVERAGE: "检查公式是否过度依赖稀疏字段或存在数据缺失。",
     }
 
     return (
@@ -151,21 +148,22 @@ def _score_report(report: BacktestReport) -> float:
     return round(raw_score, 4)
 
 
-def _build_reason_codes(report: BacktestReport, failure_mode: str | None, failed_checks: list[ThresholdCheck]) -> list[str]:
+def _build_reason_codes(report: BacktestReport, failure_mode: Optional[FailureMode], failed_checks: list[ThresholdCheck]) -> list[str]:
     if report.error_message:
         return ["EXECUTION_FAILED"]
 
-    code_map = {
-        "low_sharpe": "LOW_SHARPE",
-        "low_ic": "LOW_IC",
-        "negative_ic": "NEGATIVE_IC",
-        "low_icir": "LOW_ICIR",
-        "high_turnover": "HIGH_TURNOVER",
-        "high_drawdown": "HIGH_DRAWDOWN",
-        "low_coverage": "LOW_COVERAGE",
-        "threshold_failure": "THRESHOLD_FAILURE",
+    code_map: dict[FailureMode, str] = {
+        FailureMode.LOW_SHARPE: "LOW_SHARPE",
+        FailureMode.NO_IC: "LOW_IC",
+        FailureMode.NEGATIVE_IC: "NEGATIVE_IC",
+        FailureMode.HIGH_TURNOVER: "HIGH_TURNOVER",
+        FailureMode.HIGH_DRAWDOWN: "HIGH_DRAWDOWN",
+        FailureMode.LOW_COVERAGE: "LOW_COVERAGE",
+        FailureMode.EXECUTION_ERROR: "EXECUTION_FAILED",
+        FailureMode.OVERFITTING: "OVERFITTING",
+        FailureMode.DUPLICATE: "DUPLICATE",
     }
-    codes = [code_map[failure_mode]] if failure_mode in code_map else []
+    codes = [code_map[failure_mode]] if failure_mode is not None and failure_mode in code_map else []
 
     if report.status != "success":
         codes.append("PARSE_INCOMPLETE" if report.failure_stage == "parse" else "RUN_FAILED")
@@ -186,7 +184,7 @@ def _decide(report: BacktestReport, overall_passed: bool, score: float, failed_c
 class Critic:
     """Deterministic Stage 5A critic."""
 
-    async def evaluate(self, report: BacktestReport) -> CriticVerdict:
+    async def evaluate(self, report: BacktestReport, regime: Optional[str] = None) -> CriticVerdict:
         checks = _build_threshold_checks(report)
         failed_checks = [check for check in checks if not check.passed]
         overall_passed = not report.error_message and not failed_checks
@@ -198,7 +196,7 @@ class Critic:
         reason_codes = _build_reason_codes(report, failure_mode, failed_checks)
 
         tags = [f"island:{report.island}"]
-        tags.append("passed" if overall_passed else f"failed:{failure_mode or 'unknown'}")
+        tags.append("passed" if overall_passed else f"failed:{failure_mode.value if failure_mode else 'unknown'}")
         tags.append(f"decision:{decision}")
 
         if overall_passed:
@@ -221,6 +219,7 @@ class Critic:
             suggested_fix=suggested_fix,
             summary=summary,
             reason_codes=reason_codes,
+            regime_at_judgment=regime,
             register_to_pool=True,
             pool_tags=tags,
         )
@@ -435,20 +434,6 @@ class ReportWriter:
 # ConstraintExtractor: Stage 5 失败约束提取器
 # ─────────────────────────────────────────────────────────
 
-# 从 judgment.py 内部的 failure_mode 字符串映射到 FailureMode enum
-_FAILURE_MODE_MAP: dict[str, FailureMode] = {
-    "execution_error": FailureMode.EXECUTION_ERROR,
-    "low_sharpe": FailureMode.LOW_SHARPE,
-    "low_ic": FailureMode.NO_IC,
-    "negative_ic": FailureMode.NEGATIVE_IC,
-    "low_icir": FailureMode.NO_IC,
-    "high_turnover": FailureMode.HIGH_TURNOVER,
-    "high_drawdown": FailureMode.HIGH_DRAWDOWN,
-    "low_coverage": FailureMode.LOW_COVERAGE,
-    "overfitting": FailureMode.OVERFITTING,
-    "threshold_failure": FailureMode.LOW_SHARPE,
-}
-
 # 从 ThresholdCheck.metric 到 FailureMode 的映射
 _METRIC_TO_FAILURE_MODE: dict[str, FailureMode] = {
     "sharpe": FailureMode.LOW_SHARPE,
@@ -506,15 +491,11 @@ class ConstraintExtractor:
 
     def _classify_failure_mode(self, verdict: CriticVerdict) -> FailureMode:
         """根据 verdict.failure_mode 或 failed checks 映射到标准化 FailureMode。"""
-        # 优先：execution_error
-        if verdict.failure_mode == "execution_error":
-            return FailureMode.EXECUTION_ERROR
+        # 优先：verdict.failure_mode 已是 FailureMode enum
+        if verdict.failure_mode is not None:
+            return verdict.failure_mode
 
-        # 其次：从 verdict.failure_mode 字符串直接映射
-        if verdict.failure_mode and verdict.failure_mode in _FAILURE_MODE_MAP:
-            return _FAILURE_MODE_MAP[verdict.failure_mode]
-
-        # 再次：从第一个失败 check 映射
+        # 其次：从第一个失败 check 映射
         for check in verdict.checks:
             if not check.passed:
                 return _METRIC_TO_FAILURE_MODE.get(check.metric, FailureMode.LOW_SHARPE)

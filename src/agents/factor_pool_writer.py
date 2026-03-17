@@ -37,9 +37,9 @@ class FactorPoolWriter:
         record = FactorPoolRecord(
             factor_id=f"{report.island_id}_{report.note_id}",
             note_id=report.note_id,
-            formula=report.factor_spec.formula,
-            hypothesis=report.factor_spec.hypothesis,
-            economic_rationale=report.factor_spec.economic_rationale,
+            formula=report.factor_spec.formula if report.factor_spec else report.formula,
+            hypothesis=report.factor_spec.hypothesis if report.factor_spec else "",
+            economic_rationale=report.factor_spec.economic_rationale if report.factor_spec else "",
             backtest_report_id=report.report_id,
             verdict_id=verdict.verdict_id,
             decision=verdict.decision,

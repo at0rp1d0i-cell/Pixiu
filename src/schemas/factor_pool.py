@@ -24,3 +24,4 @@ class FactorPoolRecord(PixiuBase):
     coverage: Optional[float] = None
     tags: List[str] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    subspace_origin: Optional[str] = None  # 生成此因子的 Stage 2 子空间

@@ -212,10 +212,11 @@ def hypothesis_gen_node(state: AgentState) -> dict:
             "research_notes": notes,
             "hypotheses": result.get("hypotheses", []),
             "strategy_specs": result.get("strategy_specs", []),
+            "subspace_generated": result.get("subspace_generated", {}),
         }
     except Exception as e:
         logger.error("[Stage 2] 假设生成失败: %s", e)
-        return {"research_notes": [], "hypotheses": [], "strategy_specs": [], "last_error": str(e), "error_stage": "hypothesis_gen"}
+        return {"research_notes": [], "hypotheses": [], "strategy_specs": [], "subspace_generated": {}, "last_error": str(e), "error_stage": "hypothesis_gen"}
 
 
 # ─────────────────────────────────────────────────────────
@@ -433,9 +434,14 @@ def judgment_node(state: AgentState) -> dict:
             for note in state.approved_notes
         }
         extractor = ConstraintExtractor()
+        regime: Optional[str] = (
+            state.market_context.market_regime.value
+            if state.market_context is not None
+            else None
+        )
         for report in state.backtest_reports:
             # Critic 评判
-            verdict = await critic.evaluate(report)
+            verdict = await critic.evaluate(report, regime=regime)
             verdicts.append(verdict)
             logger.info(
                 "[Stage 5] %s → passed=%s, failure=%s",
@@ -643,6 +649,7 @@ def loop_control_node(state: AgentState) -> dict:
         "scheduler_state": updated_sched_state.model_dump(),
         "research_notes": [],
         "approved_notes": [],
+        "subspace_generated": {},
         "filtered_count": 0,
         "exploration_results": [],
         "backtest_reports": [],
