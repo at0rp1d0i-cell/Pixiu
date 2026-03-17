@@ -352,6 +352,309 @@ async def get_margin_trading_summary(days: int = 10) -> str:
 
 
 # ─────────────────────────────────────────────
+# 工具 11：个股最新新闻（NARRATIVE_MINING）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_stock_news(symbol: str, limit: int = 10) -> str:
+    """获取指定股票的最新新闻，为 NARRATIVE_MINING 提供叙事素材。
+
+    Args:
+        symbol: 股票代码，如 '600519'（贵州茅台）或 '000001'（平安银行）。
+        limit: 返回最近几条新闻，默认 10，最大 30。
+
+    返回字段：新闻标题、发布时间、关键词、文章来源。
+    用途：识别个股叙事热点，构建事件驱动因子的原始素材。
+    """
+    try:
+        limit = min(max(limit, 1), 30)
+        df = ak.stock_news_em(symbol=symbol)
+        if df is None or df.empty:
+            return json.dumps({"error": f"No news for {symbol}"}, ensure_ascii=False)
+        cols = [c for c in ["新闻标题", "发布时间", "关键词", "文章来源"] if c in df.columns]
+        result_df = df[cols].head(limit) if cols else df.head(limit)
+        result = {
+            "symbol": symbol,
+            "count": len(result_df),
+            "news": result_df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_stock_news failed for %s: %s", symbol, e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 12：市场热门股票人气榜（NARRATIVE_MINING）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_market_hot_topics(top_n: int = 20) -> str:
+    """获取当前市场人气股票排行，识别叙事热点。
+
+    Args:
+        top_n: 返回前 N 只股票，默认 20，最大 50。
+
+    返回字段：当前排名、股票代码、股票名称、最新价、涨跌幅。
+    用途：捕捉市场热点叙事，辅助 NARRATIVE_MINING 识别资金+舆论共振标的。
+    备注：数据来源东方财富人气榜，代码带市场前缀（如 SZ002506）。
+    """
+    try:
+        top_n = min(max(top_n, 1), 50)
+        df = ak.stock_hot_rank_em()
+        if df is None or df.empty:
+            return json.dumps({"error": "No hot rank data"}, ensure_ascii=False)
+        cols = [c for c in ["当前排名", "代码", "股票名称", "最新价", "涨跌幅"] if c in df.columns]
+        result_df = df[cols].head(top_n) if cols else df.head(top_n)
+        result = {
+            "count": len(result_df),
+            "hot_stocks": result_df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_market_hot_topics failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 13：概念板块资金流向（NARRATIVE_MINING）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_concept_board_flow(top_n: int = 15) -> str:
+    """获取概念板块资金流向排行，识别热门叙事背后的资金驱动。
+
+    Args:
+        top_n: 返回资金净流入前 N 个概念板块，默认 15，最大 30。
+
+    返回字段：板块名称、涨跌幅、净额（主力净流入，亿元）、公司家数、领涨股。
+    用途：判断哪些叙事板块有真实资金驱动，辅助 NARRATIVE_MINING 过滤叙事强度。
+    """
+    try:
+        top_n = min(max(top_n, 1), 30)
+        df = ak.stock_fund_flow_concept(symbol="即时")
+        if df is None or df.empty:
+            return json.dumps({"error": "No concept board flow data"}, ensure_ascii=False)
+        df_sorted = df.sort_values("净额", ascending=False)
+        cols = [c for c in ["行业", "行业-涨跌幅", "净额", "公司家数", "领涨股", "领涨股-涨跌幅"] if c in df_sorted.columns]
+        result_df = df_sorted[cols].head(top_n) if cols else df_sorted.head(top_n)
+        result = {
+            "count": len(result_df),
+            "top_concept_boards": result_df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_concept_board_flow failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 14：全球主要市场指数（CROSS_MARKET）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_global_indices() -> str:
+    """获取全球主要市场指数行情，为跨市场分析提供参照。
+
+    返回字段：指数名称、最新价、涨跌幅、涨跌额。
+    用途：CROSS_MARKET 子空间判断全球风险偏好，识别 A 股与外部市场联动关系。
+    备注：优先获取全球指数（东方财富），网络不可用时 fallback 到 A 股主要指数。
+    """
+    try:
+        # 优先尝试全球指数
+        try:
+            df = ak.index_global_spot_em()
+            if df is not None and not df.empty:
+                cols = [c for c in ["名称", "最新价", "涨跌幅", "涨跌额"] if c in df.columns]
+                result_df = df[cols] if cols else df
+                return json.dumps({
+                    "source": "全球指数（东方财富）",
+                    "count": len(result_df),
+                    "indices": result_df.to_dict(orient="records"),
+                }, ensure_ascii=False, default=str)
+        except Exception:
+            pass
+
+        # fallback：A 股主要指数
+        df = ak.stock_zh_index_spot_em()
+        if df is None or df.empty:
+            return json.dumps({"error": "No index data available"}, ensure_ascii=False)
+        target_names = {"上证指数", "深证成指", "创业板指", "科创50", "沪深300", "中证500"}
+        name_col = next((c for c in ["名称", "指数名称"] if c in df.columns), None)
+        if name_col:
+            df_filtered = df[df[name_col].isin(target_names)]
+            if df_filtered.empty:
+                df_filtered = df.head(10)
+        else:
+            df_filtered = df.head(10)
+        cols = [c for c in ["代码", "名称", "最新价", "涨跌幅", "涨跌额"] if c in df_filtered.columns]
+        result_df = df_filtered[cols] if cols else df_filtered
+        return json.dumps({
+            "source": "A 股主要指数（fallback）",
+            "count": len(result_df),
+            "indices": result_df.to_dict(orient="records"),
+        }, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_global_indices failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 15：大宗商品价格（CROSS_MARKET）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_commodity_prices() -> str:
+    """获取大宗商品价格信号，为 CROSS_MARKET 提供商品市场参照。
+
+    返回字段：商品名称、最新价/价格、涨跌幅（如接口可用）。
+    用途：判断铜、铁矿石、原油、黄金等大宗商品走势，推断上游成本压力和全球需求预期。
+    备注：优先尝试全球商品指数，网络不可用时返回空数据说明。
+    """
+    try:
+        # 尝试全球商品指数（东财）
+        try:
+            df = ak.index_global_spot_em()
+            if df is not None and not df.empty:
+                name_col = next((c for c in ["名称", "指数名称"] if c in df.columns), None)
+                if name_col:
+                    commodity_keywords = ["黄金", "原油", "铜", "铁矿", "白银", "大豆", "小麦", "corn"]
+                    mask = df[name_col].str.contains("|".join(commodity_keywords), case=False, na=False)
+                    df_comm = df[mask]
+                    if not df_comm.empty:
+                        cols = [c for c in ["名称", "最新价", "涨跌幅", "涨跌额"] if c in df_comm.columns]
+                        return json.dumps({
+                            "source": "全球商品指数（东方财富）",
+                            "count": len(df_comm),
+                            "commodities": df_comm[cols].to_dict(orient="records"),
+                        }, ensure_ascii=False, default=str)
+        except Exception:
+            pass
+
+        # 宽容 fallback
+        return json.dumps({
+            "note": "商品数据暂不可用（网络或接口问题）",
+            "data": [],
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.error("get_commodity_prices failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 16：人民币汇率（CROSS_MARKET）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_exchange_rates() -> str:
+    """获取人民币对主要货币的近期汇率，判断汇率变动对 A 股的影响。
+
+    返回字段：日期、中行汇买价、中行钞卖价/汇卖价、央行中间价（per 100 外币）。
+    用途：CROSS_MARKET 子空间判断人民币升贬值压力，构建汇率-A 股联动信号。
+    覆盖货币：美元、欧元、日元（各取最近 5 天数据）。
+    """
+    try:
+        from datetime import date, timedelta
+        end_date = date.today().strftime("%Y%m%d")
+        start_date = (date.today() - timedelta(days=14)).strftime("%Y%m%d")
+
+        result = {}
+        for currency in ["美元", "欧元", "日元"]:
+            try:
+                df = ak.currency_boc_sina(symbol=currency, start_date=start_date, end_date=end_date)
+                if df is not None and not df.empty:
+                    cols = [c for c in ["日期", "中行汇买价", "中行钞卖价/汇卖价", "央行中间价"] if c in df.columns]
+                    result[currency] = df[cols].tail(5).to_dict(orient="records") if cols else df.tail(5).to_dict(orient="records")
+                else:
+                    result[currency] = []
+            except Exception as ce:
+                result[currency] = {"error": str(ce)}
+
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_exchange_rates failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 17：市场宽度指标（REGIME_CONDITIONAL）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_market_breadth() -> str:
+    """获取全市场宽度指标（涨跌家数、涨停跌停数），判断市场内部强弱。
+
+    返回字段：上涨家数、涨停家数、真实涨停、下跌家数、跌停家数、平盘家数等。
+    用途：REGIME_CONDITIONAL 子空间的核心 regime 信号，
+    高涨停+低跌停=强势扩散 regime；低涨停+高跌停=弱势分化 regime。
+    """
+    try:
+        df = ak.stock_market_activity_legu()
+        if df is None or df.empty:
+            return json.dumps({"error": "No market breadth data"}, ensure_ascii=False)
+        # 转换为 dict（item → value 格式）
+        result = dict(zip(df["item"].tolist(), df["value"].tolist()))
+        return json.dumps({
+            "source": "乐咕乐股市场活动统计",
+            "breadth": result,
+        }, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_market_breadth failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 18：指数估值历史（REGIME_CONDITIONAL）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_index_valuation(index_code: str = "000300") -> str:
+    """获取主要指数估值历史（PE/股息率），判断当前估值所处历史分位。
+
+    Args:
+        index_code: 指数代码，可选 '000300'（沪深300）、'000001'（上证指数）、
+                    '399006'（创业板指），默认 '000300'。
+
+    返回字段：日期、市盈率1（加权）、市盈率2（等权）、股息率1、股息率2。
+    返回最近 20 条 + 3年/5年历史百分位估计。
+    用途：REGIME_CONDITIONAL 判断当前市场估值 regime（历史低位/中位/高位）。
+    数据源：中证指数官网（stock_zh_index_value_csindex）。
+    """
+    try:
+        valid_codes = {"000300", "000001", "399006"}
+        if index_code not in valid_codes:
+            index_code = "000300"
+
+        df = ak.stock_zh_index_value_csindex(symbol=index_code)
+        if df is None or df.empty:
+            return json.dumps({"error": f"No valuation data for {index_code}"}, ensure_ascii=False)
+
+        # 最近20条记录
+        recent = df.tail(20)
+        pe_col = next((c for c in ["市盈率1", "市盈率2"] if c in df.columns), None)
+
+        percentile_3y = percentile_5y = None
+        if pe_col:
+            try:
+                current_pe = float(recent.iloc[-1][pe_col])
+                three_years_ago = pd.Timestamp.today() - pd.DateOffset(years=3)
+                five_years_ago = pd.Timestamp.today() - pd.DateOffset(years=5)
+                df["日期"] = pd.to_datetime(df["日期"])
+                hist_3y = df[df["日期"] >= three_years_ago][pe_col].dropna().astype(float)
+                hist_5y = df[df["日期"] >= five_years_ago][pe_col].dropna().astype(float)
+                if len(hist_3y) > 0:
+                    percentile_3y = round(float((hist_3y <= current_pe).mean() * 100), 1)
+                if len(hist_5y) > 0:
+                    percentile_5y = round(float((hist_5y <= current_pe).mean() * 100), 1)
+            except Exception:
+                pass
+
+        cols = [c for c in ["日期", "市盈率1", "市盈率2", "股息率1", "股息率2"] if c in recent.columns]
+        result = {
+            "index_code": index_code,
+            "recent_20": recent[cols].to_dict(orient="records") if cols else recent.to_dict(orient="records"),
+            "pe_percentile_3y": percentile_3y,
+            "pe_percentile_5y": percentile_5y,
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_index_valuation failed for %s: %s", index_code, e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
 # Server 启动入口
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
