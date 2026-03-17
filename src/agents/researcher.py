@@ -386,7 +386,7 @@ async def _hypothesis_gen_async(state: dict) -> dict:
 
     # ── Scheduler 分配 ──
     scheduler = SubspaceScheduler()
-    scheduler_state = state.get("scheduler_state", SchedulerState())
+    scheduler_state = state.get("scheduler_state") or SchedulerState()
     if isinstance(scheduler_state, dict):
         scheduler_state = SchedulerState(**scheduler_state)
 
