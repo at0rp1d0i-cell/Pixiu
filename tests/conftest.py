@@ -27,6 +27,7 @@ FILE_TIER_MARKERS = {
     "test_pipeline_stage3_to_stage5.py": ("integration",),
     "test_akshare_mcp.py": ("live",),
     "test_stage1_live.py": ("live",),
+    "test_stage2_live.py": ("live",),
     "test_stage1_market_context.py": ("integration",),
 }
 
