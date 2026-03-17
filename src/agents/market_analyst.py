@@ -52,9 +52,18 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
     "historical_insights": [],
     "suggested_islands": ["momentum", "northbound"],
     "market_regime": "bull_trend",
+    "index_ma5": 3320.5,
+    "index_ma20": 3280.1,
+    "index_ma60": 3150.8,
+    "volatility_30d": 1.2,
+    "return_30d": 5.3,
     "raw_summary": "今日北向净流入..."
 }}
-注意：historical_insights 必须是空列表 []，该字段由下游 LiteratureMiner 填充，你不需要生成。
+注意：
+- historical_insights 必须是空列表 []，该字段由下游 LiteratureMiner 填充，你不需要生成。
+- index_ma5/index_ma20/index_ma60：上证指数对应均线值，数据不可用时填 null。
+- volatility_30d：近 30 日日均波动率（%），数据不可用时填 null。
+- return_30d：近 30 日累计涨跌幅（%），数据不可用时填 null。
 不需要解释，直接输出 JSON。"""
 
 
@@ -151,10 +160,9 @@ class MarketAnalyst:
                     if not isinstance(hi, list) or (hi and not isinstance(hi[0], dict)):
                         data["historical_insights"] = []
                 memo = MarketContextMemo(**data)
-                # 确定性优先：若 LLM 返回的 JSON 包含足够的市场数据，
-                # 用 RegimeDetector 覆盖 LLM 的 regime 判断。
+                # 确定性优先：从 memo 的类型化字段读取技术指标，用 RegimeDetector 覆盖 LLM 的 regime。
                 # 数据不足时保留 LLM 的 regime（已通过 coerce validator 标准化）。
-                regime = _apply_regime_detector(data)
+                regime = _apply_regime_detector(memo)
                 if regime is not None:
                     memo = memo.model_copy(update={"market_regime": regime})
                     logger.info("[MarketAnalyst] RegimeDetector 覆盖 regime: %s", regime.value)
@@ -165,16 +173,16 @@ class MarketAnalyst:
         return _empty_memo("MarketAnalyst 输出解析失败")
 
 
-def _apply_regime_detector(data: dict) -> MarketRegime | None:
-    """LLM 返回的 JSON 中提取市场统计量，调用 RegimeDetector 产生确定性 regime。
+def _apply_regime_detector(memo: "MarketContextMemo") -> MarketRegime | None:
+    """从 MarketContextMemo 的类型化技术指标字段调用 RegimeDetector 产生确定性 regime。
 
-    当 JSON 包含 ma5/ma20/ma60 和 volatility_30d 四个字段时执行检测（数据充分）。
+    当 memo 包含 index_ma5/index_ma20/index_ma60 和 volatility_30d 四个字段时执行检测（数据充分）。
     数据不足时返回 None，调用方保留 LLM 的 regime。
     """
-    ma5 = data.get("ma5")
-    ma20 = data.get("ma20")
-    ma60 = data.get("ma60")
-    volatility_30d = data.get("volatility_30d")
+    ma5 = memo.index_ma5
+    ma20 = memo.index_ma20
+    ma60 = memo.index_ma60
+    volatility_30d = memo.volatility_30d
 
     # 必须同时具备均线三值和波动率才算数据充分
     if any(v is None for v in (ma5, ma20, ma60, volatility_30d)):
@@ -188,10 +196,9 @@ def _apply_regime_detector(data: dict) -> MarketRegime | None:
             "ma20": float(ma20),
             "ma60": float(ma60),
         }
-        # market_return_30d 可选，有则带入
-        ret30 = data.get("market_return_30d")
-        if ret30 is not None:
-            market_data["market_return_30d"] = float(ret30)
+        # return_30d 可选，有则带入
+        if memo.return_30d is not None:
+            market_data["market_return_30d"] = float(memo.return_30d)
 
         return detector.detect(market_data)
     except Exception as e:

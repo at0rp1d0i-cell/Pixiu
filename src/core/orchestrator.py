@@ -267,8 +267,9 @@ def prefilter_node(state: AgentState) -> dict:
     logger.info("[Stage 3] 过滤 %d 个候选...", len(state.research_notes))
     result = _prefilter(dict(state))
     approved = result.get("approved_notes", [])
+    # filtered = Synthesis 去重后的候选数 - Prefilter 放行数（非 Stage 2 原始生成数）
     filtered = len(state.research_notes) - len(approved)
-    logger.info("[Stage 3] 放行 %d 个，淘汰 %d 个", len(approved), filtered)
+    logger.info("[Stage 3] 放行 %d 个，淘汰 %d 个（基准：Synthesis 后 %d 个）", len(approved), filtered, len(state.research_notes))
     return {"approved_notes": approved, "filtered_count": filtered}
 
 
@@ -579,8 +580,8 @@ def loop_control_node(state: AgentState) -> dict:
     scheduler.on_epoch_done(island_for_epoch, state.current_round)
 
     # ── SubspaceScheduler 反馈回路 ──────────────────────────
-    # 从 approved_notes 聚合每个子空间的 generated_count
-    # 从 critic_verdicts 按 note_id 匹配 approved_notes 聚合 passed_count
+    # generated_count 来自 state.subspace_generated（researcher 写入的原始生成数量）
+    # passed_count 来自 critic_verdicts.overall_passed（通过回测的数量）
     subspace_scheduler = SubspaceScheduler()
 
     # 恢复或初始化 SchedulerState
@@ -590,7 +591,7 @@ def loop_control_node(state: AgentState) -> dict:
     else:
         sched_state = SchedulerState()
 
-    # 构建 note_id → exploration_subspace 映射
+    # 构建 note_id → exploration_subspace 映射（用于 passed 统计）
     note_subspace: dict[str, str | None] = {
         note.note_id: (note.exploration_subspace.value if note.exploration_subspace else None)
         for note in state.approved_notes
@@ -601,12 +602,9 @@ def loop_control_node(state: AgentState) -> dict:
         for r in state.backtest_reports
     }
 
-    # 聚合 generated_count（以 approved_notes 为准）
-    generated: dict[str, int] = {}
-    for note in state.approved_notes:
-        subspace_val = note.exploration_subspace.value if note.exploration_subspace else None
-        if subspace_val:
-            generated[subspace_val] = generated.get(subspace_val, 0) + 1
+    # 聚合 generated_count：从 state.subspace_generated 读取 Stage 2 原始生成数量
+    # state.subspace_generated 格式: {subspace.value: count}，由 researcher 写入
+    generated: dict[str, int] = dict(state.subspace_generated) if state.subspace_generated else {}
 
     # 聚合 passed_count（以 critic_verdicts.overall_passed 为准）
     passed: dict[str, int] = {}

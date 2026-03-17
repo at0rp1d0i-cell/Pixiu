@@ -27,6 +27,8 @@ class AgentState(PixiuBase):
     synthesis_insights: List[SynthesisInsight] = Field(default_factory=list)
     hypotheses: List[Hypothesis] = Field(default_factory=list)
     strategy_specs: List[StrategySpec] = Field(default_factory=list)
+    # researcher 写入：每个子空间本轮原始生成数量 {subspace.value: count}
+    subspace_generated: Dict[str, int] = Field(default_factory=dict)
 
     # Stage 3 输出（过滤后）
     approved_notes: List[FactorResearchNote] = Field(default_factory=list)

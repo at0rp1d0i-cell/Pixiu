@@ -41,6 +41,13 @@ class MarketContextMemo(PixiuBase):
     suggested_islands: List[str]                 # 建议本轮重点探索的 Island
     market_regime: MarketRegime = MarketRegime.RANGE_BOUND  # enum, default conservative
 
+    # 技术面指标（供 RegimeDetector 使用，LLM 在数据可用时填充）
+    index_ma5: Optional[float] = None       # 上证指数 MA5
+    index_ma20: Optional[float] = None      # 上证指数 MA20
+    index_ma60: Optional[float] = None      # 上证指数 MA60
+    volatility_30d: Optional[float] = None  # 近 30 日日均波动率（%）
+    return_30d: Optional[float] = None      # 近 30 日累计涨跌幅（%）
+
     @field_validator("market_regime", mode="before")
     @classmethod
     def coerce_market_regime(cls, v):

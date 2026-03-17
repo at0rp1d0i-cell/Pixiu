@@ -20,10 +20,11 @@ def build_factor_algebra_context(
     pool: Optional[FactorPool] = None,
 ) -> str:
     """因子代数搜索上下文：原语词汇表（按类别分组）+ 可用算子 + 禁止模式（来自历史失败）"""
-    # 如果提供了 pool，动态查询该 island 的 hard constraints 并注入 forbidden_patterns
+    # 如果提供了 pool，动态查询该 island 的 hard constraints，构建有效禁止模式列表
+    # 注意：不修改 registry 对象，使用局部变量，避免跨轮次调用时副作用累积
+    effective_forbidden: list[str] = list(registry.composition_constraints.forbidden_patterns)
     if pool is not None:
         try:
-            from src.schemas.failure_constraint import FailureMode
             hard_constraints = pool.query_constraints(island=island)
             hard_patterns = [
                 c.formula_pattern
@@ -31,11 +32,10 @@ def build_factor_algebra_context(
                 if c.severity == "hard" and c.formula_pattern
             ]
             if hard_patterns:
-                registry.composition_constraints.forbidden_patterns = list(
-                    dict.fromkeys(hard_patterns)  # deduplicate, preserve order
-                )
+                # 合并 registry 现有模式与 pool 查询结果，去重保序，不写回 registry
+                effective_forbidden = list(dict.fromkeys(effective_forbidden + hard_patterns))
         except Exception:
-            pass  # degrade gracefully, forbidden_patterns stays as-is
+            pass  # degrade gracefully, effective_forbidden stays as registry value
 
     lines = ["## 探索子空间：因子代数搜索（Factor Algebra Search）", ""]
     lines.append("在受约束的原语空间中组合搜索，构造新因子表达式。")
@@ -67,11 +67,10 @@ def build_factor_algebra_context(
     lines.append("- 截面算子用于横截面排名/标准化")
     lines.append(f"- 当前 Island: {island}，请围绕此方向构造因子")
 
-    # 禁止模式（来自历史失败）
-    forbidden = registry.composition_constraints.forbidden_patterns
-    if forbidden:
+    # 禁止模式（来自历史失败，使用局部 effective_forbidden，不修改 registry）
+    if effective_forbidden:
         lines.append("\n## 禁止模式（来自历史失败）")
-        for pat in forbidden:
+        for pat in effective_forbidden:
             lines.append(f"- `{pat}`")
 
     return "\n".join(lines)

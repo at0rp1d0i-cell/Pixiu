@@ -144,7 +144,13 @@ class SubspaceScheduler:
     def _thompson_sampling_weights(
         self, state: SchedulerState
     ) -> Dict[ExplorationSubspace, float]:
-        """使用 Thompson Sampling (Beta 分布) 计算自适应权重。"""
+        """使用 Thompson Sampling (Beta 分布) 计算自适应权重。
+
+        当前实现通过 Monte Carlo 采样（_THOMPSON_SAMPLES 次）估计 Beta 均值。
+        TODO (HIGH-4): 可替换为 Beta 分布解析解 E[X] = alpha / (alpha + beta)，
+        消除随机性、提升性能，减少跨轮次权重抖动。
+        替换后可移除 random 依赖和 _THOMPSON_SAMPLES 常量。
+        """
         raw_weights: Dict[ExplorationSubspace, float] = {}
 
         for subspace in ExplorationSubspace:
@@ -155,7 +161,7 @@ class SubspaceScheduler:
             alpha = passed + 1
             beta_param = (generated - passed) + 1
 
-            # 采样多次取均值
+            # 采样多次取均值（解析解替换见上方 TODO）
             samples = [
                 random.betavariate(alpha, beta_param)
                 for _ in range(self._THOMPSON_SAMPLES)

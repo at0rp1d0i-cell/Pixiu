@@ -483,7 +483,9 @@ class ConstraintExtractor:
             return None
 
         failure_mode = self._classify_failure_mode(verdict)
-        formula_pattern = self._extract_pattern(note.proposed_formula)
+        # 优先使用 final_formula（探索后精化的公式），回退到 proposed_formula
+        formula = note.final_formula or note.proposed_formula
+        formula_pattern = self._extract_pattern(formula)
         severity = self._determine_severity(failure_mode, verdict)
         constraint_rule = self._generate_rule(failure_mode, formula_pattern, verdict, note)
 

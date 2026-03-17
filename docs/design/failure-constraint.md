@@ -80,14 +80,22 @@ class FailureConstraint(PixiuBase):
 
 | 原始公式 | 提取的 pattern |
 |----------|----------------|
-| `Div($close, Ref($close, 5))` | `Div($close, Ref($close, N))` |
-| `Rank(Mean($volume, 10))` | `Rank(Mean($volume, N))` |
-| `Log($close + 1) - Log(Ref($close, 3) + 1)` | `Log($F) - Log(Ref($F, N))` |
+| `Div($close, Ref($close, 5))` | `Div($close, Ref($close, N_SHORT))` |
+| `Rank(Mean($volume, 20))` | `Rank(Mean($volume, N_MID))` |
+| `Mean($close, 120)` | `Mean($close, N_LONG)` |
+| `Log($close + 1) - Log(Ref($close, 3) + 1)` | `Log($close + N_SHORT) - Log(Ref($close, N_SHORT) + N_SHORT)` |
 
 规则：
-- 具体数值参数 → `N`
-- 具体字段（保持在同一族内的）→ `$F`
+- 具体数值参数按三档替换（保留算子结构和字段名）：
+  - 1–10 → `N_SHORT`（短窗口）
+  - 11–60 → `N_MID`（中窗口）
+  - 61+ → `N_LONG`（长窗口）
+- 字段名保持原样（不替换为 `$F`）
 - 保留算子结构
+
+向后兼容说明：旧版约束记录中存在使用 `N` 占位符的 pattern，
+`ConstraintChecker._matches_pattern` 同时支持新格式（N_SHORT/N_MID/N_LONG）和旧格式（N），
+无需迁移历史数据。
 
 ### 3.2 constraint_rule 示例
 
