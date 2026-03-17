@@ -172,9 +172,11 @@ class TestBuildFactorAlgebraContextWithPool:
         pool.register_constraint(c)
 
         registry = SubspaceRegistry.get_default_registry()
-        build_factor_algebra_context(registry, "momentum", pool=pool)
+        ctx = build_factor_algebra_context(registry, "momentum", pool=pool)
 
-        assert "Div($close, Ref($close, N))" in registry.composition_constraints.forbidden_patterns
+        # build_factor_algebra_context does NOT mutate registry (copy-on-write);
+        # hard constraints appear in the returned prompt string instead.
+        assert "Div($close, Ref($close, N))" in ctx
 
     def test_hard_constraint_appears_in_prompt(self):
         pool = _make_pool_inmemory()
@@ -230,9 +232,12 @@ class TestBuildFactorAlgebraContextWithPool:
         pool.register_constraint(_make_constraint(island="momentum", severity="hard", formula_pattern=pat))
 
         registry = SubspaceRegistry.get_default_registry()
-        build_factor_algebra_context(registry, "momentum", pool=pool)
+        ctx = build_factor_algebra_context(registry, "momentum", pool=pool)
 
-        assert registry.composition_constraints.forbidden_patterns.count(pat) == 1
+        # build_factor_algebra_context uses copy-on-write (does not mutate registry);
+        # deduplication is applied to the effective_forbidden local list, so the
+        # pattern appears exactly once in the returned prompt string.
+        assert ctx.count(pat) == 1
 
     def test_pool_error_degrades_gracefully(self):
         from unittest.mock import MagicMock
