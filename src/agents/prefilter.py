@@ -257,26 +257,84 @@ class ConstraintChecker:
     def _matches_pattern(self, formula: str, pattern: str) -> bool:
         """判断公式是否匹配已知失败模式。
 
-        策略：将 pattern 中的 N 替换为 \\d+ 做正则匹配；
-        同时做精确匹配（将 formula 中的数值也替换为 N 后比较）。
+        策略：
+        1. 将 formula 中的数值规范化为 N_SHORT/N_MID/N_LONG，再与 pattern 精确比较。
+        2. 将 pattern 中的占位符替换为对应范围的 regex，做局部匹配。
+
+        N_SHORT = 1-10，N_MID = 11-60，N_LONG = 61+
+        也支持旧版 N 占位符（兼容未迁移的约束记录）。
         """
         if not formula or not pattern:
             return False
 
-        # 方法一：将 formula 中的数值也规范化为 N，再与 pattern 比较
-        normalized = re.sub(r'\b\d+\b', 'N', formula)
+        def _classify(m: re.Match) -> str:
+            n = int(m.group())
+            if n <= 10:
+                return "N_SHORT"
+            elif n <= 60:
+                return "N_MID"
+            else:
+                return "N_LONG"
+
+        # 方法一：规范化 formula 后与 pattern 精确比较
+        normalized = re.sub(r'\b\d+\b', _classify, formula)
         if normalized == pattern:
             return True
 
-        # 方法二：将 pattern 中的 N 转为正则数字占位符，做局部匹配
+        # 方法二：将 pattern 占位符转换为对应 regex，做局部匹配
+        # 支持三档占位符以及旧版 N（向后兼容）
+        _PLACEHOLDER_REGEX = {
+            "N_SHORT": r"([1-9]|10)",
+            "N_MID": r"([1-5][0-9]|60)",
+            "N_LONG": r"([6-9][0-9]|[1-9][0-9]{2,})",
+            "N": r"\d+",  # legacy fallback
+        }
         try:
-            regex_pattern = re.escape(pattern).replace('N', r'\d+')
-            if re.search(regex_pattern, formula):
+            escaped = re.escape(pattern)
+            # Replace placeholders longest-first to avoid partial replacement
+            for placeholder in ("N_SHORT", "N_MID", "N_LONG", "N"):
+                escaped = escaped.replace(re.escape(placeholder), _PLACEHOLDER_REGEX[placeholder])
+            if re.search(escaped, formula):
                 return True
         except re.error:
             pass
 
         return False
+
+
+# ─────────────────────────────────────────────────────────
+# Filter E：RegimeFilter（Regime 适用性过滤）
+# ─────────────────────────────────────────────────────────
+
+class RegimeFilter:
+    """Filter E: 检查候选因子是否在当前市场 regime 下有效。
+
+    若 note.invalid_regimes 包含当前 regime（字符串值），则拒绝该 note。
+    当 current_regime 为 None 时直接放行（无上下文时不阻塞流程）。
+    """
+
+    def check(
+        self,
+        note: FactorResearchNote,
+        current_regime: Optional[str],
+    ) -> tuple[bool, str]:
+        """返回 (passed: bool, reason: str)。
+
+        Args:
+            note: 候选因子研究笔记
+            current_regime: 当前市场 regime 的字符串值（如 "bull_trend"），
+                            为 None 时直接放行
+        """
+        if not current_regime:
+            return True, "无当前 regime 上下文，跳过 regime 过滤"
+
+        if not note.invalid_regimes:
+            return True, "该因子未声明 invalid_regimes，放行"
+
+        if current_regime in note.invalid_regimes:
+            return False, f"Factor invalid in current regime: {current_regime}"
+
+        return True, f"当前 regime {current_regime} 不在 invalid_regimes 中，放行"
 
 
 # ─────────────────────────────────────────────────────────
@@ -291,14 +349,21 @@ class PreFilter:
         self.novelty = NoveltyFilter(pool=factor_pool, threshold=THRESHOLDS.min_novelty_threshold)
         self.alignment = AlignmentChecker()
         self.constraint_checker = ConstraintChecker(pool=factor_pool)
+        self.regime_filter = RegimeFilter()
 
     async def filter_batch(
         self,
         notes: list[FactorResearchNote],
+        current_regime: str | None = None,
     ) -> tuple[list[FactorResearchNote], int]:
         """
-        四重过滤（Filter A/B/C/D），返回 (approved_notes, filtered_count)。
+        五重过滤（Filter A/B/C/D/E），返回 (approved_notes, filtered_count)。
         approved_notes 数量 <= THRESHOLDS.stage3_top_k
+
+        Args:
+            notes: 候选研究笔记列表
+            current_regime: 当前市场 regime 的字符串值（如 "bull_trend"）。
+                            为 None 时跳过 Filter E（Regime 过滤）。
         """
         candidates = []
 
@@ -327,6 +392,12 @@ class PreFilter:
                 logger.info("[Filter D] 拒绝 %s: %s", note.note_id, reason)
                 continue
 
+            # Filter E（同步，regime 适用性过滤）
+            passed, reason = self.regime_filter.check(note, current_regime)
+            if not passed:
+                logger.info("[Filter E] 拒绝 %s: %s", note.note_id, reason)
+                continue
+
             candidates.append(note)
 
         # 通过数量 > Top K 时，按探索需求排序（有 exploration_questions 的排后，先回测简单的）
@@ -353,10 +424,20 @@ def prefilter_node(state: dict) -> dict:
     pool = get_factor_pool()
     prefilter = PreFilter(factor_pool=pool)
 
-    approved, filtered_count = asyncio.run(prefilter.filter_batch(notes))
+    # 从 state 中提取当前 regime（若有）
+    market_context = state.get("market_context")
+    current_regime: str | None = None
+    if market_context is not None:
+        regime = getattr(market_context, "market_regime", None)
+        if regime is not None:
+            current_regime = regime.value if hasattr(regime, "value") else str(regime)
+
+    approved, filtered_count = asyncio.run(
+        prefilter.filter_batch(notes, current_regime=current_regime)
+    )
 
     logger.info(
-        "[Prefilter Node] %d → %d approved, %d filtered",
-        len(notes), len(approved), filtered_count,
+        "[Prefilter Node] %d → %d approved, %d filtered (regime=%s)",
+        len(notes), len(approved), filtered_count, current_regime,
     )
     return {**state, "approved_notes": approved}

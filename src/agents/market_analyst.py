@@ -16,7 +16,8 @@ from datetime import date
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
-from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal
+from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, MarketRegime
+from src.market.regime_detector import RegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
     "hot_themes": ["AI算力", "新能源"],
     "historical_insights": [],
     "suggested_islands": ["momentum", "northbound"],
-    "market_regime": "trending_up",
+    "market_regime": "bull_trend",
     "raw_summary": "今日北向净流入..."
 }}
 注意：historical_insights 必须是空列表 []，该字段由下游 LiteratureMiner 填充，你不需要生成。
@@ -149,11 +150,53 @@ class MarketAnalyst:
                     hi = data["historical_insights"]
                     if not isinstance(hi, list) or (hi and not isinstance(hi[0], dict)):
                         data["historical_insights"] = []
-                return MarketContextMemo(**data)
+                memo = MarketContextMemo(**data)
+                # 确定性优先：若 LLM 返回的 JSON 包含足够的市场数据，
+                # 用 RegimeDetector 覆盖 LLM 的 regime 判断。
+                # 数据不足时保留 LLM 的 regime（已通过 coerce validator 标准化）。
+                regime = _apply_regime_detector(data)
+                if regime is not None:
+                    memo = memo.model_copy(update={"market_regime": regime})
+                    logger.info("[MarketAnalyst] RegimeDetector 覆盖 regime: %s", regime.value)
+                return memo
             except Exception as e:
                 logger.warning("[MarketAnalyst] JSON 解析失败: %s", e)
         # 降级：返回最小化空 Memo
         return _empty_memo("MarketAnalyst 输出解析失败")
+
+
+def _apply_regime_detector(data: dict) -> MarketRegime | None:
+    """LLM 返回的 JSON 中提取市场统计量，调用 RegimeDetector 产生确定性 regime。
+
+    当 JSON 包含 ma5/ma20/ma60 和 volatility_30d 四个字段时执行检测（数据充分）。
+    数据不足时返回 None，调用方保留 LLM 的 regime。
+    """
+    ma5 = data.get("ma5")
+    ma20 = data.get("ma20")
+    ma60 = data.get("ma60")
+    volatility_30d = data.get("volatility_30d")
+
+    # 必须同时具备均线三值和波动率才算数据充分
+    if any(v is None for v in (ma5, ma20, ma60, volatility_30d)):
+        return None
+
+    try:
+        detector = RegimeDetector()
+        market_data = {
+            "volatility_30d": float(volatility_30d),
+            "ma5": float(ma5),
+            "ma20": float(ma20),
+            "ma60": float(ma60),
+        }
+        # market_return_30d 可选，有则带入
+        ret30 = data.get("market_return_30d")
+        if ret30 is not None:
+            market_data["market_return_30d"] = float(ret30)
+
+        return detector.detect(market_data)
+    except Exception as e:
+        logger.warning("[MarketAnalyst] RegimeDetector 调用失败，保留 LLM regime: %s", e)
+        return None
 
 
 def _empty_memo(reason: str, active_islands: list[str] | None = None) -> MarketContextMemo:
@@ -165,7 +208,7 @@ def _empty_memo(reason: str, active_islands: list[str] | None = None) -> MarketC
         hot_themes=[],
         historical_insights=[],
         suggested_islands=active_islands or ["momentum"],
-        market_regime="unknown",
+        market_regime="range_bound",
         raw_summary=f"市场数据获取失败：{reason}",
     )
 

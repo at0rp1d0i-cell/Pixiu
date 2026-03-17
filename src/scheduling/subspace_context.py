@@ -14,8 +14,29 @@ from src.schemas.exploration import (
 from src.factor_pool.pool import FactorPool
 
 
-def build_factor_algebra_context(registry: SubspaceRegistry, island: str) -> str:
-    """因子代数搜索上下文：原语词汇表（按类别分组）+ 可用算子"""
+def build_factor_algebra_context(
+    registry: SubspaceRegistry,
+    island: str,
+    pool: Optional[FactorPool] = None,
+) -> str:
+    """因子代数搜索上下文：原语词汇表（按类别分组）+ 可用算子 + 禁止模式（来自历史失败）"""
+    # 如果提供了 pool，动态查询该 island 的 hard constraints 并注入 forbidden_patterns
+    if pool is not None:
+        try:
+            from src.schemas.failure_constraint import FailureMode
+            hard_constraints = pool.query_constraints(island=island)
+            hard_patterns = [
+                c.formula_pattern
+                for c in hard_constraints
+                if c.severity == "hard" and c.formula_pattern
+            ]
+            if hard_patterns:
+                registry.composition_constraints.forbidden_patterns = list(
+                    dict.fromkeys(hard_patterns)  # deduplicate, preserve order
+                )
+        except Exception:
+            pass  # degrade gracefully, forbidden_patterns stays as-is
+
     lines = ["## 探索子空间：因子代数搜索（Factor Algebra Search）", ""]
     lines.append("在受约束的原语空间中组合搜索，构造新因子表达式。")
     lines.append("")
@@ -40,9 +61,18 @@ def build_factor_algebra_context(registry: SubspaceRegistry, island: str) -> str
         lines.append(f"\n### 允许的基础字段\n{', '.join(config.allowed_primitives)}")
 
     lines.append("\n### 组合规则")
+    lines.append(f"- 最大嵌套深度: {registry.composition_constraints.max_nesting_depth}")
+    lines.append(f"- 最大算子总数: {registry.composition_constraints.max_total_operators}")
     lines.append("- 时间变换可嵌套（如 Mean(Ref($close, -1), 5)）")
     lines.append("- 截面算子用于横截面排名/标准化")
     lines.append(f"- 当前 Island: {island}，请围绕此方向构造因子")
+
+    # 禁止模式（来自历史失败）
+    forbidden = registry.composition_constraints.forbidden_patterns
+    if forbidden:
+        lines.append("\n## 禁止模式（来自历史失败）")
+        for pat in forbidden:
+            lines.append(f"- `{pat}`")
 
     return "\n".join(lines)
 
@@ -143,7 +173,7 @@ def build_subspace_context(
 ) -> str:
     """分发器：根据子空间类型调用对应的 context builder"""
     builders = {
-        ExplorationSubspace.FACTOR_ALGEBRA: lambda: build_factor_algebra_context(registry, island),
+        ExplorationSubspace.FACTOR_ALGEBRA: lambda: build_factor_algebra_context(registry, island, pool=factor_pool),
         ExplorationSubspace.SYMBOLIC_MUTATION: lambda: build_symbolic_mutation_context(registry, factor_pool, island),
         ExplorationSubspace.CROSS_MARKET: lambda: build_cross_market_context(registry),
         ExplorationSubspace.NARRATIVE_MINING: lambda: build_narrative_mining_context(registry),

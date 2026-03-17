@@ -1,5 +1,16 @@
 from typing import Optional, List
+from enum import Enum
+from pydantic import field_validator
 from src.schemas import PixiuBase
+
+
+class MarketRegime(str, Enum):
+    BULL_TREND = "bull_trend"
+    BEAR_TREND = "bear_trend"
+    HIGH_VOLATILITY = "high_volatility"
+    RANGE_BOUND = "range_bound"
+    STRUCTURAL_BREAK = "structural_break"
+
 
 class NorthboundFlow(PixiuBase):
     net_buy_bn: float           # 净买入（亿元）
@@ -28,5 +39,29 @@ class MarketContextMemo(PixiuBase):
     hot_themes: List[str]                        # 当日热点主题
     historical_insights: List[HistoricalInsight] # 每个 Island 一条
     suggested_islands: List[str]                 # 建议本轮重点探索的 Island
-    market_regime: str                           # "trending_up" | "trending_down" | "sideways" | "volatile"
+    market_regime: MarketRegime = MarketRegime.RANGE_BOUND  # enum, default conservative
+
+    @field_validator("market_regime", mode="before")
+    @classmethod
+    def coerce_market_regime(cls, v):
+        """Coerce unknown/legacy string values to RANGE_BOUND for backward compatibility."""
+        if isinstance(v, MarketRegime):
+            return v
+        if isinstance(v, str):
+            # Legacy value mapping (pre-enum naming convention)
+            _LEGACY_MAP = {
+                "trending_up": MarketRegime.BULL_TREND,
+                "trending_down": MarketRegime.BEAR_TREND,
+                "sideways": MarketRegime.RANGE_BOUND,
+                "volatile": MarketRegime.HIGH_VOLATILITY,
+                "unknown": MarketRegime.RANGE_BOUND,
+            }
+            if v in _LEGACY_MAP:
+                return _LEGACY_MAP[v]
+            # Try direct enum lookup
+            try:
+                return MarketRegime(v)
+            except ValueError:
+                return MarketRegime.RANGE_BOUND
+        return v
     raw_summary: str                             # 给 Researcher 读的自然语言摘要（500字以内）

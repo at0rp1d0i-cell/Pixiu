@@ -121,7 +121,7 @@ def test_market_analyst_live(mcp_tools):
 
     assert isinstance(memo, MarketContextMemo)
     assert memo.date, "date 不能为空"
-    assert memo.market_regime in ("trending_up", "trending_down", "sideways", "volatile", "unknown")
+    assert memo.market_regime in ("bull_trend", "bear_trend", "high_volatility", "range_bound", "structural_break")
     assert isinstance(memo.suggested_islands, list)
     assert len(memo.suggested_islands) > 0
     assert memo.raw_summary, "raw_summary 不能为空"

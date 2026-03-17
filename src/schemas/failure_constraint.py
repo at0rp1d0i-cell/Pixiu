@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, UTC
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import Field
 
@@ -47,6 +47,10 @@ class FailureConstraint(PixiuBase):
     formula_pattern: str
     constraint_rule: str
     severity: str = "warning"  # "hard" | "warning"
+
+    # Regime 维度：约束仅在特定 regime 下有效
+    # None = 跨 regime 均有效；非 None = 仅在这些 regime 下强制执行
+    applicable_regimes: Optional[List[str]] = None
 
     # 元数据 — override PixiuBase.created_at with str for ChromaDB compatibility
     created_at: str = Field(  # type: ignore[assignment]

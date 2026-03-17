@@ -26,6 +26,7 @@ from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
 from src.schemas.exploration import SubspaceRegistry
 from src.skills.loader import SkillLoader
+from src.hypothesis.mutation import SymbolicMutator, try_all_mutations, build_mutation_record_dict
 
 
 def load_dotenv_if_available():
@@ -173,6 +174,15 @@ class AlphaResearcher:
         # 失败约束：优先从 FactorPool 查询结构化约束，fallback 到传入的 failed_formulas 文本
         failed_section = self._build_constraint_section(failed_formulas)
 
+        # ── SYMBOLIC_MUTATION 纯符号快速路径 ──────────────────
+        # 若子空间为 SYMBOLIC_MUTATION 且 FactorPool 中有历史因子，
+        # 优先用 SymbolicMutator 纯符号生成，跳过 LLM 调用。
+        # 失败（无种子公式 / 所有算子均返回 None）时 fallback 到 LLM 路径。
+        if subspace_hint == ExplorationSubspace.SYMBOLIC_MUTATION and self.factor_pool is not None:
+            symbolic_batch = self._try_symbolic_mutation_batch(iteration)
+            if symbolic_batch is not None:
+                return symbolic_batch
+
         # 子空间探索上下文（结构化注入）
         if subspace_hint:
             hint_text = build_subspace_context(
@@ -231,6 +241,74 @@ class AlphaResearcher:
             notes=notes,
             generation_rationale=data.get("generation_rationale", ""),
         )
+
+    def _try_symbolic_mutation_batch(
+        self,
+        iteration: int,
+        batch_size: int = 3,
+    ) -> Optional[AlphaResearcherBatch]:
+        """SYMBOLIC_MUTATION 纯符号路径：从 FactorPool 取历史公式，施加所有算子。
+
+        返回 AlphaResearcherBatch 或 None（当无可用种子或无有效变异时）。
+        """
+        try:
+            seeds = self.factor_pool.get_island_best_factors(self.island, top_k=5)
+            if not seeds:
+                logger.debug(
+                    "[AlphaResearcher] SYMBOLIC_MUTATION: no seed factors for island=%s, fallback to LLM",
+                    self.island,
+                )
+                return None
+
+            mutator = SymbolicMutator()
+            candidates = []
+            for seed in seeds:
+                formula = seed.get("formula", "")
+                if not formula:
+                    continue
+                results = try_all_mutations(formula, mutator)
+                candidates.extend(results)
+
+            if not candidates:
+                logger.debug(
+                    "[AlphaResearcher] SYMBOLIC_MUTATION: no valid mutations for island=%s, fallback to LLM",
+                    self.island,
+                )
+                return None
+
+            # 取前 batch_size 个，转换为 FactorResearchNote
+            notes = []
+            for mut_result in candidates[:batch_size]:
+                note_id = f"{self.island}_{_today_str()}_{uuid.uuid4().hex[:8]}"
+                mutation_dict = build_mutation_record_dict(mut_result)
+                note = FactorResearchNote(
+                    note_id=note_id,
+                    island=self.island,
+                    iteration=iteration,
+                    hypothesis=f"符号变异: {mut_result.description}",
+                    economic_intuition=f"对历史因子 {mut_result.source_formula} 施加 {mut_result.operator.value} 算子",
+                    proposed_formula=mut_result.result_formula,
+                    risk_factors=["纯符号变异，未经 LLM 语义验证"],
+                    market_context_date=_today_str(),
+                    exploration_subspace=ExplorationSubspace.SYMBOLIC_MUTATION,
+                    mutation_record=mutation_dict,
+                )
+                notes.append(note)
+
+            logger.info(
+                "[AlphaResearcher] SYMBOLIC_MUTATION 纯符号路径：island=%s, seeds=%d, candidates=%d, notes=%d",
+                self.island, len(seeds), len(candidates), len(notes),
+            )
+            return AlphaResearcherBatch(
+                island=self.island,
+                notes=notes,
+                generation_rationale=f"SYMBOLIC_MUTATION 纯符号路径：从 {len(seeds)} 个历史因子生成 {len(candidates)} 个候选，取前 {len(notes)} 个",
+            )
+        except Exception as e:
+            logger.warning(
+                "[AlphaResearcher] _try_symbolic_mutation_batch failed: %s, fallback to LLM", e
+            )
+            return None
 
     def _build_constraint_section(self, failed_formulas: Optional[list] = None) -> str:
         """构建失败约束提示段落。

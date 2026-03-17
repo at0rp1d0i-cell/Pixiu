@@ -5,6 +5,7 @@ Exploration schemas
 """
 from typing import List, Dict, Optional, Any
 from enum import Enum
+from pydantic import Field
 from src.schemas import PixiuBase
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
 from src.schemas.research_note import ExplorationQuestion
@@ -103,6 +104,13 @@ class ExplorationStrategy(PixiuBase):
     forbidden_patterns: List[str] = []
 
 
+class CompositionConstraints(PixiuBase):
+    """因子代数组合约束 — 控制组合深度和禁止模式"""
+    max_nesting_depth: int = 4
+    max_total_operators: int = 8
+    forbidden_patterns: List[str] = Field(default_factory=list)  # 动态填充，来自 FailureConstraint hard patterns
+
+
 class SubspaceRegistry(PixiuBase):
     """探索子空间注册表 - 管理所有子空间配置和结构化上下文"""
     configs: Dict[str, SubspaceConfig] = {}
@@ -110,6 +118,7 @@ class SubspaceRegistry(PixiuBase):
     primitives: List[FactorPrimitive] = []
     mechanism_templates: List[MarketMechanismTemplate] = []
     narrative_categories: List[NarrativeCategory] = []
+    composition_constraints: CompositionConstraints = Field(default_factory=CompositionConstraints)
 
     @classmethod
     def get_default_registry(cls) -> "SubspaceRegistry":

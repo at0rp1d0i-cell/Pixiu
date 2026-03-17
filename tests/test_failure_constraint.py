@@ -249,13 +249,13 @@ class TestConstraintExtractor:
         from src.agents.judgment import ConstraintExtractor
         extractor = ConstraintExtractor()
         pattern = extractor._extract_pattern("Div($close, Ref($close, 5))")
-        assert pattern == "Div($close, Ref($close, N))"
+        assert pattern == "Div($close, Ref($close, N_SHORT))"  # 5 <= 10 → N_SHORT
 
     def test_extract_pattern_multiple_numbers(self):
         from src.agents.judgment import ConstraintExtractor
         extractor = ConstraintExtractor()
         pattern = extractor._extract_pattern("Rank(Mean($volume, 10))")
-        assert pattern == "Rank(Mean($volume, N))"
+        assert pattern == "Rank(Mean($volume, N_SHORT))"  # 10 <= 10 → N_SHORT
 
     def test_extract_pattern_empty_formula(self):
         from src.agents.judgment import ConstraintExtractor

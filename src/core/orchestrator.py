@@ -560,6 +560,9 @@ def human_gate_node(state: AgentState) -> dict:
 # ─────────────────────────────────────────────────────────
 def loop_control_node(state: AgentState) -> dict:
     """轮次控制：更新调度器，清空本轮状态，递增 current_round。"""
+    from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
+    from src.schemas.hypothesis import ExplorationSubspace
+
     scheduler = get_scheduler()
 
     # 更新调度器：对通过的因子记录 island，用于 leaderboard 更新
@@ -575,12 +578,71 @@ def loop_control_node(state: AgentState) -> dict:
     island_for_epoch = epoch_island or (state.current_island or "unknown")
     scheduler.on_epoch_done(island_for_epoch, state.current_round)
 
+    # ── SubspaceScheduler 反馈回路 ──────────────────────────
+    # 从 approved_notes 聚合每个子空间的 generated_count
+    # 从 critic_verdicts 按 note_id 匹配 approved_notes 聚合 passed_count
+    subspace_scheduler = SubspaceScheduler()
+
+    # 恢复或初始化 SchedulerState
+    raw_sched_state = state.scheduler_state
+    if raw_sched_state:
+        sched_state = SchedulerState(**raw_sched_state)
+    else:
+        sched_state = SchedulerState()
+
+    # 构建 note_id → exploration_subspace 映射
+    note_subspace: dict[str, str | None] = {
+        note.note_id: (note.exploration_subspace.value if note.exploration_subspace else None)
+        for note in state.approved_notes
+    }
+    # 构建 factor_id → note_id 映射（通过 backtest_reports）
+    factor_to_note: dict[str, str] = {
+        r.factor_id: r.note_id
+        for r in state.backtest_reports
+    }
+
+    # 聚合 generated_count（以 approved_notes 为准）
+    generated: dict[str, int] = {}
+    for note in state.approved_notes:
+        subspace_val = note.exploration_subspace.value if note.exploration_subspace else None
+        if subspace_val:
+            generated[subspace_val] = generated.get(subspace_val, 0) + 1
+
+    # 聚合 passed_count（以 critic_verdicts.overall_passed 为准）
+    passed: dict[str, int] = {}
+    for verdict in state.critic_verdicts:
+        if verdict.overall_passed:
+            note_id = factor_to_note.get(verdict.factor_id)
+            if note_id:
+                subspace_val = note_subspace.get(note_id)
+                if subspace_val:
+                    passed[subspace_val] = passed.get(subspace_val, 0) + 1
+
+    # 构建 SubspaceScheduler.update_state() 所需格式
+    subspace_results: dict[ExplorationSubspace, tuple[int, int]] = {}
+    for subspace in ExplorationSubspace:
+        g = generated.get(subspace.value, 0)
+        p = passed.get(subspace.value, 0)
+        subspace_results[subspace] = (g, p)
+
+    updated_sched_state = subspace_scheduler.update_state(sched_state, subspace_results)
+
+    # 记录调度器警告
+    for warning in subspace_scheduler.get_warnings(updated_sched_state):
+        logger.warning("[Loop Control] SubspaceScheduler: %s", warning)
+
     next_round = state.current_round + 1
-    logger.info("[Loop Control] 进入第 %d 轮", next_round)
+    logger.info(
+        "[Loop Control] 进入第 %d 轮 (scheduler warm_start=%s, total_passed=%s)",
+        next_round,
+        updated_sched_state.warm_start,
+        sum(updated_sched_state.total_passed.values()),
+    )
 
     # 清空本轮临时状态，保留跨轮次持久数据
     return {
         "current_round": next_round,
+        "scheduler_state": updated_sched_state.model_dump(),
         "research_notes": [],
         "approved_notes": [],
         "filtered_count": 0,

@@ -31,7 +31,7 @@ def test_market_analyst_empty_fallback():
             memo = asyncio.run(analyst.analyze())
 
     assert isinstance(memo, MarketContextMemo)
-    assert memo.market_regime == "unknown"
+    assert memo.market_regime == "range_bound"  # 无效 JSON → 降级到 RANGE_BOUND
     assert "失败" in memo.raw_summary
 
 
@@ -60,7 +60,7 @@ def test_market_analyst_valid_json_parsing():
             analyst = MarketAnalyst(mcp_tools=[])
             memo = asyncio.run(analyst.analyze())
 
-    assert memo.market_regime == "trending_up"
+    assert memo.market_regime == "bull_trend"  # legacy "trending_up" → MarketRegime.BULL_TREND
     assert "momentum" in memo.suggested_islands
     assert memo.northbound is not None
     assert memo.northbound.net_buy_bn == 12.5

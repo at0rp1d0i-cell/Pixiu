@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import Field
 from src.schemas import PixiuBase
 from src.schemas.market_context import MarketContextMemo
@@ -15,6 +15,9 @@ class AgentState(PixiuBase):
     current_round: int = 0
     current_island: str = "momentum"
     iteration: int = 0
+
+    # SubspaceScheduler 持久化状态（跨轮次）
+    scheduler_state: Optional[Dict[str, Any]] = None
 
     # Stage 1 输出
     market_context: Optional[MarketContextMemo] = None

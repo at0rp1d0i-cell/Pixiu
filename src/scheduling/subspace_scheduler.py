@@ -54,7 +54,7 @@ class SubspaceScheduler:
         ExplorationSubspace.CROSS_MARKET: 1,
     }
 
-    WARM_START_THRESHOLD = 200  # 累计通过 200 个因子后切换
+    WARM_START_THRESHOLD = 30  # 累计通过 30 个因子后切换（降低冷启动门槛）
     CONSECUTIVE_ZERO_WARNING = 3  # 连续 3 轮零通过触发警告
 
     # Thompson Sampling 采样次数

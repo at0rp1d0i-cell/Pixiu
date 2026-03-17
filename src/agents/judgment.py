@@ -498,6 +498,8 @@ class ConstraintExtractor:
             constraint_rule=constraint_rule,
             severity=severity,
             created_at=datetime.now(UTC).isoformat(),
+            # 约束继承 note 声明的适用 regime：在这些 regime 下失败，约束就针对这些 regime
+            applicable_regimes=note.applicable_regimes if note.applicable_regimes else None,
         )
 
     def _classify_failure_mode(self, verdict: CriticVerdict) -> FailureMode:
@@ -522,13 +524,24 @@ class ConstraintExtractor:
         """将具体公式抽象为结构模式。
 
         规则：
-        - 具体数值参数 → N
+        - 1-10  → N_SHORT（短窗口）
+        - 11-60 → N_MID  （中窗口）
+        - 61+   → N_LONG （长窗口）
         - 保留算子结构和字段名
         """
         if not formula:
             return ""
-        # 数值参数 → N（仅匹配独立数字，不影响字段名中的数字）
-        pattern = re.sub(r'\b\d+\b', 'N', formula)
+
+        def _classify(m: re.Match) -> str:
+            n = int(m.group())
+            if n <= 10:
+                return "N_SHORT"
+            elif n <= 60:
+                return "N_MID"
+            else:
+                return "N_LONG"
+
+        pattern = re.sub(r'\b\d+\b', _classify, formula)
         return pattern
 
     def _determine_severity(self, failure_mode: FailureMode, verdict: CriticVerdict) -> str:
