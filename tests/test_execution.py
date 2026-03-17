@@ -63,8 +63,8 @@ def test_coder_valid_formula(mock_note):
     # 2.8 >= 2.67 (默认)，IC 等也满足条件
     assert report.passed is True
     assert report.metrics.sharpe == 2.8
-    assert report.metrics.annual_return == 0.3
-    assert report.metrics.turnover == 0.2
+    assert report.metrics.annualized_return == 0.3
+    assert report.metrics.turnover_rate == 0.2
     assert report.metrics.coverage == 1.0
 
 def test_coder_invalid_formula(mock_note):

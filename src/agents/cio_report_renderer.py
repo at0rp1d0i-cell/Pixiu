@@ -65,11 +65,11 @@ class CIOReportRenderer:
         lines.append("## Core Metrics")
         m = report.metrics
         lines.append(f"- Sharpe: {m.sharpe:.4f}" if m.sharpe is not None else "- Sharpe: N/A")
-        lines.append(f"- Annual return: {m.annual_return:.4f}" if m.annual_return is not None else "- Annual return: N/A")
+        lines.append(f"- Annual return: {m.annualized_return:.4f}")
         lines.append(f"- Max drawdown: {m.max_drawdown:.4f}" if m.max_drawdown is not None else "- Max drawdown: N/A")
         lines.append(f"- IC mean: {m.ic_mean:.4f}" if m.ic_mean is not None else "- IC mean: N/A")
         lines.append(f"- ICIR: {m.icir:.4f}" if m.icir is not None else "- ICIR: N/A")
-        lines.append(f"- Turnover: {m.turnover:.4f}" if m.turnover is not None else "- Turnover: N/A")
+        lines.append(f"- Turnover: {m.turnover_rate:.4f}")
         lines.append(f"- Coverage: {m.coverage:.4f}" if m.coverage is not None else "- Coverage: N/A")
         lines.append("")
 

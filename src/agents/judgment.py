@@ -27,7 +27,7 @@ from src.schemas.thresholds import THRESHOLDS
 
 def _build_threshold_checks(report: BacktestReport) -> list[ThresholdCheck]:
     metrics = report.metrics
-    turnover = metrics.turnover if metrics.turnover is not None else metrics.turnover_rate
+    turnover = metrics.turnover_rate
     coverage = metrics.coverage if metrics.coverage is not None else 1.0
     return [
         ThresholdCheck(
@@ -138,7 +138,7 @@ def _normalize_negative(value: float, threshold: float) -> float:
 
 def _score_report(report: BacktestReport) -> float:
     metrics = report.metrics
-    turnover = metrics.turnover if metrics.turnover is not None else metrics.turnover_rate
+    turnover = metrics.turnover_rate
     coverage = metrics.coverage if metrics.coverage is not None else 1.0
     raw_score = (
         0.35 * _normalize_positive(metrics.sharpe, THRESHOLDS.min_sharpe)

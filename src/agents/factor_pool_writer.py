@@ -47,7 +47,7 @@ class FactorPoolWriter:
             sharpe=report.metrics.sharpe,
             ic_mean=report.metrics.ic_mean,
             icir=report.metrics.icir,
-            turnover=report.metrics.turnover,
+            turnover=report.metrics.turnover_rate,
             max_drawdown=report.metrics.max_drawdown,
             coverage=report.metrics.coverage,
             created_at=datetime.now(UTC),

@@ -33,13 +33,11 @@ class ArtifactRefs(PixiuBase):
 class BacktestMetrics(PixiuBase):
     sharpe: float
     annualized_return: float
-    annual_return: Optional[float] = None
     max_drawdown: float
     ic_mean: float
     ic_std: float
     icir: float                 # IC / IC_std
     turnover_rate: float        # 日均换手率
-    turnover: Optional[float] = None
     coverage: Optional[float] = None
     win_rate: Optional[float] = None
     long_short_spread: Optional[float] = None

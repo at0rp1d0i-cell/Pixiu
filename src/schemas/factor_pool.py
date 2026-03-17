@@ -1,4 +1,7 @@
+from datetime import datetime, timezone
 from typing import List, Optional
+
+from pydantic import Field
 
 from src.schemas import PixiuBase
 
@@ -20,3 +23,4 @@ class FactorPoolRecord(PixiuBase):
     max_drawdown: Optional[float] = None
     coverage: Optional[float] = None
     tags: List[str] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

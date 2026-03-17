@@ -181,13 +181,11 @@ class Coder:
         metrics = BacktestMetrics(
             sharpe=raw.get("sharpe", 0.0),
             annualized_return=raw.get("annualized_return", 0.0),
-            annual_return=raw.get("annualized_return"),
             max_drawdown=raw.get("max_drawdown", 0.0),
             ic_mean=raw.get("ic_mean", 0.0),
             ic_std=raw.get("ic_std", 0.0),
             icir=raw.get("icir", 0.0),
             turnover_rate=raw.get("turnover_rate", 0.0),
-            turnover=raw.get("turnover_rate", 0.0),
             coverage=1.0 if error_message is None else 0.0,
         )
 
@@ -245,13 +243,11 @@ class Coder:
             metrics=BacktestMetrics(
                 sharpe=0.0,
                 annualized_return=0.0,
-                annual_return=0.0,
                 max_drawdown=0.0,
                 ic_mean=0.0,
                 ic_std=0.0,
                 icir=0.0,
                 turnover_rate=0.0,
-                turnover=0.0,
                 coverage=0.0,
             ),
             passed=False,

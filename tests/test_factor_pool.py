@@ -128,13 +128,11 @@ class TestReads:
             metrics=V2BacktestMetrics(
                 sharpe=3.0,
                 annualized_return=0.2,
-                annual_return=0.2,
                 max_drawdown=0.1,
                 ic_mean=0.04,
                 ic_std=0.03,
                 icir=0.6,
                 turnover_rate=0.18,
-                turnover=0.18,
                 coverage=1.0,
             ),
             passed=True,
