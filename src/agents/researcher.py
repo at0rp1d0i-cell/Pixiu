@@ -170,10 +170,8 @@ class AlphaResearcher:
         else:
             fb = "（首次迭代，无历史反馈）"
 
-        # 失败因子
-        failed_section = "无" if not failed_formulas else "\n".join(
-            f"- {f}" for f in (failed_formulas or [])[:5]
-        )
+        # 失败约束：优先从 FactorPool 查询结构化约束，fallback 到传入的 failed_formulas 文本
+        failed_section = self._build_constraint_section(failed_formulas)
 
         # 子空间探索上下文（结构化注入）
         if subspace_hint:
@@ -233,6 +231,40 @@ class AlphaResearcher:
             notes=notes,
             generation_rationale=data.get("generation_rationale", ""),
         )
+
+    def _build_constraint_section(self, failed_formulas: Optional[list] = None) -> str:
+        """构建失败约束提示段落。
+
+        优先从 FactorPool 查询结构化 FailureConstraint（按 island 过滤）；
+        若 FactorPool 不可用或无结果，降级为传入的 failed_formulas 文本列表。
+        """
+        constraints_text = ""
+        if self.factor_pool is not None:
+            try:
+                constraints = self.factor_pool.query_constraints(
+                    island=self.island,
+                    limit=10,
+                )
+                hard = [c for c in constraints if c.severity == "hard"]
+                warnings = [c for c in constraints if c.severity == "warning"]
+                if hard:
+                    constraints_text += "## 硬约束（必须遵守）\n"
+                    constraints_text += "\n".join(f"- {c.constraint_rule}" for c in hard)
+                if warnings:
+                    if constraints_text:
+                        constraints_text += "\n"
+                    constraints_text += "## 警告（建议避免）\n"
+                    constraints_text += "\n".join(f"- {c.constraint_rule}" for c in warnings)
+            except Exception:
+                pass  # FactorPool 不可用时静默降级
+
+        if not constraints_text:
+            # fallback：使用传入的文本列表
+            if not failed_formulas:
+                return "无"
+            return "\n".join(f"- {f}" for f in failed_formulas[:5])
+
+        return constraints_text
 
 
 # ====================================================

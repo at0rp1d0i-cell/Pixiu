@@ -3,11 +3,14 @@ Pixiu v2: Deterministic judgment runtime for the Stage 4→5 golden path.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timezone, UTC
 import uuid
+from typing import Optional
 
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestReport
+from src.schemas.failure_constraint import FailureConstraint, FailureMode
 from src.schemas.judgment import (
     CIOReport,
     CorrelationFlag,
@@ -17,6 +20,7 @@ from src.schemas.judgment import (
     RiskAuditReport,
     ThresholdCheck,
 )
+from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
 from src.schemas.thresholds import THRESHOLDS
 
@@ -415,3 +419,168 @@ class ReportWriter:
             )
 
         return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────
+# ConstraintExtractor: Stage 5 失败约束提取器
+# ─────────────────────────────────────────────────────────
+
+# 从 judgment.py 内部的 failure_mode 字符串映射到 FailureMode enum
+_FAILURE_MODE_MAP: dict[str, FailureMode] = {
+    "execution_error": FailureMode.EXECUTION_ERROR,
+    "low_sharpe": FailureMode.LOW_SHARPE,
+    "low_ic": FailureMode.NO_IC,
+    "low_icir": FailureMode.NO_IC,
+    "high_turnover": FailureMode.HIGH_TURNOVER,
+    "high_drawdown": FailureMode.HIGH_DRAWDOWN,
+    "low_coverage": FailureMode.LOW_COVERAGE,
+    "overfitting": FailureMode.OVERFITTING,
+    "threshold_failure": FailureMode.LOW_SHARPE,
+}
+
+# 从 ThresholdCheck.metric 到 FailureMode 的映射
+_METRIC_TO_FAILURE_MODE: dict[str, FailureMode] = {
+    "sharpe": FailureMode.LOW_SHARPE,
+    "ic_mean": FailureMode.NO_IC,
+    "icir": FailureMode.NO_IC,
+    "turnover": FailureMode.HIGH_TURNOVER,
+    "max_drawdown": FailureMode.HIGH_DRAWDOWN,
+    "coverage": FailureMode.LOW_COVERAGE,
+}
+
+# severity 升级条件：这些 failure_mode 直接设为 hard
+_HARD_FAILURE_MODES = {
+    FailureMode.EXECUTION_ERROR,
+    FailureMode.HIGH_TURNOVER,
+    FailureMode.OVERFITTING,
+}
+
+
+class ConstraintExtractor:
+    """从 CriticVerdict 提取 FailureConstraint。
+
+    仅对 overall_passed=False 的 verdict 生效。
+    """
+
+    def extract(
+        self,
+        verdict: CriticVerdict,
+        note: FactorResearchNote,
+    ) -> Optional[FailureConstraint]:
+        """提取失败约束，若 verdict 已通过则返回 None。"""
+        if verdict.overall_passed:
+            return None
+
+        failure_mode = self._classify_failure_mode(verdict)
+        formula_pattern = self._extract_pattern(note.proposed_formula)
+        severity = self._determine_severity(failure_mode, verdict)
+        constraint_rule = self._generate_rule(failure_mode, formula_pattern, verdict, note)
+
+        return FailureConstraint(
+            constraint_id=str(uuid.uuid4()),
+            source_note_id=note.note_id,
+            source_verdict_id=verdict.verdict_id,
+            failure_mode=failure_mode,
+            island=note.island,
+            subspace=note.exploration_subspace.value if note.exploration_subspace else None,
+            formula_pattern=formula_pattern,
+            constraint_rule=constraint_rule,
+            severity=severity,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+    def _classify_failure_mode(self, verdict: CriticVerdict) -> FailureMode:
+        """根据 verdict.failure_mode 或 failed checks 映射到标准化 FailureMode。"""
+        # 优先：execution_error
+        if verdict.failure_mode == "execution_error":
+            return FailureMode.EXECUTION_ERROR
+
+        # 其次：从 verdict.failure_mode 字符串直接映射
+        if verdict.failure_mode and verdict.failure_mode in _FAILURE_MODE_MAP:
+            return _FAILURE_MODE_MAP[verdict.failure_mode]
+
+        # 再次：从第一个失败 check 映射
+        for check in verdict.checks:
+            if not check.passed:
+                return _METRIC_TO_FAILURE_MODE.get(check.metric, FailureMode.LOW_SHARPE)
+
+        # fallback
+        return FailureMode.LOW_SHARPE
+
+    def _extract_pattern(self, formula: str) -> str:
+        """将具体公式抽象为结构模式。
+
+        规则：
+        - 具体数值参数 → N
+        - 保留算子结构和字段名
+        """
+        if not formula:
+            return ""
+        # 数值参数 → N（仅匹配独立数字，不影响字段名中的数字）
+        pattern = re.sub(r'\b\d+\b', 'N', formula)
+        return pattern
+
+    def _determine_severity(self, failure_mode: FailureMode, verdict: CriticVerdict) -> str:
+        """判断约束严重程度：hard（prefilter 直接拒绝）或 warning（注入 prompt）。"""
+        if failure_mode in _HARD_FAILURE_MODES:
+            return "hard"
+        # 多个 check 都失败时升级为 hard
+        failed_count = len([c for c in verdict.checks if not c.passed])
+        if failed_count >= 3:
+            return "hard"
+        return "warning"
+
+    def _generate_rule(
+        self,
+        failure_mode: FailureMode,
+        formula_pattern: str,
+        verdict: CriticVerdict,
+        note: FactorResearchNote,
+    ) -> str:
+        """生成人类可读的约束规则描述。"""
+        island = note.island
+        explanation = verdict.failure_explanation or ""
+        suggested_fix = verdict.suggested_fix or ""
+
+        templates: dict[FailureMode, str] = {
+            FailureMode.LOW_SHARPE: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"low Sharpe: {explanation}"
+            ),
+            FailureMode.HIGH_TURNOVER: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"high turnover: {explanation}. Fix: {suggested_fix}"
+            ),
+            FailureMode.NO_IC: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"near-zero IC: {explanation}"
+            ),
+            FailureMode.NEGATIVE_IC: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"negative IC signal: {explanation}"
+            ),
+            FailureMode.HIGH_DRAWDOWN: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"high drawdown: {explanation}"
+            ),
+            FailureMode.OVERFITTING: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"overfitting suspected: {explanation}"
+            ),
+            FailureMode.LOW_COVERAGE: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"low coverage: {explanation}"
+            ),
+            FailureMode.EXECUTION_ERROR: (
+                f"avoid pattern '{formula_pattern}' — "
+                f"execution error: {explanation}"
+            ),
+            FailureMode.DUPLICATE: (
+                f"avoid pattern '{formula_pattern}' in {island} island — "
+                f"duplicate of existing factor"
+            ),
+        }
+        return templates.get(
+            failure_mode,
+            f"avoid pattern '{formula_pattern}' in {island} island — {explanation}",
+        )

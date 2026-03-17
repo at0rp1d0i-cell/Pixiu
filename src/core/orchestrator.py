@@ -222,13 +222,39 @@ def hypothesis_gen_node(state: AgentState) -> dict:
 # Stage 2b：Synthesis（跨 Island 洞察）
 # ─────────────────────────────────────────────────────────
 def synthesis_node(state: AgentState) -> dict:
-    """Stage 2b: SynthesisAgent 发现跨 Island 关联（当前轮次为直通节点）。
+    """Stage 2b: SynthesisAgent 去重、聚类、提出 merge 建议。
 
-    Phase 9 中作为 pass-through，完整 SynthesisAgent 在后续 Phase 实现。
+    任何失败均降级为 pass-through（返回 {}），不阻塞主链。
     """
-    # TODO: 实现 SynthesisAgent（跨 Island 向量相似度检索）
-    logger.info("[Stage 2b] Synthesis（pass-through）: %d 个候选", len(state.research_notes))
-    return {}  # 保持状态不变
+    from src.agents.synthesis import SynthesisAgent
+
+    notes = state.research_notes
+    if len(notes) <= 1:
+        logger.info("[Stage 2b] Synthesis: <= 1 个候选，跳过")
+        return {}
+
+    logger.info("[Stage 2b] Synthesis: 处理 %d 个候选...", len(notes))
+
+    async def _run():
+        agent = SynthesisAgent()
+        return await agent.synthesize(notes)
+
+    try:
+        result = asyncio.run(_run())
+        removed = len(notes) - len(result.filtered_notes)
+        logger.info(
+            "[Stage 2b] Synthesis 完成：去重 %d 个，识别 %d 个 family，%d 个 merge 建议",
+            removed,
+            len(result.families),
+            len(result.merge_candidates),
+        )
+        return {
+            "research_notes": result.filtered_notes,
+            "synthesis_insights": result.insights + result.merge_candidates,
+        }
+    except Exception as e:
+        logger.warning("[Stage 2b] Synthesis 失败（降级为 pass-through）: %s", e)
+        return {}
 
 
 # ─────────────────────────────────────────────────────────

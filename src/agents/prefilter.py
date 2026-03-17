@@ -213,16 +213,79 @@ class AlignmentChecker:
 
 
 # ─────────────────────────────────────────────────────────
-# PreFilter：组合执行三重过滤器
+# Filter D：ConstraintChecker（结构化失败约束检查）
+# ─────────────────────────────────────────────────────────
+
+class ConstraintChecker:
+    """Filter D: 检查候选公式是否匹配已知失败约束（hard 级别）。
+
+    失败时降级（不阻塞主链）：若 FactorPool 不可用，直接放行。
+    """
+
+    def __init__(self, pool: FactorPool):
+        self.pool = pool
+
+    def check(self, note: FactorResearchNote) -> tuple[bool, str]:
+        """返回 (passed: bool, reason: str)。"""
+        try:
+            constraints = self.pool.query_constraints(
+                island=note.island,
+                limit=20,
+            )
+            hard_constraints = [c for c in constraints if c.severity == "hard"]
+
+            formula = note.final_formula or note.proposed_formula
+            for constraint in hard_constraints:
+                if self._matches_pattern(formula, constraint.formula_pattern):
+                    try:
+                        self.pool.increment_violation(constraint.constraint_id)
+                    except Exception:
+                        pass  # 计数失败不阻塞判断
+                    return False, f"Matches failure pattern: {constraint.constraint_rule}"
+        except Exception as e:
+            # ConstraintChecker 失败时放行，不阻塞主链
+            logger.warning("[ConstraintChecker] 调用失败，放行: %s", e)
+            return True, f"ConstraintChecker 调用失败，跳过：{e}"
+
+        return True, "No known failure patterns matched"
+
+    def _matches_pattern(self, formula: str, pattern: str) -> bool:
+        """判断公式是否匹配已知失败模式。
+
+        策略：将 pattern 中的 N 替换为 \\d+ 做正则匹配；
+        同时做精确匹配（将 formula 中的数值也替换为 N 后比较）。
+        """
+        if not formula or not pattern:
+            return False
+
+        # 方法一：将 formula 中的数值也规范化为 N，再与 pattern 比较
+        normalized = re.sub(r'\b\d+\b', 'N', formula)
+        if normalized == pattern:
+            return True
+
+        # 方法二：将 pattern 中的 N 转为正则数字占位符，做局部匹配
+        try:
+            regex_pattern = re.escape(pattern).replace(r'\bN\b', r'\d+').replace('N', r'\d+')
+            if re.search(regex_pattern, formula):
+                return True
+        except re.error:
+            pass
+
+        return False
+
+
+# ─────────────────────────────────────────────────────────
+# PreFilter：组合执行四重过滤器
 # ─────────────────────────────────────────────────────────
 
 class PreFilter:
-    """Stage 3 三重过滤器组合执行器。"""
+    """Stage 3 四重过滤器组合执行器。"""
 
     def __init__(self, factor_pool: FactorPool):
         self.validator = Validator()
         self.novelty = NoveltyFilter(pool=factor_pool, threshold=THRESHOLDS.min_novelty_threshold)
         self.alignment = AlignmentChecker()
+        self.constraint_checker = ConstraintChecker(pool=factor_pool)
 
     async def filter_batch(
         self,
@@ -251,6 +314,12 @@ class PreFilter:
             passed, reason = await self.alignment.check(note)
             if not passed:
                 logger.info("[Filter C] 拒绝 %s: %s", note.note_id, reason)
+                continue
+
+            # Filter D（同步，结构化失败约束检查，失败时降级放行）
+            passed, reason = self.constraint_checker.check(note)
+            if not passed:
+                logger.info("[Filter D] 拒绝 %s: %s", note.note_id, reason)
                 continue
 
             candidates.append(note)

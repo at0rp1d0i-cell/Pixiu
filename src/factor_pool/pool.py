@@ -22,6 +22,7 @@ from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.factor_pool import FactorPoolRecord
+from src.schemas.failure_constraint import FailureConstraint, FailureMode
 from .islands import ISLANDS
 
 
@@ -125,6 +126,8 @@ class _InMemoryClient:
 class FactorPool:
     """因子实验历史库，支持 Island 分组和向量相似检索。"""
 
+    CONSTRAINT_COLLECTION = "failure_constraints"
+
     def __init__(self, db_path: str = _DEFAULT_DB_PATH):
         os.makedirs(db_path, exist_ok=True)
         self._storage_mode = "persistent"
@@ -151,6 +154,10 @@ class FactorPool:
         # v2 新增：EDA 探索结果归档
         self._explorations_collection = self._client.get_or_create_collection(
             name="exploration_results",
+        )
+        # v2 新增：结构化失败约束
+        self._constraints_collection = self._client.get_or_create_collection(
+            name=self.CONSTRAINT_COLLECTION,
         )
         logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", db_path, self._storage_mode)
         logger.info("[FactorPool] 当前存储因子数量：%d", self._collection.count())
@@ -600,6 +607,152 @@ class FactorPool:
         except Exception as e:
             logger.warning("[FactorPool] get_island_factors failed: %s", e)
             return []
+
+    # ═══════════════════════════════════════════════════════
+    # v2 失败约束 API
+    # ═══════════════════════════════════════════════════════
+
+    def register_constraint(self, constraint: FailureConstraint) -> None:
+        """写入一条 FailureConstraint。"""
+        self._constraints_collection.upsert(
+            ids=[constraint.constraint_id],
+            documents=[constraint.constraint_rule],
+            metadatas=[{
+                "failure_mode": constraint.failure_mode.value,
+                "island": constraint.island,
+                "subspace": constraint.subspace or "",
+                "formula_pattern": constraint.formula_pattern,
+                "severity": constraint.severity,
+                "times_violated": constraint.times_violated,
+                "times_checked": constraint.times_checked,
+                "created_at": constraint.created_at,
+                "source_note_id": constraint.source_note_id,
+                "source_verdict_id": constraint.source_verdict_id,
+                "last_violated_at": constraint.last_violated_at or "",
+            }],
+        )
+        logger.info(
+            "[FactorPool] register_constraint: %s → island=%s, mode=%s, severity=%s",
+            constraint.constraint_id, constraint.island,
+            constraint.failure_mode.value, constraint.severity,
+        )
+
+    def query_constraints(
+        self,
+        island: Optional[str] = None,
+        failure_mode: Optional[FailureMode] = None,
+        limit: int = 10,
+    ) -> list[FailureConstraint]:
+        """按 island / failure_mode 查询约束。"""
+        where_clauses: dict = {}
+        if island and failure_mode:
+            where_clauses = {"$and": [
+                {"island": island},
+                {"failure_mode": failure_mode.value},
+            ]}
+        elif island:
+            where_clauses = {"island": island}
+        elif failure_mode:
+            where_clauses = {"failure_mode": failure_mode.value}
+
+        try:
+            results = self._constraints_collection.get(
+                where=where_clauses if where_clauses else None,
+                include=["metadatas", "documents"],
+            )
+            return self._parse_constraint_results_get(results)
+        except Exception as e:
+            logger.warning("[FactorPool] query_constraints failed: %s", e)
+            return []
+
+    def query_constraints_by_formula(
+        self,
+        formula: str,
+        limit: int = 5,
+    ) -> list[FailureConstraint]:
+        """按公式相似度检索相关约束（fallback 模式下退化为精确匹配）。"""
+        try:
+            count = self._constraints_collection.count()
+            if count == 0:
+                return []
+            results = self._constraints_collection.query(
+                query_texts=[formula],
+                n_results=min(limit, count),
+                include=["metadatas", "documents"],
+            )
+            return self._parse_constraint_results_query(results)
+        except Exception as e:
+            logger.warning("[FactorPool] query_constraints_by_formula failed: %s", e)
+            return []
+
+    def increment_violation(self, constraint_id: str) -> None:
+        """记录一次约束违反，更新 times_violated / times_checked / last_violated_at。"""
+        try:
+            result = self._constraints_collection.get(
+                ids=[constraint_id],
+                include=["metadatas", "documents"],
+            )
+            if not result["ids"]:
+                logger.warning("[FactorPool] increment_violation: constraint %s not found", constraint_id)
+                return
+            meta = result["metadatas"][0]
+            doc = result["documents"][0] if result.get("documents") else meta.get("constraint_rule", "")
+            now_iso = datetime.now(UTC).isoformat()
+            updated_meta = {
+                **meta,
+                "times_violated": meta.get("times_violated", 0) + 1,
+                "times_checked": meta.get("times_checked", 0) + 1,
+                "last_violated_at": now_iso,
+            }
+            self._constraints_collection.upsert(
+                ids=[constraint_id],
+                documents=[doc],
+                metadatas=[updated_meta],
+            )
+        except Exception as e:
+            logger.warning("[FactorPool] increment_violation failed: %s", e)
+
+    def _parse_constraint_results_get(self, results: dict) -> list[FailureConstraint]:
+        """从 collection.get() 结果中解析 FailureConstraint 列表。"""
+        constraints = []
+        ids = results.get("ids", [])
+        metadatas = results.get("metadatas", [])
+        documents = results.get("documents", [])
+        for i, cid in enumerate(ids):
+            meta = metadatas[i] if i < len(metadatas) else {}
+            doc = documents[i] if i < len(documents) else meta.get("constraint_rule", "")
+            try:
+                constraints.append(FailureConstraint(
+                    constraint_id=cid,
+                    source_note_id=meta.get("source_note_id", ""),
+                    source_verdict_id=meta.get("source_verdict_id", ""),
+                    failure_mode=FailureMode(meta["failure_mode"]),
+                    island=meta.get("island", ""),
+                    subspace=meta.get("subspace") or None,
+                    formula_pattern=meta.get("formula_pattern", ""),
+                    constraint_rule=doc,
+                    severity=meta.get("severity", "warning"),
+                    created_at=meta.get("created_at", datetime.now(UTC).isoformat()),
+                    times_violated=int(meta.get("times_violated", 0)),
+                    times_checked=int(meta.get("times_checked", 0)),
+                    last_violated_at=meta.get("last_violated_at") or None,
+                ))
+            except Exception as e:
+                logger.warning("[FactorPool] _parse_constraint_results_get skip %s: %s", cid, e)
+        return constraints
+
+    def _parse_constraint_results_query(self, results: dict) -> list[FailureConstraint]:
+        """从 collection.query() 结果中解析 FailureConstraint 列表。"""
+        # query() wraps results in an extra list dimension
+        ids_outer = results.get("ids", [[]])
+        metas_outer = results.get("metadatas", [[]])
+        docs_outer = results.get("documents", [[]])
+        ids = ids_outer[0] if ids_outer else []
+        metadatas = metas_outer[0] if metas_outer else []
+        documents = docs_outer[0] if docs_outer else []
+        flat = {"ids": ids, "metadatas": metadatas, "documents": documents}
+        return self._parse_constraint_results_get(flat)
+
 
 def _summarize_failure(meta: dict) -> str:
     """从元数据生成人类可读的失败原因摘要（注入给 Researcher）。"""
