@@ -411,7 +411,7 @@ def coder_node(state: AgentState) -> dict:
 # ─────────────────────────────────────────────────────────
 def judgment_node(state: AgentState) -> dict:
     """Stage 5: Critic + RiskAuditor + FactorPool 写入。"""
-    from src.agents.judgment import Critic, RiskAuditor
+    from src.agents.judgment import Critic, RiskAuditor, ConstraintExtractor
 
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
@@ -426,11 +426,12 @@ def judgment_node(state: AgentState) -> dict:
     async def _run_judgment():
         critic = Critic()
         auditor = RiskAuditor(factor_pool=pool)
-        # 构建 note_id → hypothesis 映射，用于写入 pool 时携带语义锚点
-        note_hypothesis: dict[str, str] = {
-            note.note_id: note.hypothesis
+        # 构建 note_id → note 映射，用于写入 pool 时携带语义锚点，以及约束提取
+        note_map: dict[str, object] = {
+            note.note_id: note
             for note in state.approved_notes
         }
+        extractor = ConstraintExtractor()
         for report in state.backtest_reports:
             # Critic 评判
             verdict = await critic.evaluate(report)
@@ -444,8 +445,9 @@ def judgment_node(state: AgentState) -> dict:
             risk_reports.append(risk_report)
             # FactorPool 写入
             if verdict.register_to_pool:
+                note = note_map.get(report.note_id)
+                hypothesis = note.hypothesis if note else ""
                 try:
-                    hypothesis = note_hypothesis.get(report.note_id, "")
                     pool.register_factor(
                         report=report,
                         verdict=verdict,
@@ -454,6 +456,21 @@ def judgment_node(state: AgentState) -> dict:
                     )
                 except Exception as e:
                     logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
+            # ConstraintExtractor：对失败 verdict 提取并写入约束
+            if not verdict.overall_passed:
+                note = note_map.get(report.note_id)
+                if note is not None:
+                    try:
+                        constraint = extractor.extract(verdict, note)
+                        if constraint is not None:
+                            pool.register_constraint(constraint)
+                            logger.info(
+                                "[Stage 5] 约束写入: %s → island=%s, mode=%s",
+                                constraint.constraint_id, constraint.island,
+                                constraint.failure_mode.value,
+                            )
+                    except Exception as e:
+                        logger.warning("[Stage 5] ConstraintExtractor 失败，静默降级: %s", e)
 
     asyncio.run(_run_judgment())
 

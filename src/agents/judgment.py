@@ -91,9 +91,17 @@ def _diagnose_failure(report: BacktestReport, failed_checks: list[ThresholdCheck
     }
     failure_mode = mode_map.get(primary.metric, "threshold_failure")
 
+    # Refine IC failure: distinguish negative IC from near-zero IC
+    if failure_mode == "low_ic":
+        ic_val = primary.value
+        if ic_val < -0.01:
+            failure_mode = "negative_ic"
+        # else: ic_val is near-zero (|ic| <= 0.01 or small positive below threshold) → keep "low_ic"
+
     explanations = {
         "low_sharpe": f"Sharpe={primary.value:.2f}，低于门槛 {primary.threshold:.2f}。",
-        "low_ic": f"IC={primary.value:.4f}，低于门槛 {primary.threshold:.4f}。",
+        "low_ic": f"IC={primary.value:.4f}，低于门槛 {primary.threshold:.4f}（近零信号）。",
+        "negative_ic": f"IC={primary.value:.4f}，为明显负值，信号方向可能反转。",
         "low_icir": f"ICIR={primary.value:.2f}，低于门槛 {primary.threshold:.2f}。",
         "high_turnover": f"换手率={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
         "high_drawdown": f"最大回撤={primary.value:.2%}，高于门槛 {primary.threshold:.2%}。",
@@ -102,6 +110,7 @@ def _diagnose_failure(report: BacktestReport, failed_checks: list[ThresholdCheck
     suggestions = {
         "low_sharpe": "考虑更换信号方向或延长窗口平滑噪声。",
         "low_ic": "检查经济假设是否成立，或缩小适用股票池。",
+        "negative_ic": "信号方向与收益负相关，尝试对信号取反或重审经济逻辑。",
         "low_icir": "检查不同市场状态下的稳定性。",
         "high_turnover": "增大平滑窗口，降低信号抖动。",
         "high_drawdown": "增加风险过滤或缩短暴露窗口。",
@@ -149,6 +158,7 @@ def _build_reason_codes(report: BacktestReport, failure_mode: str | None, failed
     code_map = {
         "low_sharpe": "LOW_SHARPE",
         "low_ic": "LOW_IC",
+        "negative_ic": "NEGATIVE_IC",
         "low_icir": "LOW_ICIR",
         "high_turnover": "HIGH_TURNOVER",
         "high_drawdown": "HIGH_DRAWDOWN",
@@ -430,6 +440,7 @@ _FAILURE_MODE_MAP: dict[str, FailureMode] = {
     "execution_error": FailureMode.EXECUTION_ERROR,
     "low_sharpe": FailureMode.LOW_SHARPE,
     "low_ic": FailureMode.NO_IC,
+    "negative_ic": FailureMode.NEGATIVE_IC,
     "low_icir": FailureMode.NO_IC,
     "high_turnover": FailureMode.HIGH_TURNOVER,
     "high_drawdown": FailureMode.HIGH_DRAWDOWN,

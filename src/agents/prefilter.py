@@ -1,13 +1,14 @@
 """
 Pixiu v2 Stage 3：前置过滤层（PreFilter）
 
-三重串联过滤器，在进入昂贵 Qlib 回测（Stage 4b）之前
+四重串联过滤器，在进入昂贵 Qlib 回测（Stage 4b）之前
 低成本筛除劣质候选，最多放行 THRESHOLDS.stage3_top_k 个。
 
 过滤器：
   A - Validator         ：A 股硬约束（字段白名单、Ref 方向、Log 安全、算子白名单）
   B - NoveltyFilter     ：AST Token Jaccard 相似度，防重复探索
   C - AlignmentChecker  ：LLM 快速调用，检验公式与经济假设语义一致性
+  D - ConstraintChecker ：历史失败约束检查，拦截已知硬约束模式
 
 参考设计：docs/design/stage-3-prefilter.md
 """
@@ -236,11 +237,15 @@ class ConstraintChecker:
 
             formula = note.final_formula or note.proposed_formula
             for constraint in hard_constraints:
-                if self._matches_pattern(formula, constraint.formula_pattern):
-                    try:
+                matched = self._matches_pattern(formula, constraint.formula_pattern)
+                try:
+                    if matched:
                         self.pool.increment_violation(constraint.constraint_id)
-                    except Exception:
-                        pass  # 计数失败不阻塞判断
+                    else:
+                        self.pool.increment_checked(constraint.constraint_id)
+                except Exception:
+                    pass  # 计数失败不阻塞判断
+                if matched:
                     return False, f"Matches failure pattern: {constraint.constraint_rule}"
         except Exception as e:
             # ConstraintChecker 失败时放行，不阻塞主链
@@ -265,7 +270,7 @@ class ConstraintChecker:
 
         # 方法二：将 pattern 中的 N 转为正则数字占位符，做局部匹配
         try:
-            regex_pattern = re.escape(pattern).replace(r'\bN\b', r'\d+').replace('N', r'\d+')
+            regex_pattern = re.escape(pattern).replace('N', r'\d+')
             if re.search(regex_pattern, formula):
                 return True
         except re.error:
@@ -292,7 +297,7 @@ class PreFilter:
         notes: list[FactorResearchNote],
     ) -> tuple[list[FactorResearchNote], int]:
         """
-        三重过滤，返回 (approved_notes, filtered_count)。
+        四重过滤（Filter A/B/C/D），返回 (approved_notes, filtered_count)。
         approved_notes 数量 <= THRESHOLDS.stage3_top_k
         """
         candidates = []

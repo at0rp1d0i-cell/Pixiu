@@ -255,8 +255,8 @@ class AlphaResearcher:
                         constraints_text += "\n"
                     constraints_text += "## 警告（建议避免）\n"
                     constraints_text += "\n".join(f"- {c.constraint_rule}" for c in warnings)
-            except Exception:
-                pass  # FactorPool 不可用时静默降级
+            except Exception as e:
+                logger.debug("[AlphaResearcher] FailureConstraint query failed: %s", e)
 
         if not constraints_text:
             # fallback：使用传入的文本列表

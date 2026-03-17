@@ -66,6 +66,7 @@ class _InMemoryCollection:
         ids: Optional[list[str]] = None,
         where: Optional[dict] = None,
         include: Optional[list[str]] = None,
+        limit: Optional[int] = None,
     ):
         records = list(self._items.values())
         if ids is not None:
@@ -75,6 +76,8 @@ class _InMemoryCollection:
             record for record in records
             if _match_where(record["metadata"], where)
         ]
+        if limit is not None:
+            records = records[:limit]
         return {
             "ids": [record["id"] for record in records],
             "documents": [record["document"] for record in records] if not include or "documents" in include else [],
@@ -660,7 +663,7 @@ class FactorPool:
                 where=where_clauses if where_clauses else None,
                 include=["metadatas", "documents"],
             )
-            return self._parse_constraint_results_get(results)
+            return self._parse_constraint_results_get(results)[:limit]
         except Exception as e:
             logger.warning("[FactorPool] query_constraints failed: %s", e)
             return []
@@ -684,6 +687,29 @@ class FactorPool:
         except Exception as e:
             logger.warning("[FactorPool] query_constraints_by_formula failed: %s", e)
             return []
+
+    def increment_checked(self, constraint_id: str) -> None:
+        """记录一次约束检查（无论是否匹配），递增 times_checked。"""
+        try:
+            result = self._constraints_collection.get(
+                ids=[constraint_id],
+                include=["metadatas", "documents"],
+            )
+            if not result["ids"]:
+                return
+            meta = result["metadatas"][0]
+            doc = result["documents"][0] if result.get("documents") else meta.get("constraint_rule", "")
+            updated_meta = {
+                **meta,
+                "times_checked": meta.get("times_checked", 0) + 1,
+            }
+            self._constraints_collection.upsert(
+                ids=[constraint_id],
+                documents=[doc],
+                metadatas=[updated_meta],
+            )
+        except Exception as e:
+            logger.warning("[FactorPool] increment_checked failed: %s", e)
 
     def increment_violation(self, constraint_id: str) -> None:
         """记录一次约束违反，更新 times_violated / times_checked / last_violated_at。"""
