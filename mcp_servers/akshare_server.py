@@ -18,23 +18,32 @@ app = FastMCP("akshare-mcp")
 
 
 # ─────────────────────────────────────────────
-# 工具 1：北向资金当日摘要
+# 工具 1：市场资金流向当日摘要
 # ─────────────────────────────────────────────
 @app.tool()
 async def get_northbound_flow_today() -> str:
-    """获取今日沪深港通北向/南向资金实时净流入摘要（亿元）。
+    """获取今日全市场行业资金流向摘要（主力净流入，亿元）。
 
-    返回字段：交易日、类型(沪港通/深港通)、板块、资金方向、
-    成交净买额、资金净流入、上涨数、下跌数、相关指数涨跌幅。
-    用途：判断当日外资情绪，是市场情绪的高频强信号。
+    注：沪深港通北向资金接口数据源已失效，改用行业主力资金流向作为替代。
+    返回字段：行业、行业指数、行业涨跌幅、流入资金、流出资金、净额、领涨股。
+    用途：判断当日主力资金偏好行业，推断市场情绪和热点方向。
     """
     try:
-        df = ak.stock_hsgt_fund_flow_summary_em()
-        # 只保留北向资金（外资流入A股方向）
-        north = df[df["资金方向"] == "北向"].copy()
-        if north.empty:
-            north = df  # 若过滤后为空则返回全量
-        result = north.to_dict(orient="records")
+        df = ak.stock_fund_flow_industry(symbol="即时")
+        if df is None or df.empty:
+            return json.dumps({"error": "No industry fund flow data"}, ensure_ascii=False)
+        # 按净额降序，取前10和后5（流入最多和流出最多的行业）
+        df = df.sort_values("净额", ascending=False)
+        top_inflow = df.head(10)
+        top_outflow = df.tail(5)
+        result = {
+            "data_source": "行业主力资金流向（替代北向资金）",
+            "top_inflow_sectors": top_inflow[["行业", "行业-涨跌幅", "净额", "领涨股", "领涨股-涨跌幅"]].to_dict(orient="records"),
+            "top_outflow_sectors": top_outflow[["行业", "行业-涨跌幅", "净额", "领涨股", "领涨股-涨跌幅"]].to_dict(orient="records"),
+            "total_net_inflow": round(float(df["净额"].sum()), 2),
+            "positive_sectors": int((df["净额"] > 0).sum()),
+            "negative_sectors": int((df["净额"] < 0).sum()),
+        }
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         logger.error("get_northbound_flow_today failed: %s", e)
@@ -42,23 +51,29 @@ async def get_northbound_flow_today() -> str:
 
 
 # ─────────────────────────────────────────────
-# 工具 2：北向资金历史序列
+# 工具 2：市场资金流向历史序列
 # ─────────────────────────────────────────────
 @app.tool()
 async def get_northbound_flow_history(days: int = 20) -> str:
-    """获取北向资金最近 N 个交易日的净买入历史（默认20天）。
+    """获取全市场融资融券余额历史（最近N个交易日）。
 
+    注：沪深港通北向资金历史接口数据源已失效，改用融资融券余额作为市场杠杆/情绪替代指标。
     Args:
-        days: 返回最近多少个交易日的数据，默认 20，最大 60。
+        days: 返回最近多少个交易日，默认 20，最大 60。
 
-    返回字段：日期、北向资金净买入（亿元）、累计净买入。
-    用途：构建北向资金 N 日动量/反转因子，研究外资趋势性行为。
+    返回字段：日期、融资买入额、融资余额、融券卖出量、融券余量、融资融券余额。
+    用途：判断市场杠杆水平趋势，融资余额上升=市场情绪偏多，下降=情绪偏空。
     """
     try:
-        days = min(max(days, 1), 60)  # 限制在 [1, 60] 范围
-        df = ak.stock_hsgt_hist_em(symbol="北向资金")
+        days = min(max(days, 1), 60)
+        df = ak.macro_china_market_margin_sh()
+        if df is None or df.empty:
+            return json.dumps({"error": "No margin data available"}, ensure_ascii=False)
         df = df.tail(days)
-        result = df.to_dict(orient="records")
+        result = {
+            "data_source": "上交所融资融券余额（替代北向资金历史）",
+            "records": df.to_dict(orient="records"),
+        }
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         logger.error("get_northbound_flow_history failed: %s", e)
