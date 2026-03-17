@@ -28,6 +28,7 @@ FILE_TIER_MARKERS = {
     "test_akshare_mcp.py": ("live",),
     "test_stage1_live.py": ("live",),
     "test_stage2_live.py": ("live",),
+    "test_e2e_live.py": ("e2e",),
     "test_stage1_market_context.py": ("integration",),
 }
 
