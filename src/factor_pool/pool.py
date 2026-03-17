@@ -382,7 +382,7 @@ class FactorPool:
     ) -> None:
         """将完整执行结果（BacktestReport + CriticVerdict + RiskAuditReport）写入 factors collection。"""
         factor_spec = report.factor_spec
-        turnover = report.metrics.turnover if report.metrics.turnover is not None else report.metrics.turnover_rate
+        turnover = report.metrics.turnover_rate
         coverage = report.metrics.coverage
         record = FactorPoolRecord(
             factor_id=report.factor_id,
@@ -420,7 +420,6 @@ class FactorPool:
                 "sharpe": record.sharpe,
                 "ic_mean": record.ic_mean,
                 "icir": record.icir,
-                "turnover_rate": turnover,
                 "turnover": record.turnover,
                 "max_drawdown": record.max_drawdown,
                 "coverage": record.coverage if record.coverage is not None else 0.0,

@@ -95,13 +95,11 @@ def test_backtest_report_metrics():
     metrics = BacktestMetrics(
         sharpe=2.8,
         annualized_return=0.25,
-        annual_return=0.25,
         max_drawdown=0.1,
         ic_mean=0.035,
         ic_std=0.05,
         icir=0.7,
         turnover_rate=0.2,
-        turnover=0.2,
         coverage=1.0,
     )
     
@@ -134,7 +132,7 @@ def test_backtest_report_metrics():
     
     assert report.passed is True
     assert report.metrics.sharpe == 2.8
-    assert report.metrics.annual_return == 0.25
+    assert report.metrics.annualized_return == 0.25
     assert report.factor_spec is not None
 
 def test_critic_verdict():
