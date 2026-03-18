@@ -14,6 +14,8 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.backtest import BacktestMetrics, BacktestReport

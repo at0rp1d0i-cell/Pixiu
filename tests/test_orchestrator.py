@@ -1,14 +1,12 @@
 """
-Orchestrator 路由逻辑测试
+Orchestrator tests: routing logic + Stage 4b execution path.
 
-验证：
-- route_after_portfolio 的两条分支（N 轮触发 / breakthrough 触发 / 第0轮不触发）
-- loop_control_node 每轮无条件调用 scheduler.on_epoch_done
-- loop_control_node 正确递增 round 并清空临时字段
+Sources:
+  - tests/test_orchestrator_routing.py
+  - tests/test_orchestrator_stage4b.py
 """
-from unittest.mock import MagicMock, patch
-
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 pytestmark = pytest.mark.unit
 
@@ -16,16 +14,18 @@ from src.core.orchestrator import (
     NODE_LOOP_CONTROL,
     NODE_REPORT,
     REPORT_EVERY_N_ROUNDS,
+    coder_node,
     loop_control_node,
     route_after_portfolio,
 )
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.judgment import CriticVerdict
+from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
 
 
 # ─────────────────────────────────────────────────────────
-# Helpers
+# Shared helpers
 # ─────────────────────────────────────────────────────────
 
 def _make_state(
@@ -77,8 +77,47 @@ def _make_verdict(overall_passed: bool) -> CriticVerdict:
     )
 
 
+def _make_note(note_id: str) -> FactorResearchNote:
+    return FactorResearchNote(
+        note_id=note_id,
+        island="momentum",
+        iteration=1,
+        hypothesis="h",
+        economic_intuition="e",
+        proposed_formula="$close",
+        final_formula="$close",
+        exploration_questions=[],
+        risk_factors=[],
+        market_context_date="2026-03-09",
+        status="ready_for_backtest",
+    )
+
+
+def _make_coder_report(note: FactorResearchNote) -> BacktestReport:
+    return BacktestReport(
+        report_id=f"report-{note.note_id}",
+        note_id=note.note_id,
+        factor_id=note.note_id,
+        island=note.island,
+        formula=note.final_formula or note.proposed_formula,
+        metrics=BacktestMetrics(
+            sharpe=1.0,
+            annualized_return=0.1,
+            max_drawdown=0.2,
+            ic_mean=0.01,
+            ic_std=0.02,
+            icir=0.5,
+            turnover_rate=0.3,
+        ),
+        passed=True,
+        execution_time_seconds=1.0,
+        qlib_output_raw="BACKTEST_RESULT_JSON:{}",
+        error_message=None,
+    )
+
+
 # ─────────────────────────────────────────────────────────
-# route_after_portfolio 测试
+# From test_orchestrator_routing.py
 # ─────────────────────────────────────────────────────────
 
 class TestRouteAfterPortfolio:
@@ -86,9 +125,7 @@ class TestRouteAfterPortfolio:
         """第 0 轮不应触发报告（即使 0 % N == 0）。"""
         state = _make_state(current_round=0)
         result = route_after_portfolio(state)
-        assert result == NODE_LOOP_CONTROL, (
-            f"第 0 轮应返回 NODE_LOOP_CONTROL，实际返回: {result}"
-        )
+        assert result == NODE_LOOP_CONTROL
 
     def test_triggers_report_at_n_rounds(self):
         """current_round == REPORT_EVERY_N_ROUNDS 时应触发报告。"""
@@ -111,9 +148,9 @@ class TestRouteAfterPortfolio:
     def test_triggers_on_breakthrough(self):
         """有超越基线 10% 的因子时立即触发报告。"""
         from src.schemas.thresholds import THRESHOLDS
-        high_sharpe = THRESHOLDS.min_sharpe * 1.2  # 超越 20%
+        high_sharpe = THRESHOLDS.min_sharpe * 1.2
         state = _make_state(
-            current_round=3,  # 非 N 的整数倍
+            current_round=3,
             backtest_reports=[_make_report(sharpe=high_sharpe, passed=True)],
         )
         result = route_after_portfolio(state)
@@ -131,10 +168,6 @@ class TestRouteAfterPortfolio:
         assert result == NODE_LOOP_CONTROL
 
 
-# ─────────────────────────────────────────────────────────
-# loop_control_node 测试
-# ─────────────────────────────────────────────────────────
-
 class TestLoopControlNode:
     def test_increments_round(self):
         """current_round 应递增。"""
@@ -146,7 +179,6 @@ class TestLoopControlNode:
 
     def test_clears_temporary_fields(self):
         """临时字段应被清空。"""
-        from src.schemas.research_note import FactorResearchNote
         note = FactorResearchNote(
             note_id="n1",
             island="momentum",
@@ -194,10 +226,7 @@ class TestLoopControlNode:
         mock_sched.on_epoch_done.assert_called()
 
     def test_calls_on_epoch_done_even_when_no_verdict_passes(self):
-        """
-        即使没有通过因子，on_epoch_done 也应被调用（修复 Bug 3）。
-        确保温度每轮都能退火。
-        """
+        """即使没有通过因子，on_epoch_done 也应被调用（修复 Bug 3）。"""
         state = _make_state(
             current_round=2,
             backtest_reports=[_make_report(0.5, passed=False)],
@@ -208,6 +237,25 @@ class TestLoopControlNode:
             mock_get_sched.return_value = mock_sched
             loop_control_node(state)
 
-        mock_sched.on_epoch_done.assert_called_once(), (
-            "即使没有通过因子，on_epoch_done 也应被调用一次"
-        )
+        mock_sched.on_epoch_done.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────
+# From test_orchestrator_stage4b.py
+# ─────────────────────────────────────────────────────────
+
+def test_orchestrator_stage4b_uses_execution_coder_path():
+    note = _make_note("momentum_20260309_01")
+    state = AgentState(approved_notes=[note], backtest_reports=[])
+    expected_report = _make_coder_report(note)
+
+    with patch("src.execution.coder.Coder") as mock_coder_cls:
+        mock_coder = mock_coder_cls.return_value
+        mock_coder.run_backtest = AsyncMock(return_value=expected_report)
+
+        result = coder_node(state)
+
+    mock_coder_cls.assert_called_once()
+    mock_coder.run_backtest.assert_awaited_once_with(note)
+    assert result["backtest_reports"] == [expected_report]
+    assert result["approved_notes"][0].status == "completed"

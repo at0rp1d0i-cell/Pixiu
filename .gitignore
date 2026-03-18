@@ -40,3 +40,8 @@ results/
 
 # claude
 .claude/
+
+# qlib download artifacts
+data/qlib_download_progress.json
+data/parquet_staging/baostock_raw/
+logs/qlib_download.log
