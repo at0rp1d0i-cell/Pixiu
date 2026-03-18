@@ -2,11 +2,12 @@
 import logging
 
 from src.schemas.state import AgentState
+from src.schemas.stage_io import PrefilterOutput
 
 logger = logging.getLogger(__name__)
 
 
-def prefilter_node(state: AgentState) -> dict:
+def prefilter_node(state: AgentState) -> PrefilterOutput:
     """Stage 3: Validator + NoveltyFilter + AlignmentChecker，最多放行 Top K。"""
     from src.agents.prefilter import prefilter_node as _prefilter
 

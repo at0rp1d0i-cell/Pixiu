@@ -6,6 +6,7 @@ from typing import List
 
 from src.schemas.state import AgentState
 from src.schemas.market_context import MarketContextMemo
+from src.schemas.stage_io import MarketContextOutput
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ ACTIVE_ISLANDS: List[str] = os.getenv(
 ).split(",")
 
 
-def market_context_node(state: AgentState) -> dict:
+def market_context_node(state: AgentState) -> MarketContextOutput:
     """Stage 1: MarketAnalyst + LiteratureMiner，生成 MarketContextMemo。"""
     from src.agents.market_analyst import market_context_node as _market_node
     from src.core.orchestrator._context import get_scheduler

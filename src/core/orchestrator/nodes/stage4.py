@@ -4,11 +4,12 @@ import logging
 import uuid
 
 from src.schemas.state import AgentState
+from src.schemas.stage_io import ExplorationOutput, CoderOutput
 
 logger = logging.getLogger(__name__)
 
 
-def exploration_node(state: AgentState) -> dict:
+def exploration_node(state: AgentState) -> ExplorationOutput:
     """Stage 4a: 对有 exploration_questions 的 Note 执行 EDA。"""
     from src.execution.exploration_agent import ExplorationAgent
 
@@ -39,7 +40,7 @@ def exploration_node(state: AgentState) -> dict:
     return {"exploration_results": exploration_results}
 
 
-def coder_node(state: AgentState) -> dict:
+def coder_node(state: AgentState) -> CoderOutput:
     """Stage 4b: 对每个 approved_note 调用 Coder 执行 Qlib 回测。
 
     串行执行（Docker 资源限制），每个 note 生成一个 BacktestReport。

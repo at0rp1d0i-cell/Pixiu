@@ -2,11 +2,12 @@
 import logging
 
 from src.schemas.state import AgentState
+from src.schemas.stage_io import HumanGateOutput, LoopControlOutput
 
 logger = logging.getLogger(__name__)
 
 
-def human_gate_node(state: AgentState) -> dict:
+def human_gate_node(state: AgentState) -> HumanGateOutput:
     """Human Gate: 此节点本身不执行任何逻辑。
 
     LangGraph 在 interrupt_before=[NODE_HUMAN_GATE] 配置下，
@@ -22,7 +23,7 @@ def human_gate_node(state: AgentState) -> dict:
     return {}  # pass-through，路由在 route_after_human 中处理
 
 
-def loop_control_node(state: AgentState) -> dict:
+def loop_control_node(state: AgentState) -> LoopControlOutput:
     """轮次控制：更新调度器，清空本轮状态，递增 current_round。"""
     from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
     from src.schemas.hypothesis import ExplorationSubspace

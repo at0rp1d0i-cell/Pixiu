@@ -4,11 +4,12 @@ import logging
 from typing import Optional
 
 from src.schemas.state import AgentState
+from src.schemas.stage_io import JudgmentOutput, PortfolioOutput, ReportOutput
 
 logger = logging.getLogger(__name__)
 
 
-def judgment_node(state: AgentState) -> dict:
+def judgment_node(state: AgentState) -> JudgmentOutput:
     """Stage 5: Critic + RiskAuditor + FactorPool 写入。"""
     from src.agents.judgment import Critic, RiskAuditor, ConstraintExtractor
     import src.core.orchestrator as _orch
@@ -84,7 +85,7 @@ def judgment_node(state: AgentState) -> dict:
     return result
 
 
-def portfolio_node(state: AgentState) -> dict:
+def portfolio_node(state: AgentState) -> PortfolioOutput:
     """Stage 5b: PortfolioManager 更新组合权重。"""
     from src.agents.judgment import PortfolioManager
     import src.core.orchestrator as _orch
@@ -106,7 +107,7 @@ def portfolio_node(state: AgentState) -> dict:
         return {"last_error": str(e), "error_stage": "portfolio"}
 
 
-def report_node(state: AgentState) -> dict:
+def report_node(state: AgentState) -> ReportOutput:
     """Stage 5c: ReportWriter 生成 CIOReport，标记等待人类审批。"""
     from src.agents.judgment import ReportWriter
     import src.core.orchestrator as _orch

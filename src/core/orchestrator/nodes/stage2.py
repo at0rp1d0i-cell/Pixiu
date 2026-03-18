@@ -5,6 +5,7 @@ import os
 from typing import List
 
 from src.schemas.state import AgentState
+from src.schemas.stage_io import HypothesisGenOutput, SynthesisOutput, NoteRefinementOutput
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ ACTIVE_ISLANDS: List[str] = os.getenv(
 ).split(",")
 
 
-def hypothesis_gen_node(state: AgentState) -> dict:
+def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     """Stage 2: 并行调用所有 Island 的 AlphaResearcher，展开 Batch。"""
     from src.agents.researcher import hypothesis_gen_node as _gen_node
     from src.core.orchestrator._context import get_scheduler
@@ -45,7 +46,7 @@ def hypothesis_gen_node(state: AgentState) -> dict:
         }
 
 
-def synthesis_node(state: AgentState) -> dict:
+def synthesis_node(state: AgentState) -> SynthesisOutput:
     """Stage 2b: SynthesisAgent 去重、聚类、提出 merge 建议。
 
     任何失败均降级为 pass-through（返回 {}），不阻塞主链。
@@ -81,7 +82,7 @@ def synthesis_node(state: AgentState) -> dict:
         return {}
 
 
-def note_refinement_node(state: AgentState) -> dict:
+def note_refinement_node(state: AgentState) -> NoteRefinementOutput:
     """Stage 4a→2: 将 ExplorationResult 反馈给对应 ResearchNote，更新 final_formula。"""
     if not state.exploration_results:
         return {}
