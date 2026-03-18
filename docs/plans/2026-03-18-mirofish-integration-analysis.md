@@ -1,5 +1,9 @@
 # MiroFish 集成分析与建议
 
+Status: active
+Owner: coordinator
+Last Reviewed: 2026-03-18
+
 > 2026-03-18 | 基于 v2 技术调研（`docs/futures/mirofish-integration-redesign-v2.md`）
 > 状态：决策参考文档，不是实现规格
 

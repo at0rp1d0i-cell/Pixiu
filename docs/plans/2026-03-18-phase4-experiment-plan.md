@@ -1,5 +1,9 @@
 # Phase 4B 受控实验计划
 
+Status: active
+Owner: coordinator
+Last Reviewed: 2026-03-18
+
 > 创建：2026-03-18
 > 阶段：Phase 4A（数据上线）→ Phase 4B（受控实验）→ Phase 4C（MiroFish 接入 Go/No-Go）
 
@@ -49,9 +53,9 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 
 推荐分期：
 
-- 前 20 轮：cold start / transition
-- 第 21-50 轮：主要观测期
-- 如果 Round 20 结束后 `sum(scheduler_state.total_passed.values()) < 30`，则顺延 cold start，直到达到 `WARM_START_THRESHOLD`
+- 前 10 轮：cold start / transition
+- 第 11-50 轮：主要观测期
+- 如果 Round 10 结束后 `sum(scheduler_state.total_passed.values()) < 30`，则顺延 cold start，直到达到 `WARM_START_THRESHOLD`
 
 每轮完成后自动记录快照，不人工干预中间过程。预计每轮耗时 5–15 分钟（取决于 LLM 并发和 Stage 4 回测耗时）。
 
@@ -61,8 +65,8 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 
 | 分期 | 轮次 | 说明 |
 |------|------|------|
-| Cold start / transition | Round 1–20 | FailureConstraint Filter D 仍偏弱，Thompson Sampling 多数情况下尚未达到 `WARM_START_THRESHOLD=30` |
-| 主要观测期 | Round 21–50 | 若累计通过数已达到阈值，则开始观测调度器的方向性偏好；否则延后进入 |
+| Cold start / transition | Round 1–10 | FailureConstraint Filter D 仍偏弱，Thompson Sampling 多数情况下尚未达到 `WARM_START_THRESHOLD=30` |
+| 主要观测期 | Round 11–50 | 若累计通过数已达到阈值，则开始观测调度器的方向性偏好；否则延后进入 |
 
 ### 2.3 控制变量
 
@@ -92,6 +96,8 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 - `AgentState.filtered_count: int`
 - `AgentState.backtest_reports: List[BacktestReport]`
 - `AgentState.critic_verdicts: List[CriticVerdict]`
+
+> **注意**：`AgentState.approved_notes` 是单轮数据。`loop_control_node` 在每轮结束时会清空该字段，因此不能依赖最终 state 做跨轮统计——必须从每轮 JSON 快照（`logs/rounds/`）中捕获各轮快照，而不能读取实验结束后的 state。
 
 ### 3.2 子空间覆盖度指标（每轮记录）
 

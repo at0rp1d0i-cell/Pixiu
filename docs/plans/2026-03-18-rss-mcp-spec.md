@@ -1,6 +1,24 @@
 # RSS MCP Server 规格文档
 
+Status: active
+Owner: coordinator
+Last Reviewed: 2026-03-18
+
 > 版本：v1.0 | 日期：2026-03-18 | 状态：待实现
+
+---
+
+## 0. 前置条件与依赖
+
+### Phase 1（当前可实现）
+RSS server 本体 + Stage 1 MarketAnalyst 消费。
+具体改动：在 `src/agents/market_analyst.py` 的 `MultiServerMCPClient` 配置中注册 `rss_server.py`。
+
+### Phase 2（需 Researcher 架构升级后）
+Stage 2 NARRATIVE_MINING 直接消费 RSS 工具，需要将 `AlphaResearcher`
+从纯 LLM prompt 生成器升级为支持 MCP 工具调用的 ReAct agent。
+当前 `src/agents/researcher.py` 使用 `llm.ainvoke()`，无 tool binding，不支持工具调用。
+Stage 2 消费路径标注为：`planned`（依赖 Researcher 架构升级）
 
 ---
 
@@ -247,24 +265,11 @@ items = data["result"]["data"]
 | Stage | 消费者 | 工具 | 注入位置 | 状态 |
 |-------|--------|------|----------|------|
 | Stage 1 — Market Context | `MarketAnalyst` | `fetch_rss_feed(sources=["csrc","pboc","eastmoney"], since_hours=24)` | `MarketContextMemo.raw_summary` | 当前可直连 |
-| Stage 2 — NARRATIVE_MINING | `AlphaResearcher` 工具化版本 | `fetch_rss_feed` + `fetch_announcement(symbol)` | 叙事种子与 hypothesis context | 目标态，当前 blocked |
+| Stage 2 — NARRATIVE_MINING | `AlphaResearcher` 工具化版本（planned） | `fetch_rss_feed` + `fetch_announcement(symbol)` | 叙事种子与 hypothesis context | planned（待 Researcher 升级后启用） |
 
-**当前使用模式**：RSS 内容先由 Stage 1 进入 `MarketContextMemo`，再被 Stage 2 间接消费。
+**当前阶段**：Stage 1 MarketAnalyst 通过 `MultiServerMCPClient` 消费 RSS 工具，内容经 `MarketContextMemo` 间接影响 Stage 2。
 
-**目标使用模式**：Researcher 工具化升级完成后，Stage 2 再按需直连 RSS / 公告工具；RSS 内容仍只服务于当次 hypothesis 生成，不写入 Factor Pool，不参与回测。
-
----
-
-## 前置条件与分阶段消费
-
-**Phase 1（可立即实现，本 spec 当前范围）**：
-- 实现 RSS server 本体（`mcp_servers/rss_server.py`）
-- Stage 1 消费：修改 `src/agents/market_analyst.py` 的 `MultiServerMCPClient` 配置，注册 `rss` 服务器
-
-**Phase 2（需 Researcher 架构升级，超出本 spec 范围）**：
-- Stage 2 消费需要将 `AlphaResearcher` 从纯 prompt 生成器升级为支持 MCP 工具调用的 ReAct agent
-- 当前 `AlphaResearcher`（`src/agents/researcher.py`）通过 `llm.ainvoke()` 直接调用 LLM，没有 tool binding，不支持 MCP 工具调用
-- 在 Researcher 架构升级完成前，RSS 数据通过 Stage 1 的 `MarketContextMemo` 间接注入 Stage 2 上下文
+**Stage 2 直连路径**：planned（待 Researcher 升级后启用）。升级完成后，Stage 2 再按需直连 RSS / 公告工具；RSS 内容仍只服务于当次 hypothesis 生成，不写入 Factor Pool，不参与回测。
 
 ---
 
