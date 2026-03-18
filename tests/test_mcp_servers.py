@@ -260,9 +260,10 @@ def tools(mcp_client):
 
 @pytest.mark.integration
 def test_tools_loaded(tools):
-    """应加载 7 个工具。"""
+    """应加载 25 个工具（Phase 4A 扩展后）。"""
     tool_names = [t.name for t in tools]
-    expected = [
+    # 原始 7 个工具
+    original_tools = [
         "get_northbound_flow_today",
         "get_northbound_flow_history",
         "get_market_fund_flow",
@@ -271,8 +272,30 @@ def test_tools_loaded(tools):
         "get_industry_pe",
         "get_individual_fund_flow_rank",
     ]
-    for name in expected:
+    # Phase 4A 新增工具
+    phase4a_tools = [
+        "get_stock_financial_summary",
+        "get_macro_indicators",
+        "get_margin_trading_summary",
+        "get_stock_news",
+        "get_market_hot_topics",
+        "get_concept_board_flow",
+        "get_global_indices",
+        "get_commodity_prices",
+        "get_exchange_rates",
+        "get_market_breadth",
+        "get_index_valuation",
+        "get_margin_balance",
+        "get_limit_up_pool",
+        "get_limit_down_pool",
+        "get_sector_rotation_speed",
+        "get_north_bound_flow",
+        "get_volatility_index",
+        "get_top_list",
+    ]
+    for name in original_tools + phase4a_tools:
         assert name in tool_names, f"Missing tool: {name}"
+    assert len(tool_names) == 25, f"Expected 25 tools, got {len(tool_names)}: {tool_names}"
 
 
 @pytest.mark.integration

@@ -21,8 +21,13 @@ class SkillLoader:
       Type C (Context)— 按 AgentState 条件注入
     """
 
-    def load_for_researcher(self, state: Any) -> str:
-        """为 Researcher Agent 加载完整的 Skill 上下文。"""
+    def load_for_researcher(self, state: Any, subspace: Any = None) -> str:
+        """为 Researcher Agent 加载完整的 Skill 上下文。
+
+        Args:
+            state: AgentState 字典，用于条件注入判断
+            subspace: Optional[ExplorationSubspace]，当前激活的探索子空间
+        """
         parts = []
 
         # ── Type A: 永久注入（硬约束）─────────────────────────
@@ -41,10 +46,27 @@ class SkillLoader:
         if state.get("error_message"):
             parts.append(self._load("researcher/feedback_interpretation.md"))
 
+        # 子空间专项推理框架（按激活子空间注入对应 skill）
+        if subspace is not None:
+            subspace_file_map = {
+                "FACTOR_ALGEBRA": "researcher/subspaces/factor_algebra.md",
+                "SYMBOLIC_MUTATION": "researcher/subspaces/symbolic_mutation.md",
+                "CROSS_MARKET": "researcher/subspaces/cross_market.md",
+                "NARRATIVE_MINING": "researcher/subspaces/narrative_mining.md",
+            }
+            subspace_key = subspace.value if hasattr(subspace, "value") else str(subspace)
+            skill_path = subspace_file_map.get(subspace_key)
+            if skill_path:
+                parts.append(self._load(skill_path))
+
         # 过滤掉加载失败的（None）
         valid_parts = [p for p in parts if p]
 
-        logger.debug("[SkillLoader] Researcher 加载了 %d 个 Skill 文档", len(valid_parts))
+        logger.debug(
+            "[SkillLoader] Researcher 加载了 %d 个 Skill 文档（subspace=%s）",
+            len(valid_parts),
+            subspace,
+        )
         return "\n\n---\n\n".join(valid_parts)
 
     def load_for_coder(self) -> str:

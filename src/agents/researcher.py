@@ -208,8 +208,26 @@ class AlphaResearcher:
             failed_factors_section=failed_section,
         )
 
+        # 加载 Skill 文档（Type A/B 硬约束 + Type C 条件注入 + 子空间推理框架）
+        _state_proxy = {
+            "current_iteration": iteration,
+            "error_message": (
+                last_verdict.failure_explanation
+                if last_verdict and not last_verdict.overall_passed
+                else None
+            ),
+        }
+        skill_context = self.skill_loader.load_for_researcher(
+            _state_proxy, subspace=subspace_hint
+        )
+        system_content = ALPHA_RESEARCHER_SYSTEM_PROMPT
+        if skill_context:
+            system_content = (
+                system_content + "\n\n## 研究规范与子空间框架\n\n" + skill_context
+            )
+
         response = await self.llm.ainvoke([
-            SystemMessage(content=ALPHA_RESEARCHER_SYSTEM_PROMPT),
+            SystemMessage(content=system_content),
             HumanMessage(content=user_msg),
         ])
 
