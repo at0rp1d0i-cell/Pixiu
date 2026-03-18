@@ -32,3 +32,6 @@ Last Reviewed: 2026-03-18
 - `commercialization-principles.md`
 - `mirofish-integration-redesign-v2.md`
 - `data-source-expansion-roadmap.md`
+- `stage-2-runtime-expansion-notes.md`
+- `stage-4-exploration-branch.md`
+- `stage-5-judgment-expansion.md`

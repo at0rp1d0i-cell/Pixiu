@@ -233,12 +233,18 @@ class ArtifactRefs(BaseModel):
 
 ## 4. Stage 5 deterministic MVP
 
-当前 Stage 5 先收缩成两个组件：
+当前 Stage 5 的 deterministic/template MVP 已经收缩成四个组件：
 
 1. `Critic`
-2. `ReportWriter` 的 deterministic 模板版
+2. `RiskAuditor`
+3. `PortfolioManager`
+4. `ReportWriter` 的 deterministic 模板版
 
-也就是说，第一版 Stage 5 不是“综合思考”，而是把 `BacktestReport` 转成稳定 `CriticVerdict`，并沉淀到 `FactorPool`。
+也就是说，当前主链已经是：
+
+`BacktestReport -> CriticVerdict / RiskAuditReport -> PortfolioAllocation -> CIOReport`
+
+不做的是更复杂的相关性矩阵、组合优化求解和 richer narrative synthesis。
 
 ### 4.1 `CriticVerdict`
 

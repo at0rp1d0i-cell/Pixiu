@@ -19,7 +19,7 @@ Orchestrator 是系统的中枢，负责：
 - 维护 LangGraph `StateGraph`，定义节点与边
 - 调用 `IslandScheduler` 选择本轮研究方向
 - 驱动五阶段漏斗顺序执行
-- 在 Stage 4 协调 ExplorationAgent 与 Coder 的交互（探索→精化→执行）
+- 在 Stage 4 以 `Coder` 为主路径，并在需要时协调 `ExplorationAgent` 的条件分支
 - 触发 `interrupt()` 等待 CIO 审批
 - 管理错误恢复与重试逻辑
 
@@ -71,8 +71,7 @@ judgment
   → loop_control（如果无新因子）
 
 portfolio
-  → report（每 N 轮触发一次，或有重大新发现）
-  → loop_control
+  → report
 
 report
   → human_gate（interrupt()）
@@ -121,7 +120,7 @@ def build_graph() -> StateGraph:
     graph.add_edge(NODE_NOTE_REFINEMENT, NODE_CODER)
     graph.add_edge(NODE_CODER, NODE_JUDGMENT)
     graph.add_conditional_edges(NODE_JUDGMENT, route_after_judgment)
-    graph.add_edge(NODE_PORTFOLIO, NODE_REPORT)  # 有重大发现时
+    graph.add_edge(NODE_PORTFOLIO, NODE_REPORT)
     graph.add_conditional_edges(NODE_REPORT, route_after_report)
     graph.add_conditional_edges(NODE_HUMAN_GATE, route_after_human)
     graph.add_conditional_edges(NODE_LOOP_CONTROL, route_loop)
@@ -210,8 +209,8 @@ async def prefilter_node(state: AgentState) -> AgentState:
 ```python
 async def exploration_node(state: AgentState) -> AgentState:
     """
-    对 approved_notes 中有 exploration_questions 的 Note，
-    逐个调用 ExplorationAgent 执行 EDA。
+    仅对带有 exploration_questions 的 Note 调用 ExplorationAgent。
+    这是 Stage 4 的条件分支，不是默认主路径。
     详细规格见 `23_stage-4-execution.md`。
     """
     ...
@@ -223,7 +222,7 @@ async def exploration_node(state: AgentState) -> AgentState:
 async def note_refinement_node(state: AgentState) -> AgentState:
     """
     将 ExplorationResult 反馈给 AlphaResearcher，
-    让 Researcher 根据探索结果更新 final_formula。
+    让 Researcher 按需更新 final_formula。
     更新 approved_notes 中对应 Note 的 final_formula 和 status。
     """
     ...
