@@ -9,7 +9,6 @@ Pixiu: FactorPool — 因子实验历史库
 import json
 import logging
 import os
-import warnings
 from difflib import SequenceMatcher
 from datetime import UTC, datetime
 from typing import Optional
@@ -164,82 +163,6 @@ class FactorPool:
         )
         logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", db_path, self._storage_mode)
         logger.info("[FactorPool] 当前存储因子数量：%d", self._collection.count())
-
-    # ─────────────────────────────────────────────
-    # 写入：注册新因子实验
-    # ─────────────────────────────────────────────
-    def register(
-        self,
-        hypothesis,
-        metrics,
-        island_name: str,
-        run_id: Optional[str] = None,
-    ) -> str:
-        """将一次因子实验结果存入 FactorPool。
-
-        .. deprecated::
-            Use :meth:`register_factor` instead. This method writes an
-            incomplete metadata schema (missing ``passed``, ``note_id``,
-            ``verdict_id`` fields) and is incompatible with reads produced
-            by ``register_factor``.
-
-        Args:
-            hypothesis: Researcher 提出的结构化因子假设
-            metrics: Critic 解析的回测指标
-            island_name: 所属 Island 名称（如 'momentum'）
-            run_id: 可选的唯一标识符，默认自动生成
-
-        Returns:
-            factor_id: 存储的唯一 ID
-        """
-        warnings.warn(
-            "register() is deprecated, use register_factor() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if not run_id:
-            run_id = f"{island_name}_{hypothesis.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-        # 向量化文档：公式 + 假设 + 逻辑（用于相似检索）
-        document = (
-            f"公式: {hypothesis.formula}\n"
-            f"假设: {hypothesis.hypothesis}\n"
-            f"逻辑: {hypothesis.rationale}"
-        )
-
-        # 元数据：所有可查询的结构化字段
-        metadata = {
-            "island": island_name,
-            "factor_name": hypothesis.name,
-            "formula": hypothesis.formula,
-            "hypothesis": hypothesis.hypothesis,
-            "rationale": hypothesis.rationale,
-            "expected_direction": hypothesis.expected_direction,
-            "market_observation": hypothesis.market_observation or "",
-            # 回测指标
-            "sharpe": metrics.sharpe,
-            "ic": getattr(metrics, "ic_mean", getattr(metrics, "ic", 0.0)),
-            "icir": metrics.icir,
-            "turnover": getattr(metrics, "turnover_rate", getattr(metrics, "turnover", 0.0)),
-            "annualized_return": metrics.annualized_return,
-            "max_drawdown": metrics.max_drawdown,
-            "parse_success": getattr(metrics, "parse_success", True),
-            # 时间戳
-            "registered_at": datetime.now().isoformat(),
-            # 是否达到基线（方便过滤）
-            "beats_baseline": metrics.sharpe > THRESHOLDS.min_sharpe and getattr(metrics, "parse_success", True),
-        }
-
-        self._collection.upsert(
-            ids=[run_id],
-            documents=[document],
-            metadatas=[metadata],
-        )
-        logger.info(
-            "[FactorPool] 注册因子 %s → Island=%s, Sharpe=%.2f",
-            hypothesis.name, island_name, metrics.sharpe,
-        )
-        return run_id
 
     # ─────────────────────────────────────────────
     # 读取：Island 最优因子

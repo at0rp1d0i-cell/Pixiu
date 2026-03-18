@@ -34,10 +34,13 @@ Pixiu uses a **5-stage high-throughput funnel** — wide generation on the cheap
 ║  MarketAnalyst + LiteratureMiner                                 ║
 ║  → MarketContextMemo (macro signals, northbound flows, themes)   ║
 ╠══════════════════════════════════════════════════════════════════╣
-║  Stage 2 · Parallel Hypothesis Generation          [cost: low]   ║
-║  6 × AlphaResearcher (one per Island, async parallel)            ║
-║  Each outputs 2–3 FactorResearchNote candidates                  ║
-║  → 12–18 candidates total per round                              ║
+║  Stage 2 · Hypothesis Expansion Engine              [cost: low]  ║
+║  5 parallel subspaces per Island:                                ║
+║    · Factor Algebra Search  · Symbolic Mutation                  ║
+║    · Cross-Market Mining    · Narrative Mining                   ║
+║    · Regime-Conditional Factors                                  ║
+║  SubspaceScheduler (Thompson Sampling) routes each Island        ║
+║  → 12–18 FactorResearchNote candidates per round                 ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Stage 3 · Three-Dimensional Pre-filter            [cost: low]   ║
 ║  Filter A: Validator    — Qlib syntax + A-share constraints      ║
@@ -62,6 +65,35 @@ Each Island has its own `AlphaResearcher`, failure history, and softmax-sampled 
 
 ---
 
+## Pipeline Flow
+
+```mermaid
+flowchart TD
+    START([Start]) --> S1[Stage 1\nMarket Context\nMarketAnalyst + LiteratureMiner]
+    S1 --> S2[Stage 2\nHypothesis Expansion\n5 Subspaces × N Islands]
+    S2 --> SYN[Synthesis\ndedup + cross-island merge]
+    SYN --> S3{Stage 3\nPrefilter\nValidator · Novelty · Alignment\nConstraint · Regime}
+    S3 -->|approved_notes > 0| EXP{Needs\nExploration?}
+    S3 -->|no candidates| LC[Loop Control\ncurrent_round++]
+    EXP -->|yes| S4A[Stage 4a\nExploration Agent\nEDA in Docker sandbox]
+    EXP -->|no| S4B[Stage 4b\nCoder\nQlib backtest subprocess]
+    S4A --> REF[Note Refinement\nupdate final_formula]
+    REF --> S4B
+    S4B --> S5A[Stage 5a\nJudgment\nCritic + RiskAuditor]
+    S5A -->|some passed| S5B[Stage 5b\nPortfolio Manager]
+    S5A -->|none passed| LC
+    S5B -->|every N rounds\nor breakthrough| S5C[Stage 5c\nReport Writer\nCIOReport]
+    S5B -->|otherwise| LC
+    S5C --> HG[Human Gate\napprove / redirect / stop]
+    HG -->|approve| LC
+    HG -->|redirect| S2
+    HG -->|stop| END([End])
+    LC -->|max_rounds reached| END
+    LC -->|continue| S1
+```
+
+---
+
 ## Key Design Decisions
 
 **Coder is deterministic — zero LLM calls.**
@@ -82,32 +114,30 @@ The system runs autonomously (Stage 1–4). Humans receive a `CIOReport` and cho
 
 ```bash
 # 1. Set up environment
-conda create -n pixiu python=3.11
-conda activate pixiu
-pip install -e .
+uv sync --dev
 
 # 2. Configure credentials
 cp .env.example .env
 # Edit .env: set RESEARCHER_MODEL / RESEARCHER_BASE_URL / RESEARCHER_API_KEY
 # Optional: PIXIU_STATE_STORE_PATH, ACTIVE_ISLANDS, TUSHARE_TOKEN, TAVILY_API_KEY
 
-# 3. Download A-share data (CSI 300)
-python3 -m src.data_pipeline.data_downloader
-python3 -m src.data_pipeline.format_to_qlib
+# 3. Download A-share data
+uv run python scripts/download_qlib_data.py
+# (runs in background, checkpoint-resumable, ~5510 A-shares 2010-today)
 
-# 4. Run baseline (establishes benchmark)
-python3 -m src.core.run_baseline
+# 4. Run baseline
+uv run python -m src.core.run_baseline
 
-# 5. Start single-island research (debug mode)
-python3 -m src.core.orchestrator --mode single --island momentum
+# 5. Single-island debug
+uv run python -m src.core.orchestrator --mode single --island momentum
 
-# 6. Start full evolution loop
-python3 -m src.core.orchestrator --mode evolve --rounds 20
+# 6. Full evolution loop
+uv run python -m src.core.orchestrator --mode evolve --rounds 20
 
-# 7. Check status / approve factors
-pixiu status
-pixiu factors --top 10
-pixiu approve
+# 7. Check status / approve
+uv run pixiu status
+uv run pixiu factors --top 10
+uv run pixiu approve
 ```
 
 ### Environment Truth
@@ -117,9 +147,6 @@ Current MVP runtime reads these variables directly:
 - `RESEARCHER_MODEL`
 - `RESEARCHER_BASE_URL`
 - `RESEARCHER_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_API_BASE`
-- `OPENAI_API_KEY`
 - `MAX_ROUNDS`
 - `ACTIVE_ISLANDS`
 - `REPORT_EVERY_N_ROUNDS`
@@ -174,7 +201,7 @@ Pixiu's architecture is grounded in recent literature on LLM-driven quantitative
 | Phase | Status | Goal |
 |---|---|---|
 | **Skateboard** | ✅ Done | Data pipeline + Alpha158/LightGBM baseline (Sharpe 2.67 IS) |
-| **Bicycle** | 🔄 In Progress | LangGraph funnel + Island evolution + FactorPool |
+| **Bicycle** | 🔄 90% Done | LangGraph funnel + Island evolution + FactorPool + modular packages |
 | **Car** | Planned | Terminal CLI + Web dashboard + CIO approval flow |
 | **Expansion** | Future | Multi-market: HK, US equities, futures, crypto |
 

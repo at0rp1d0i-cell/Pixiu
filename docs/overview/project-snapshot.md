@@ -1,6 +1,6 @@
 # Project Snapshot
 
-> 更新时间：2026-03-17
+> 更新时间：2026-03-18
 
 这是”用一个文件看懂整个项目”的入口。
 
@@ -19,12 +19,14 @@ Pixiu 当前应当同时用两句话理解：
 
 - `src/schemas/`
   - 核心 schema 已基本成型
-- `src/core/orchestrator.py`
-  - 主编排图已存在
+- `src/core/orchestrator/`
+  - 主编排图已拆分为包（graph.py + nodes/ + _context.py），Stage I/O TypedDicts 覆盖全部12个节点
 - `src/execution/`
   - Stage 4 确定性执行主路径已接入主链
 - `src/agents/judgment.py`
   - Stage 5 deterministic MVP 已存在
+- `src/schemas/stage_io.py`
+  - 12个 Stage I/O TypedDict，节点返回类型完全收紧
 - `src/control_plane/`
   - 最小 `state_store` 已出现
 - `tests/`
@@ -92,7 +94,8 @@ Pixiu 当前应当同时用两句话理解：
 1. ~~重构文档体系，保证 `overview -> design` 映射准确~~ ✅ Phase A 已完成
 2. ~~将 Stage 2 从”并行假设生成”升级为 `Hypothesis Expansion Engine`~~ ✅ Phase 2 已完成（327 smoke/unit tests 通过）
 3. ~~继续收紧 `BacktestReport / CriticVerdict / FactorPoolRecord`~~ ✅ Phase 3A 已完成（FailureMode 对齐、regime_at_judgment 字段、decision 枚举、subspace_origin 溯源）
-4. 数据源扩展：NARRATIVE_MINING（新闻/公告）+ REGIME_CONDITIONAL（更多 regime 特征量）优先
-5. 代码清理：归档兼容层（critic.py / factor_pool_writer.py / cio_report_renderer.py），确认无独立消费者后迁至 archive
-6. MiroFish 协议层（NarrativePrediction schema + MiroFishAdapter）与控制平面扩展
-7. 最后再补 live / e2e 和更完整的产品壳
+4. ~~Phase 3 模块化收口~~：orchestrator/judgment 包拆分，Stage I/O TypedDicts，测试42→20文件，THRESHOLDS 单例，register() 删除 ✅ Phase 3 已完成
+5. 数据源扩展：NARRATIVE_MINING（新闻/公告）+ REGIME_CONDITIONAL（更多 regime 特征量）优先
+6. 代码清理：归档兼容层（critic.py / factor_pool_writer.py / cio_report_renderer.py），确认无独立消费者后迁至 archive
+7. MiroFish 协议层（NarrativePrediction schema + MiroFishAdapter）与控制平面扩展
+8. 最后再补 live / e2e 和更完整的产品壳
