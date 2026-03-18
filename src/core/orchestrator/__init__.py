@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from src.schemas.state import AgentState
 
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # 配置常量
 # ─────────────────────────────────────────────────────────
 MAX_ROUNDS: int = int(os.getenv("MAX_ROUNDS", "100"))
-ACTIVE_ISLANDS: List[str] = os.getenv(
+ACTIVE_ISLANDS: list[str] = os.getenv(
     "ACTIVE_ISLANDS", "momentum,northbound,valuation,volatility,volume,sentiment"
 ).split(",")
 REPORT_EVERY_N_ROUNDS: int = int(os.getenv("REPORT_EVERY_N_ROUNDS", "5"))

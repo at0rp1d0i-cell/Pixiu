@@ -2,7 +2,6 @@
 Graph builder: build_graph, routing condition functions, and graph wiring.
 """
 import logging
-import os
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -38,9 +37,8 @@ from src.core.orchestrator.nodes import (
 )
 
 logger = logging.getLogger(__name__)
-
-REPORT_EVERY_N_ROUNDS: int = int(os.getenv("REPORT_EVERY_N_ROUNDS", "5"))
-# MAX_ROUNDS is read dynamically from src.core.orchestrator.__init__ to support test monkeypatching
+# REPORT_EVERY_N_ROUNDS and MAX_ROUNDS are read dynamically from src.core.orchestrator.__init__
+# to support test monkeypatching
 
 
 # ─────────────────────────────────────────────────────────
@@ -72,11 +70,13 @@ def route_after_judgment(state: AgentState) -> str:
 
 def route_after_portfolio(state: AgentState) -> str:
     """每 N 轮或有重大新发现时生成报告。"""
-    if state.current_round > 0 and state.current_round % REPORT_EVERY_N_ROUNDS == 0:
+    import src.core.orchestrator as _orch_mod
+    report_every = _orch_mod.REPORT_EVERY_N_ROUNDS
+    if state.current_round > 0 and state.current_round % report_every == 0:
         return NODE_REPORT
     from src.schemas.thresholds import THRESHOLDS
     has_breakthrough = any(
-        r.metrics.sharpe > THRESHOLDS.min_sharpe * 1.1
+        r.metrics.sharpe > THRESHOLDS.min_sharpe * THRESHOLDS.breakthrough_sharpe_multiplier
         for r in state.backtest_reports
         if r.passed
     )

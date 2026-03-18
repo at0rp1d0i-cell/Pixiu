@@ -25,6 +25,7 @@ from langchain_openai import ChatOpenAI
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
+from src.schemas.stage_io import PrefilterOutput
 
 logger = logging.getLogger(__name__)
 
@@ -432,7 +433,7 @@ class PreFilter:
 # LangGraph 节点
 # ─────────────────────────────────────────────────────────
 
-def prefilter_node(state: dict) -> dict:
+def prefilter_node(state: dict) -> PrefilterOutput:
     """LangGraph Stage 3 同步入口。"""
     from src.factor_pool.pool import get_factor_pool
 

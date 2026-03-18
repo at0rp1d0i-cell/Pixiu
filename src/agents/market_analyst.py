@@ -18,6 +18,7 @@ from langchain_openai import ChatOpenAI
 
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, MarketRegime
 from src.market.regime_detector import RegimeDetector
+from src.schemas.stage_io import MarketContextOutput
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,6 @@ async def _market_context_async(state: dict) -> dict:
     return {**state, "market_context": memo}
 
 
-def market_context_node(state: dict) -> dict:
+def market_context_node(state: dict) -> MarketContextOutput:
     """LangGraph Stage 1 同步入口。"""
     return asyncio.run(_market_context_async(state))

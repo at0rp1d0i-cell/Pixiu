@@ -9,6 +9,7 @@ Pixiu: FactorPool — 因子实验历史库
 import json
 import logging
 import os
+import warnings
 from difflib import SequenceMatcher
 from datetime import UTC, datetime
 from typing import Optional
@@ -176,6 +177,12 @@ class FactorPool:
     ) -> str:
         """将一次因子实验结果存入 FactorPool。
 
+        .. deprecated::
+            Use :meth:`register_factor` instead. This method writes an
+            incomplete metadata schema (missing ``passed``, ``note_id``,
+            ``verdict_id`` fields) and is incompatible with reads produced
+            by ``register_factor``.
+
         Args:
             hypothesis: Researcher 提出的结构化因子假设
             metrics: Critic 解析的回测指标
@@ -185,6 +192,11 @@ class FactorPool:
         Returns:
             factor_id: 存储的唯一 ID
         """
+        warnings.warn(
+            "register() is deprecated, use register_factor() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not run_id:
             run_id = f"{island_name}_{hypothesis.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 

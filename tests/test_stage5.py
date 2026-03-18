@@ -401,3 +401,162 @@ def test_stage45_golden_path_runs_end_to_end(tmp_path):
     assert "CIO Review" in cio_report.full_report_markdown
     assert report.factor_id in cio_report.full_report_markdown
     assert "decision=promote" in cio_report.full_report_markdown
+
+
+# ─────────────────────────────────────────────────────────
+# TestRiskAuditor
+# ─────────────────────────────────────────────────────────
+
+class TestRiskAuditor:
+    def test_audit_passed_report_returns_no_flags(self):
+        report = _make_report()
+        result = asyncio.run(RiskAuditor().audit(report))
+
+        assert result.factor_id == report.factor_id
+        assert result.correlation_flags == []
+        assert result.recommendation == "clear"
+        assert result.overfitting_flag is False
+
+    def test_audit_low_ic_report_flags_overfitting(self):
+        # High turnover triggers overfitting score > threshold (0.40)
+        # turnover_rate=2.0 → overfitting_score = 2.0/0.5 - 1 = 3.0, clamped to 1.0
+        report = _make_report(turnover_rate=2.0)
+        result = asyncio.run(RiskAuditor().audit(report))
+
+        assert result.overfitting_flag is True
+        assert result.overfitting_score > 0.40
+        assert result.recommendation == "manual_review"
+
+    def test_audit_execution_error_sets_penalty_score(self):
+        report = _make_report(error_message="RuntimeError: division by zero")
+        result = asyncio.run(RiskAuditor().audit(report))
+
+        assert result.overfitting_score == 0.5
+        assert result.factor_id == report.factor_id
+
+
+# ─────────────────────────────────────────────────────────
+# TestConstraintExtractor
+# ─────────────────────────────────────────────────────────
+
+class TestConstraintExtractor:
+    def _make_failed_verdict(self) -> "CriticVerdict":
+        from src.schemas.judgment import CriticVerdict, ThresholdCheck
+        from src.schemas.failure_constraint import FailureMode
+
+        return CriticVerdict(
+            report_id="report-001",
+            factor_id="momentum_20260309_01",
+            note_id="momentum_20260309_01",
+            overall_passed=False,
+            decision="reject",
+            score=0.1,
+            failure_mode=FailureMode.LOW_SHARPE,
+            failure_explanation="Sharpe too low",
+            suggested_fix="Try longer window",
+            checks=[
+                ThresholdCheck(metric="sharpe", value=0.5, threshold=2.67, passed=False)
+            ],
+            failed_checks=["sharpe"],
+            register_to_pool=True,
+        )
+
+    def _make_passed_verdict(self) -> "CriticVerdict":
+        from src.schemas.judgment import CriticVerdict, ThresholdCheck
+
+        return CriticVerdict(
+            report_id="report-002",
+            factor_id="momentum_20260309_02",
+            note_id="momentum_20260309_02",
+            overall_passed=True,
+            decision="promote",
+            score=0.9,
+            checks=[
+                ThresholdCheck(metric="sharpe", value=3.5, threshold=2.67, passed=True)
+            ],
+            passed_checks=["sharpe"],
+            register_to_pool=True,
+        )
+
+    def _make_note(self, note_id: str = "momentum_20260309_01") -> FactorResearchNote:
+        return FactorResearchNote(
+            note_id=note_id,
+            island="momentum",
+            iteration=1,
+            hypothesis="动量假设",
+            economic_intuition="资金流",
+            proposed_formula="Ref($close, 20) / $close - 1",
+            final_formula="Ref($close, 20) / $close - 1",
+            exploration_questions=[],
+            risk_factors=[],
+            market_context_date="2026-03-09",
+        )
+
+    def test_extract_returns_constraint_on_failed_verdict(self):
+        from src.agents.judgment.constraint_extractor import ConstraintExtractor
+
+        verdict = self._make_failed_verdict()
+        note = self._make_note()
+        result = ConstraintExtractor().extract(verdict, note)
+
+        assert result is not None
+        assert result.source_note_id == note.note_id
+        assert result.source_verdict_id == verdict.verdict_id
+
+    def test_extract_returns_none_on_passed_verdict(self):
+        from src.agents.judgment.constraint_extractor import ConstraintExtractor
+
+        verdict = self._make_passed_verdict()
+        note = self._make_note(note_id="momentum_20260309_02")
+        result = ConstraintExtractor().extract(verdict, note)
+
+        assert result is None
+
+    def test_extract_sets_correct_island_and_failure_mode(self):
+        from src.agents.judgment.constraint_extractor import ConstraintExtractor
+        from src.schemas.failure_constraint import FailureMode
+
+        verdict = self._make_failed_verdict()
+        note = self._make_note()
+        result = ConstraintExtractor().extract(verdict, note)
+
+        assert result is not None
+        assert result.island == "momentum"
+        assert result.failure_mode == FailureMode.LOW_SHARPE
+
+
+# ─────────────────────────────────────────────────────────
+# TestScoring
+# ─────────────────────────────────────────────────────────
+
+class TestScoring:
+    def test_decide_promotes_high_score(self):
+        from src.agents.judgment._scoring import _decide
+        from src.schemas.judgment import ThresholdCheck
+
+        report = _make_report(sharpe=3.0)
+        result = _decide(report, overall_passed=True, score=0.9, failed_checks=[])
+
+        assert result == "promote"
+
+    def test_decide_rejects_low_score(self):
+        from src.agents.judgment._scoring import _decide
+        from src.schemas.judgment import ThresholdCheck
+
+        report = _make_report(sharpe=-0.5)
+        failed = [ThresholdCheck(metric="sharpe", value=-0.5, threshold=2.67, passed=False)]
+        result = _decide(report, overall_passed=False, score=0.1, failed_checks=failed)
+
+        assert result == "reject"
+
+    def test_normalize_sharpe_clamps_to_zero_one(self):
+        from src.agents.judgment._scoring import _normalize_positive
+
+        # Value well above threshold → clamped to 1.0
+        assert _normalize_positive(10.0, 2.67) == 1.0
+        # Zero value → 0.0
+        assert _normalize_positive(0.0, 2.67) == 0.0
+        # Exactly at threshold → 1.0
+        assert _normalize_positive(2.67, 2.67) == 1.0
+        # Half of threshold → 0.5
+        assert abs(_normalize_positive(1.335, 2.67) - 0.5) < 1e-9

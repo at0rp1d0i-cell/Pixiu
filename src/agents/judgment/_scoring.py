@@ -169,7 +169,7 @@ def _decide(
     if report.status != "success" or report.error_message:
         return "retry"
     if overall_passed:
-        return "promote" if score >= 0.8 else "archive"
+        return "promote" if score >= THRESHOLDS.min_promote_score else "archive"
     if failed_checks and any(check.metric == "sharpe" and check.value <= 0 for check in failed_checks):
         return "reject"
     return "archive"

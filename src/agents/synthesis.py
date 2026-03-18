@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from src.schemas.research_note import FactorResearchNote, SynthesisInsight
+from src.schemas.thresholds import THRESHOLDS
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class SynthesisAgent:
         MAX_MERGE_CANDIDATES — 最多建议合并数，默认 3
     """
 
-    DEDUP_THRESHOLD: float = 0.85
+    DEDUP_THRESHOLD: float = THRESHOLDS.synthesis_dedup_threshold
     FAMILY_THRESHOLD: float = 0.60
     MAX_MERGE_CANDIDATES: int = 3
 
@@ -286,7 +287,7 @@ class SynthesisAgent:
                 if notes[i].island == notes[j].island:
                     continue
                 sim = float(sim_matrix[i][j])
-                if 0.50 < sim < self.DEDUP_THRESHOLD:
+                if THRESHOLDS.synthesis_family_similarity_min < sim < self.DEDUP_THRESHOLD:
                     candidates.append((i, j, sim))
 
         # 取 top-K（按相似度降序）
@@ -303,7 +304,7 @@ class SynthesisAgent:
                     note_id_b=notes[j].note_id,
                     relationship="complement",
                     combined_hypothesis=None,  # LLM 填充（Phase 2.2 后续迭代）
-                    priority="high" if sim > 0.70 else "medium",
+                    priority="high" if sim > THRESHOLDS.synthesis_high_priority_threshold else "medium",
                 )
             )
 

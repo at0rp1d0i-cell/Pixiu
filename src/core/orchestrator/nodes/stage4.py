@@ -5,6 +5,7 @@ import uuid
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import ExplorationOutput, CoderOutput
+from src.core.orchestrator._context import NODE_CODER
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,6 @@ def coder_node(state: AgentState) -> CoderOutput:
     from src.schemas.backtest import BacktestReport, BacktestMetrics
     import src.core.orchestrator as _orch
     _write_snapshot = _orch._write_snapshot
-    NODE_CODER = _orch.NODE_CODER
 
     notes = state.approved_notes
     if not notes:

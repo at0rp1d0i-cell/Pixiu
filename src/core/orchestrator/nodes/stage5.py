@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import JudgmentOutput, PortfolioOutput, ReportOutput
+from src.core.orchestrator._context import NODE_JUDGMENT, NODE_REPORT
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,6 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
     import src.core.orchestrator as _orch
     get_factor_pool = _orch.get_factor_pool
     _write_snapshot = _orch._write_snapshot
-    NODE_JUDGMENT = _orch.NODE_JUDGMENT
 
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
@@ -114,7 +114,6 @@ def report_node(state: AgentState) -> ReportOutput:
     _persist_cio_report = _orch._persist_cio_report
     _update_run_record = _orch._update_run_record
     _write_snapshot = _orch._write_snapshot
-    NODE_REPORT = _orch.NODE_REPORT
 
     logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
 

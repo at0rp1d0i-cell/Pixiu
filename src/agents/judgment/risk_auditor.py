@@ -30,7 +30,7 @@ class RiskAuditor:
 
         overfitting_score = 0.0
         if report.error_message:
-            overfitting_score = 0.5
+            overfitting_score = THRESHOLDS.execution_error_overfitting_penalty
         elif report.metrics.turnover_rate > THRESHOLDS.max_turnover_rate:
             overfitting_score = min(
                 1.0,

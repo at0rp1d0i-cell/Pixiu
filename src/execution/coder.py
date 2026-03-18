@@ -1,7 +1,10 @@
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from src.execution.docker_runner import DockerRunner
 from src.schemas.backtest import (
@@ -28,7 +31,10 @@ class Coder:
 
     def __init__(self):
         self.runner = DockerRunner()
-        self.template = TEMPLATE_PATH.read_text(encoding="utf-8")
+        try:
+            self.template = TEMPLATE_PATH.read_text(encoding="utf-8")
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Qlib backtest template not found: {TEMPLATE_PATH}") from e
         self.template_version = TEMPLATE_PATH.name
         ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -84,7 +90,7 @@ class Coder:
             .replace("{universe}", note.universe)
             .replace("{start_date}", note.backtest_start)
             .replace("{end_date}", note.backtest_end)
-            .replace("{topk}", "50")
+            .replace("{topk}", str(THRESHOLDS.backtest_topk))
         )
 
     def _save_artifacts(
@@ -94,22 +100,26 @@ class Coder:
         stdout: str,
         stderr: str,
     ) -> ArtifactRefs:
-        run_dir = ARTIFACTS_DIR / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            run_dir = ARTIFACTS_DIR / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
 
-        script_path = run_dir / "script.py"
-        stdout_path = run_dir / "stdout.txt"
-        stderr_path = run_dir / "stderr.txt"
+            script_path = run_dir / "script.py"
+            stdout_path = run_dir / "stdout.txt"
+            stderr_path = run_dir / "stderr.txt"
 
-        script_path.write_text(script, encoding="utf-8")
-        stdout_path.write_text(stdout or "", encoding="utf-8")
-        stderr_path.write_text(stderr or "", encoding="utf-8")
+            script_path.write_text(script, encoding="utf-8")
+            stdout_path.write_text(stdout or "", encoding="utf-8")
+            stderr_path.write_text(stderr or "", encoding="utf-8")
 
-        return ArtifactRefs(
-            stdout_path=str(stdout_path),
-            stderr_path=str(stderr_path),
-            script_path=str(script_path),
-        )
+            return ArtifactRefs(
+                stdout_path=str(stdout_path),
+                stderr_path=str(stderr_path),
+                script_path=str(script_path),
+            )
+        except OSError as exc:
+            logger.warning("[Coder] _save_artifacts failed for run_id=%s: %s", run_id, exc)
+            return ArtifactRefs()
 
     def _parse_result(
         self,

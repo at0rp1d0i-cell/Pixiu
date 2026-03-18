@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
+from src.schemas.stage_io import HypothesisGenOutput
 from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
@@ -447,12 +448,11 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         "hypotheses": hypotheses,
         "strategy_specs": strategy_specs,
         "scheduler_state": scheduler_state.model_dump(),
-        "scheduler_allocations": {a.subspace.value: a.quota for a in allocations},
         "subspace_generated": {s.value: v[0] for s, v in subspace_results.items()},
     }
 
 
-def hypothesis_gen_node(state: dict) -> dict:
+def hypothesis_gen_node(state: dict) -> HypothesisGenOutput:
     """LangGraph 同步入口。"""
     return asyncio.run(_hypothesis_gen_async(state))
 
