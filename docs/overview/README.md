@@ -1,24 +1,30 @@
 # Overview Guide
 
-`docs/overview/` 只回答三类问题：
+`docs/overview/` 是 Pixiu 给人类读者准备的主阅读路径。
 
-- 这个项目是什么
-- 现在做到了哪里
-- 应该先读哪些设计文档
+它只回答四件事：
 
-它不是实现细节堆放区，也不是历史讨论区。
+- 项目是什么
+- 代码入口在哪
+- 现在做到哪了
+- 下一篇该读什么
 
 ## Reading Order
 
-1. `project-snapshot.md`
-   - 用一个文件快速理解项目、当前进度和目标用户。
-2. `architecture-overview.md`
-   - 系统级总览；每个一级模块都必须映射到 `docs/design/` 中的展开设计。
-3. `spec-execution-audit.md`
-   - 当前哪些设计已经落地、哪些仍在漂移、哪些只是前瞻。
+1. `01_project-snapshot.md`
+   - 用一个文件快速理解 Pixiu 是什么、不是什么。
+2. `02_codebase-map.md`
+   - 找到代码入口和目录职责。
+3. `03_architecture-overview.md`
+   - 理解系统结构和 Stage 关系。
+4. `04_current-state.md`
+   - 用人类可读方式看清当前进度。
+5. `05_spec-execution-audit.md`
+   - 用审计视角核实哪些设计已经落地、哪些仍在漂移。
 
 ## Rules
 
-- `overview` 中出现的一级模块，必须能在 `docs/design/` 中找到对应设计文档。
-- `overview` 只保留系统边界、主张、当前状态和阅读顺序，不承载大段实现细节。
-- 当 `overview` 和实现不一致时，先更新 `spec-execution-audit.md`，再决定是否改设计或改代码。
+- `overview` 只保留高层真相和阅读顺序。
+- 大段实现细节应进入 `docs/design/`。
+- 当前执行计划应进入 `docs/plans/`。
+- 设计与代码不一致时，先更新 `05_spec-execution-audit.md`。

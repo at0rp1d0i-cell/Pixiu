@@ -1,44 +1,62 @@
 # Docs Guide
 
-这份目录是项目文档的统一入口。后续实现、审阅和协作，默认先从这里开始，而不是直接猜哪篇文档还有效。
+这份目录是 Pixiu 文档系统的唯一入口。
 
-## Start Here
+如果你不知道该先读什么，就从这里开始，不要直接在 `docs/` 里扫文件名。
 
-1. `docs/overview/README.md`
-   - 先理解 `overview` 的职责和阅读顺序。
-2. `docs/overview/project-snapshot.md`
-   - 如果你只想用一个文件快速理解项目，先读这个。
-3. `docs/overview/architecture-overview.md`
-   - 当前系统总览；每个一级模块都映射到 `docs/design/`。
-4. `docs/design/README.md`
-   - 有效设计文档清单和阅读顺序。
-5. `docs/overview/spec-execution-audit.md`
-   - 判断设计和实现是否一致，先看这里。
-6. `docs/design/test-pipeline.md`
-   - 测试分层、命令、前置依赖和 merge gate 的统一设计。
-7. `docs/plans/current_implementation_plan.md`
-   - 当前主线执行计划。
+## Default Reading Path
 
-## Directory Map
+### 15 分钟理解项目
 
-- `docs/overview/`
-  - 项目全貌、当前状态和阅读顺序。
+1. `docs/overview/01_project-snapshot.md`
+2. `docs/overview/02_codebase-map.md`
+3. `docs/overview/03_architecture-overview.md`
+4. `docs/overview/04_current-state.md`
+5. `docs/overview/05_spec-execution-audit.md`
+
+### 要深入当前设计
+
+1. `docs/design/README.md`
+2. 当前相关模块的 design 文档
+
+### 要看当前执行工作
+
+1. `docs/plans/current_implementation_plan.md`
+2. `docs/plans/README.md`
+
+### 要看未来路线
+
+1. `docs/futures/README.md`
+
+## Two-layer Model
+
+Pixiu 的文档系统采用双层结构：
+
+- 上层：人类优先
+  - `docs/README.md`
+  - `docs/overview/`
+- 下层：实现与维护
+  - `docs/design/`
+  - `docs/plans/`
+  - `docs/futures/`
+  - `docs/reference/`
+  - `docs/research/`
+  - `docs/archive/`
+
+## After the Main Path
+
 - `docs/design/`
-  - 当前有效的设计展开层；`overview` 中的 part 都应在这里展开。
+  - 当前有效设计，只有在你已经读完 `overview` 后再进入
 - `docs/plans/`
-  - 当前任务、实现计划和工程债。
-- `docs/research/`
-  - 背景讨论与历史分析。默认不再承载当前真相或参考索引。
-- `docs/reference/`
-  - 相对稳定的外部知识、论文索引和数据管线参考资料。
-- `docs/archive/`
-  - 已过时、被替代或仅保留历史价值的文档。默认不直接指导新开发。
-- `docs/specs/`
-  - 兼容入口；不再承载当前设计真相。
+  - 当前执行计划和工程债
+- `docs/futures/`
+  - 前瞻但非当前运行时的设计
 
-## Rules
+其余目录如 `reference / research / archive / specs` 默认都不在第一阅读路径里。
 
-- 需要理解项目时，先看 `docs/overview/README.md` 和 `docs/overview/architecture-overview.md`。
-- 需要展开某个模块时，再进入 `docs/design/` 对应文档。
-- 当设计与代码不一致时，以 `docs/overview/spec-execution-audit.md` 的结论为准，先修设计路径，再做实现。
-- `docs/archive/` 中的内容只用于追溯历史决策，不应再被当作当前架构的依据。
+## Ground Rules
+
+- 需要理解项目时，先走 `overview` 五篇主路径。
+- 需要改实现时，再进入 `design/` 或 `plans/`。
+- 当设计与代码不一致时，以 `docs/overview/05_spec-execution-audit.md` 为准。
+- 文档系统本身的规范见 `docs/00_documentation-standard.md`。

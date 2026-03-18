@@ -60,12 +60,12 @@ uv lock
 | Stage | 职责 | 核心模块 | 输出 |
 |-------|------|----------|------|
 | 1 — Market Context | 宽扫描，建立市场上下文 | `src/agents/market_analyst.py` | `MarketContextMemo` |
-| 2 — Hypothesis Expansion | 系统扩张研究假设空间（5 子空间） | `src/agents/researcher.py` | `FactorResearchNote` → `Hypothesis/StrategySpec` |
+| 2 — Hypothesis Expansion | 系统扩张研究假设空间（4 个活跃子空间 + regime 基础设施层） | `src/agents/researcher.py` | `FactorResearchNote` → `Hypothesis/StrategySpec` |
 | 3 — Prefilter | 昂贵回测前做硬 gate | `src/agents/prefilter.py` | `FilterReport` |
 | 4 — Execution | 确定性执行，可 replay | `src/execution/coder.py` | `BacktestReport` |
-| 5 — Judgment | 结构化判断，沉淀约束 | `src/agents/judgment.py` | `CriticVerdict`, `CIOReport` |
+| 5 — Judgment | 结构化判断，沉淀约束 | `src/agents/judgment/` | `CriticVerdict`, `CIOReport` |
 
-### Stage 2 — Hypothesis Expansion Engine（五子空间）
+### Stage 2 — Hypothesis Expansion Engine（4 个活跃子空间 + regime 基础设施层）
 
 Stage 2 的核心升级方向：把"智能性"从 execution layer 搬回 hypothesis layer。
 
@@ -93,10 +93,10 @@ A 股 alpha 大量藏在叙事层而非 price signal：
 - 公告语言风格、卖方一致预期与现实偏差
 - 产出：candidate mechanism, latent driver hypothesis, event-to-factor mapping
 
-#### 5. Regime Conditional Factors
+#### 5. Regime 基础设施层
 因子不是"好"或"坏"，而是 regime-dependent：
 - 生成 factor + applicable regime + invalid regime + switching rule hypothesis
-- 直接改变 Stage 3/4 的评估方式
+- 通过 `RegimeDetector / RegimeFilter / applicable_regimes / invalid_regimes` 改变 Stage 3/4 的评估方式
 
 ### 因子的广义定义
 
@@ -115,20 +115,22 @@ A 股 alpha 大量藏在叙事层而非 price signal：
 - 主编排：`src/core/orchestrator/`（graph.py + nodes/ + _context.py）
 - 控制平面：`src/control_plane/state_store.py`
 - Factor 沉淀：`src/factor_pool/pool.py`
-- Stage 5 canonical runtime：`src/agents/judgment.py`
+- Stage 5 canonical runtime：`src/agents/judgment/`
 
 ## 文档体系
 
 优先级从高到低：
 
-1. `docs/overview/` — 项目全貌、当前状态
-2. `docs/design/` — 有效设计展开层
-3. `docs/plans/` — 执行计划和工程债
-4. `docs/reference/` — 外部参考资料
-5. `docs/research/` — 历史讨论
-6. `docs/archive/` — 已过时文档，仅供追溯
+1. `docs/00_documentation-standard.md` — 文档系统总规范
+2. `docs/overview/` — 项目全貌、当前状态、代码地图
+3. `docs/design/` — 有效设计展开层
+4. `docs/plans/` — 执行计划和工程债
+5. `docs/futures/` — 前瞻但非当前运行时的设计
+6. `docs/reference/` — 外部参考资料
+7. `docs/research/` — 历史讨论
+8. `docs/archive/` — 已过时文档，仅供追溯
 
-当设计与代码不一致时，以 `docs/overview/spec-execution-audit.md` 的结论为准。
+当设计与代码不一致时，以 `docs/overview/05_spec-execution-audit.md` 的结论为准。
 
 ## 常用命令
 
@@ -146,10 +148,10 @@ uv run pytest -q tests -m integration
 uv run python -m src.core.run_baseline
 
 # 单岛调试
-uv run python -m src.core.orchestrator --mode single --island momentum
+uv run pixiu run --mode single --island momentum
 
 # 演化循环
-uv run python -m src.core.orchestrator --mode evolve --rounds 20
+MAX_ROUNDS=20 uv run pixiu run --mode evolve --rounds 20
 
 # CLI
 uv run pixiu --help
@@ -160,11 +162,11 @@ uv run uvicorn src.api.server:app --reload
 
 ## 当前优先级
 
-1. **Stage 2 升级**：将 Stage 2 从 note generation 升级为真正的 Hypothesis Expansion Engine（五子空间）
-2. **Richer contracts**：收紧 `BacktestReport / CriticVerdict / FactorPoolRecord` 合约
+1. **Stage 2 工具化与数据源扩展**：让 Researcher 能主动消费 RSS / MCP 数据源，补齐 NARRATIVE_MINING 与 regime 特征层
+2. **Richer contracts**：继续收紧 `BacktestReport / CriticVerdict / FactorPoolRecord` 合约，并补齐 `subspace_origin` 端到端写回
 3. **控制平面**：扩展到稳定的数据面（审计 trail、读模型）
-4. **测试闭环**：补齐 live / e2e 测试
-5. **产品层**：Dashboard 和数据源扩展
+4. **Phase 4B 实验与 MiroFish Go/No-Go**：先用受控实验验证新数据价值，再决定是否接入 MiroFish
+5. **测试闭环与产品层**：补齐 live / e2e，最后再扩展 Dashboard
 
 ---
 

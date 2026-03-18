@@ -1,7 +1,7 @@
 # Current Implementation Plan
 
 > 更新时间：2026-03-17
-> 来源：`docs/overview/spec-execution-audit.md`、`docs/design/stage-45-golden-path.md`
+> 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
 
 ---
 
@@ -35,7 +35,7 @@
 - [x] 实现 deterministic `Critic`
 - [x] 打通 `FactorPool.register_factor` 的最小写回路径
 - [x] 生成最小 `CIOReport`
-- [x] 明确 `src/agents/judgment.py` 为唯一 Stage 5 主路径，旧 Stage 5 文件降级为兼容层
+- [x] 明确 `src/agents/judgment/` 包为唯一 Stage 5 主路径，旧 Stage 5 文件降级为兼容层
 
 注：当前已经落下 deterministic `Critic / RiskAuditor / PortfolioManager / ReportWriter` 的最小运行时，但 richer contract 和控制平面还未完成。
 
@@ -70,19 +70,18 @@
 - [x] CriticVerdict.decision → Literal["promote","archive","reject","retry"]（明确决策枚举）
 - [x] _diagnose_failure() 直接返回 Optional[FailureMode]（删除 _FAILURE_MODE_MAP bridge，消除二次解析）
 - [x] FactorPoolRecord.subspace_origin: Optional[str]（假设来源子空间溯源）
-- [x] pool.register_factor() 接受 note 参数，写入 subspace_origin
+- [ ] Stage 5 → FactorPool 端到端 `subspace_origin` 写回（`register_factor()` 签名已支持 `note`，当前调用链仍未传入）
 - [x] factor_pool_writer.py factor_spec None guard（处理历史兼容对象）
 
 ### Phase 3B（计划）: 代码清理
 
-- [x] 归档兼容层文件（critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py / factor_pool_record.py 全部删除，phase3b）
-- [x] 清理 src/agents/schemas.py 中的重复 BacktestMetrics 定义（已删除，phase3b）
-- [x] 删除 src/schemas/factor_pool_record.py legacy re-export wrapper（已删除，phase3b）
+- [x] 兼容层清理已完成：旧 Stage 5 shim、重复 schema 定义和 legacy re-export wrapper 已在 phase3b 删除
 
 ### Phase 3C（计划）: 数据源扩展
 
-- [ ] NARRATIVE_MINING 子空间：接入新闻/公告文本数据源（MCP 工具或 API）
-- [ ] REGIME_CONDITIONAL 子空间：扩展 regime 特征量（资金流向、估值分位、波动率结构等）
+- [ ] NARRATIVE_MINING 子空间：接入新闻/公告文本数据源（当前优先走 Stage 1 消费，Stage 2 直连需 Researcher 工具化）
+- [ ] Researcher 工具化升级：为 `AlphaResearcher` 增加 MCP / tool calling 能力
+- [ ] regime 基础设施层：扩展特征量（资金流向、估值分位、波动率结构等）
 - [ ] CROSS_MARKET：美股/港股/商品价格信号对齐与 pattern transfer
 
 ### Phase 3D（计划）: MiroFish 协议层

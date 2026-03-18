@@ -6,11 +6,12 @@ Repository guidance for AI agents working in this project.
 
 Before making architectural decisions, read these in order:
 
-1. `CLAUDE.md` — 项目定义、技术栈、AI Team 设计、Stage 2 五子空间方向
-2. `docs/README.md` — 文档体系入口
-3. `docs/overview/architecture-overview.md` — 系统总览
-4. `docs/overview/spec-execution-audit.md` — 设计与实现一致性审计
-5. `docs/design/test-pipeline.md` — 测试分层规范
+1. `CLAUDE.md` — 项目定义、技术栈、AI Team 设计、Stage 2 四个活跃子空间 + regime 基础设施层
+2. `docs/00_documentation-standard.md` — 文档级别与目录职责规范
+3. `docs/README.md` — 文档体系入口
+4. `docs/overview/03_architecture-overview.md` — 系统总览
+5. `docs/overview/05_spec-execution-audit.md` — 设计与实现一致性审计
+6. `docs/design/16_test-pipeline.md` — 测试分层规范
 
 Do not treat `docs/archive/` as the source of truth for current implementation.
 
@@ -19,10 +20,10 @@ Do not treat `docs/archive/` as the source of truth for current implementation.
 Pixiu v2 — LLM-native alpha research OS for A-shares.
 
 - Schema 真相：`src/schemas/`
-- 主编排：`src/core/orchestrator.py`
+- 主编排：`src/core/orchestrator/`
 - 控制平面：`src/control_plane/state_store.py`
-- Stage 5 canonical runtime：`src/agents/judgment.py`
-- 设计与实现偏差以 `docs/overview/spec-execution-audit.md` 为准
+- Stage 5 canonical runtime：`src/agents/judgment/`
+- 设计与实现偏差以 `docs/overview/05_spec-execution-audit.md` 为准
 - 当前架构重心：扩大 hypothesis space，不扩大 execution power
 
 ### 架构灵魂
@@ -98,10 +99,10 @@ uv run pytest -q tests -m integration
 uv run python -m src.core.run_baseline
 
 # single-island debug run
-uv run python -m src.core.orchestrator --mode single --island momentum
+uv run pixiu run --mode single --island momentum
 
 # evolve loop
-uv run python -m src.core.orchestrator --mode evolve --rounds 20
+MAX_ROUNDS=20 uv run pixiu run --mode evolve --rounds 20
 
 # CLI
 uv run pixiu --help
@@ -114,11 +115,11 @@ uv run uvicorn src.api.server:app --reload
 
 Recommended execution order:
 
-1. Upgrade Stage 2 into a real Hypothesis Expansion Engine (5 subspaces: Factor Algebra Search, Symbolic Mutation, Cross-Market Mining, Narrative Mining, Regime Conditional)
-2. Converge richer contracts (`BacktestReport / CriticVerdict / FactorPoolRecord`)
+1. Expand Stage 2 data access: RSS / MCP direct consumption still only exists in Stage 1; upgrading `AlphaResearcher` tool access is the next architecture step
+2. Converge richer contracts (`BacktestReport / CriticVerdict / FactorPoolRecord`) and finish end-to-end `subspace_origin` writeback
 3. Expand control plane to stable data plane
-4. Complete live / e2e test loops
-5. Only then expand Dashboard and data-source surface area
+4. Run Phase 4B controlled experiments before deciding on MiroFish Go/No-Go
+5. Only then expand Dashboard and broader data-source surface area
 
 ## Worker Output Requirements
 

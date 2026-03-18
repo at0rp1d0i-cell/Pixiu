@@ -1,192 +1,80 @@
 # Pixiu v2 杂项待办清单
 
-> 创建：2026-03-07
-> 来源：代码审计（src/ 全量扫描）
+> 更新时间：2026-03-18
+> 说明：本文件只保留当前代码仍然存在的工程债。随 Phase 3 重构一起消失的旧文件问题，已不再保留在 active 清单中。
 
 ---
 
-## 🔴 Critical（必须在任何新代码合并前修复）
+## 🔴 Current
 
-### C1. 删除硬编码 API Key
+### D1. Researcher 环境变量校验仍然偏隐式
 
-**问题**：源码中包含真实 API Key，任何 git push 都会泄露。
+**文件**：`src/agents/researcher.py:141-145`
 
-| 文件 | 行 | 问题代码 |
-|---|---|---|
-| `src/sandbox/claude_code_adapter.py` | 26 | `os.environ.get("ANTHROPIC_API_KEY", "sk-sp-0dac...")` |
-| `src/data_pipeline/news_sentiment_spider.py` | 25 | `os.environ.get("ANTHROPIC_API_KEY", "sk-746...")` |
-| `src/agents/researcher.py` | 60 | `os.environ.get("RESEARCHER_API_KEY", os.environ.get(..., "sk-746..."))` |
-
-**修复**：删除所有 fallback 字符串，改为缺失时 raise：
-```python
-api_key = os.environ.get("ANTHROPIC_API_KEY")
-if not api_key:
-    raise ValueError("ANTHROPIC_API_KEY 未设置，请检查 .env 文件")
-```
-
-### C2. 硬编码阈值 magic number 分散在各处
-
-**问题**：`2.67`、`0.02`、`0.3`、`0.5` 散落在 orchestrator、pool、critic 等多个文件，与 `THRESHOLDS` 配置不一致（v2 已定义集中配置，旧代码未迁移）。
-
-**修复**：统一从 `src/schemas/thresholds.py` 的 `THRESHOLDS` 对象读取，删除所有 literal 数值。
-
-### ~~C3. Stage 5 兼容层仍待进一步收缩~~ ✅ 已解决（phase3b）
-
-**文件**：`critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py / factor_pool_record.py` 已全部删除。`src/agents/judgment.py` 为唯一 Stage 5 主实现。
-
----
-
-## 🟠 High（影响可维护性和可移植性）
-
-### H1. 15+ 处 print() 替换为 logging
-
-**涉及文件**：
-
-| 文件 | 数量 |
-|---|---|
-| `src/data_pipeline/data_downloader.py` | ~7 处 |
-| `src/data_pipeline/format_to_qlib.py` | ~7 处 |
-| `src/data_pipeline/news_sentiment_spider.py` | ~6 处 |
-
-**修复模板**：
-```python
-import logging
-logger = logging.getLogger(__name__)
-# print("...") → logger.info("...")
-# print(f"错误: {e}") → logger.error("错误: %s", e)
-```
-
-### H2. 硬编码 Docker 镜像名
-
-**文件**：`src/sandbox/claude_code_adapter.py:87`（v2 中此文件将被删除，但新 `src/execution/docker_runner.py` 不应重蹈覆辙）
-
-**v2 修复**（在 docker_runner.py 中）：
-```python
-IMAGE = os.environ.get("CODER_DOCKER_IMAGE", "Pixiu-coder:latest")
-```
-
-### H3. 硬编码 IP 地址和代理
-
-**文件**：`src/data_pipeline/news_sentiment_spider.py`
+当前 `ChatOpenAI` 初始化直接读取环境变量：
 
 ```python
-# 问题
-LLM_API_BASE = os.environ.get("ANTHROPIC_BASE_URL", "http://172.30.128.1:8045/v1")  # WSL IP
-PROXIES = {"http": "http://127.0.0.1:17890", ...}  # 本地代理端口
-
-# 修复
-LLM_API_BASE = os.environ.get("ANTHROPIC_BASE_URL")
-if not LLM_API_BASE: raise ValueError("ANTHROPIC_BASE_URL 未设置")
-
-HTTP_PROXY = os.environ.get("HTTP_PROXY", "")
-PROXIES = {"http": HTTP_PROXY, "https": HTTP_PROXY} if HTTP_PROXY else {}
+model=os.getenv("RESEARCHER_MODEL", "deepseek-chat")
+base_url=os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE"))
+api_key=os.getenv("RESEARCHER_API_KEY", os.getenv("OPENAI_API_KEY"))
 ```
 
----
+问题：
 
-## 🟡 Medium（影响健壮性）
+- 缺失时可能静默传入 `None`
+- 配置错误定位不够直接
+- 仍缺统一的 config/validation 入口
 
-### M1. API 调用无重试
+建议：
 
-**文件**：`src/data_pipeline/news_sentiment_spider.py:67,99`
+- 为 Researcher 增加集中配置校验
+- 对关键环境变量缺失给出明确错误信息
 
-HTTP 请求单次失败即崩溃，无重试逻辑。
+### D2. IslandScheduler 调度参数仍是模块级硬编码常量
 
-**修复**：
-```python
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+**文件**：`src/factor_pool/scheduler.py:18-28`
 
-session = requests.Session()
-session.mount("https://", HTTPAdapter(max_retries=Retry(total=3, backoff_factor=1.0)))
-```
+当前温度退火和重置阈值仍是模块级常量：
 
-### M2. Docker subprocess 超时硬编码
+- `T_INIT`
+- `T_MIN`
+- `ANNEAL_EVERY`
+- `ANNEAL_FACTOR`
+- `RESET_MIN_RUNS`
+- `RESET_SHARPE_THRESHOLD`
+- `VIRGIN_ISLAND_SHARPE`
 
-**文件**：`src/sandbox/claude_code_adapter.py:100`（和新 `docker_runner.py`）
+问题：
 
-```python
-# 问题
-subprocess.run(..., timeout=300)
+- 调参与运行时配置没有统一入口
+- 参数约束没有显式验证
+- 实验与生产口径难以切换
 
-# v2 修复（在 docker_runner.py 中已按 spec 处理）
-timeout_seconds=int(os.environ.get("BACKTEST_TIMEOUT_SECONDS", "600"))
-```
+建议：
 
-### M3. os.getenv 不验证必填项
+- 收敛到集中配置对象
+- 为关键参数增加不变量校验
 
-**文件**：`src/agents/researcher.py:59-61`、多处
+## 🟡 Follow-up
 
-目前代码假设所有 env var 存在，缺失时会传 `None` 给 LLM 客户端，导致难以诊断的错误。
+### D3. Researcher 内部仍有过宽的异常捕获
 
-**修复**：统一使用 `src/core/config.py` 中的验证函数：
-```python
-def require_env(key: str) -> str:
-    value = os.environ.get(key)
-    if not value:
-        raise EnvironmentError(f"必填环境变量 {key} 未设置，请检查 .env 文件")
-    return value
-```
+**文件**：`src/agents/researcher.py:312-315`, `src/agents/researcher.py:341-342`
 
-### M4. IslandScheduler 参数无验证
+当前对符号变异失败和 FailureConstraint 查询失败采用宽泛 `except Exception`。
 
-**文件**：`src/factor_pool/scheduler.py`
+问题：
 
-```python
-# 修复：在 __init__ 中添加断言
-assert 0 < t_min < t_init, f"需满足 0 < T_MIN({t_min}) < T_INIT({t_init})"
-assert 0 < anneal_factor < 1.0, f"ANNEAL_FACTOR({anneal_factor}) 必须在 (0,1) 之间"
-assert reset_min_runs > 0, "RESET_MIN_RUNS 必须 > 0"
-```
+- 容易吞掉真正的实现错误
+- 诊断粒度不足
 
----
+建议：
 
-## 🔵 Low（代码整洁，不影响功能）
+- 区分“预期降级”和“真实异常”
+- 对可恢复错误保留 fallback，对不可恢复错误提高日志等级或直接暴露
 
-### L1. 路径存在性验证
+## 约定
 
-**文件**：`src/agents/researcher.py:31-34`
-
-```python
-if not DICTIONARY_PATH.exists():
-    raise FileNotFoundError(f"因子字典文件缺失: {DICTIONARY_PATH}")
-```
-
-### L2. 异常类型细化
-
-**文件**：`src/agents/researcher.py:115-119`
-
-```python
-# 粗糙
-except Exception as e:
-    logger.warning("因子字典加载失败: %s", e)
-
-# 细化
-except FileNotFoundError:
-    logger.warning("因子字典文件未找到: %s", DICTIONARY_PATH)
-except OSError as e:
-    logger.error("因子字典读取 IO 错误: %s", e)
-```
-
-### L3. 删除 v1 遗留文件
-
-v2 实施完成后，以下文件/目录应删除：
-- `src/sandbox/`（整个目录，被 `src/execution/` 替代）
-- `src/agents/coder.py` 中的 Claude Code 相关代码
-- `AgentState` 中的 DEPRECATED 字段（`factor_hypothesis`、`backtest_metrics`）
-
----
-
-## 执行优先级
-
-```
-C1（泄露密钥）→ C2（magic number）→ C3（静默异常）
-    ↓
-H1（print→logging）→ H3（硬编码 IP）→ H2（Docker 镜像名）
-    ↓
-M1-M4（健壮性）
-    ↓
-L1-L3（整洁）
-```
-
-**建议**：C1-C3 在 v2 Stage 4 实施前修复（可合并）；H/M 类在各 Stage 实施时顺手处理；L 类在所有 Stage 完成后统一清理。
+- 新的工程债只记录当前仍存在的代码问题
+- 已删除文件的问题不继续留在 active 清单中
+- 纯历史债务应移动到 `docs/archive/`
