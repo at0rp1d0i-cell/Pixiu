@@ -9,23 +9,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 pytestmark = pytest.mark.unit
 
-from dataclasses import dataclass, field
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport, FactorSpecSnapshot
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
-
-
-@dataclass
-class FactorHypothesis:
-    """Duck-type shim for legacy pool.register() API."""
-    name: str
-    formula: str
-    hypothesis: str
-    rationale: str
-    expected_direction: str = "unknown"
-    market_observation: str = ""
-
-
 
 
 @pytest.fixture()
@@ -34,46 +20,86 @@ def pool(tmp_path):
     return FactorPool(db_path=str(tmp_path / "test_db"))
 
 
-def _make_hypothesis(name="test_factor", formula="Mean($close, 5) / Ref($close, 5)"):
-    return FactorHypothesis(
-        name=name,
+def _make_report(name="test_factor", formula="Mean($close, 5) / Ref($close, 5)",
+                 island="momentum", sharpe=2.0, ic_mean=0.03, icir=0.4,
+                 turnover_rate=20.0) -> BacktestReport:
+    # report.passed = execution succeeded (parse_success); verdict.overall_passed = met quality bar
+    return BacktestReport(
+        report_id=f"report-{name}",
+        note_id=f"note-{name}",
+        factor_id=f"{island}_{name}",
+        island=island,
         formula=formula,
-        hypothesis="测试因子",
-        rationale="用于单元测试",
+        metrics=BacktestMetrics(
+            sharpe=sharpe,
+            annualized_return=0.1,
+            max_drawdown=-0.1,
+            ic_mean=ic_mean,
+            ic_std=0.01,
+            icir=icir,
+            turnover_rate=turnover_rate,
+        ),
+        passed=True,  # execution succeeded; quality judgment lives in CriticVerdict
+        execution_time_seconds=1.0,
+        qlib_output_raw="{}",
     )
 
 
-def _make_metrics(sharpe=2.0, ic_mean=0.03, icir=0.4, turnover_rate=20.0):
-    return BacktestMetrics(
-        sharpe=sharpe, annualized_return=0.1, max_drawdown=-0.1,
-        ic_mean=ic_mean, ic_std=0.01, icir=icir, turnover_rate=turnover_rate,
+def _make_verdict(name="test_factor", island="momentum", passed=True) -> CriticVerdict:
+    return CriticVerdict(
+        report_id=f"report-{name}",
+        factor_id=f"{island}_{name}",
+        note_id=f"note-{name}",
+        overall_passed=passed,
+        decision="promote" if passed else "archive",
+        score=0.8 if passed else 0.3,
+        checks=[],
+        register_to_pool=True,
+        pool_tags=[],
+        reason_codes=[],
     )
+
+
+def _make_risk(name="test_factor", island="momentum") -> RiskAuditReport:
+    return RiskAuditReport(
+        factor_id=f"{island}_{name}",
+        overfitting_score=0.1,
+        overfitting_flag=False,
+        correlation_flags=[],
+        recommendation="clear",
+        audit_notes="ok",
+    )
+
+
+def _register(pool, name, formula="Mean($close, 5) / Ref($close, 5)",
+              island="momentum", sharpe=2.0):
+    report = _make_report(name=name, formula=formula, island=island, sharpe=sharpe)
+    verdict = _make_verdict(name=name, island=island, passed=sharpe > 2.67)
+    risk = _make_risk(name=name, island=island)
+    pool.register_factor(report=report, verdict=verdict, risk_report=risk,
+                         hypothesis="测试因子")
 
 
 class TestRegister:
     def test_register_basic(self, pool):
-        h = _make_hypothesis()
-        m = _make_metrics()
-        fid = pool.register(h, m, island_name="momentum")
-        assert "momentum" in fid
+        _register(pool, "test_factor", island="momentum")
         assert pool._collection.count() == 1
 
     def test_register_multiple(self, pool):
         for i in range(3):
-            h = _make_hypothesis(name=f"test_factor_{i}")
-            pool.register(h, _make_metrics(), island_name="momentum")
+            _register(pool, f"test_factor_{i}", island="momentum")
         assert pool._collection.count() == 3
 
 
 class TestReads:
     def test_get_island_best_factors(self, pool):
         # 写入三个因子，Sharpe 分别为 1.0, 3.0, 2.0
-        pool.register(_make_hypothesis("f1"), _make_metrics(sharpe=1.0), "momentum")
-        pool.register(_make_hypothesis("f2"), _make_metrics(sharpe=3.0), "momentum")
-        pool.register(_make_hypothesis("f3"), _make_metrics(sharpe=2.0), "momentum")
-        
+        _register(pool, "f1", island="momentum", sharpe=1.0)
+        _register(pool, "f2", island="momentum", sharpe=3.0)
+        _register(pool, "f3", island="momentum", sharpe=2.0)
+
         # 另外一个 Island
-        pool.register(_make_hypothesis("f4"), _make_metrics(sharpe=5.0), "valuation")
+        _register(pool, "f4", island="valuation", sharpe=5.0)
 
         bests = pool.get_island_best_factors("momentum", top_k=2)
         assert len(bests) == 2
@@ -82,45 +108,38 @@ class TestReads:
 
     def test_get_similar_failures(self, pool):
         # 相似失败 (Sharpe 低于基线)
-        pool.register(
-            _make_hypothesis("fail1", "$close / Ref($close, 5)"),
-            _make_metrics(sharpe=1.0),
-            "momentum"
-        )
+        _register(pool, "fail1", formula="$close / Ref($close, 5)",
+                  island="momentum", sharpe=1.0)
         # 相似成功 (Sharpe 高于基线)
-        pool.register(
-            _make_hypothesis("success1", "$close / Ref($close, 5) + 1"),
-            _make_metrics(sharpe=3.0),
-            "momentum"
-        )
-        
+        _register(pool, "success1", formula="$close / Ref($close, 5) + 1",
+                  island="momentum", sharpe=3.0)
+
         failures = pool.get_similar_failures("$close / Ref($close, 5)", top_k=5)
-        
+
         assert len(failures) == 1
         assert failures[0]["sharpe"] == 1.0
-        assert "fail1" in failures[0]["factor_name"]
 
     def test_get_island_leaderboard(self, pool):
-        pool.register(_make_hypothesis("f1"), _make_metrics(sharpe=1.0), "momentum")
-        pool.register(_make_hypothesis("f2"), _make_metrics(sharpe=2.0), "momentum")
-        
-        pool.register(_make_hypothesis("f3"), _make_metrics(sharpe=5.0), "valuation")
+        _register(pool, "f1", island="momentum", sharpe=1.0)
+        _register(pool, "f2", island="momentum", sharpe=2.0)
+
+        _register(pool, "f3", island="valuation", sharpe=5.0)
 
         board = pool.get_island_leaderboard()
         assert len(board) == 2
         # Valuation has max sharpe 5.0, so it should be first
         assert board[0]["island"] == "valuation"
         assert board[0]["best_sharpe"] == 5.0
-        
+
         assert board[1]["island"] == "momentum"
         assert board[1]["best_sharpe"] == 2.0
         assert board[1]["avg_sharpe"] == 1.5
         assert board[1]["factor_count"] == 2
 
     def test_get_stats(self, pool):
-        pool.register(_make_hypothesis("f1"), _make_metrics(sharpe=1.0), "momentum")
+        _register(pool, "f1", island="momentum", sharpe=1.0)
         # > 2.67 baseline
-        pool.register(_make_hypothesis("f2"), _make_metrics(sharpe=3.0), "momentum") 
+        _register(pool, "f2", island="momentum", sharpe=3.0)
 
         stats = pool.get_stats()
         assert stats["total_factors"] == 2

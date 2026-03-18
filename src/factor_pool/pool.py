@@ -807,12 +807,14 @@ def _summarize_failure(meta: dict) -> str:
 
     if sharpe <= THRESHOLDS.min_sharpe:
         reasons.append(f"Sharpe={sharpe:.2f}（基线{THRESHOLDS.min_sharpe}）")
-    if ic != 0.0 and ic < 0.02:
-        reasons.append(f"IC={ic:.4f}（低于0.02）")
-    if icir != 0.0 and icir < 0.3:
-        reasons.append(f"ICIR={icir:.2f}（不稳定）")
-    if turnover != 0.0 and turnover > 50.0:
-        reasons.append(f"换手率={turnover:.1f}%（过高）")
+    if ic != 0.0 and ic < THRESHOLDS.min_ic_mean:
+        reasons.append(f"IC={ic:.4f}（低于{THRESHOLDS.min_ic_mean}）")
+    if icir != 0.0 and icir < THRESHOLDS.min_icir:
+        # THRESHOLDS.min_icir = 0.30
+        reasons.append(f"ICIR={icir:.2f}（低于{THRESHOLDS.min_icir}）")
+    if turnover != 0.0 and turnover > THRESHOLDS.max_turnover_rate:
+        # turnover_rate 单位为小数（0~1），THRESHOLDS.max_turnover_rate = 0.50
+        reasons.append(f"换手率={turnover:.4f}（高于{THRESHOLDS.max_turnover_rate}）")
 
     return "；".join(reasons) if reasons else "指标未达标"
 

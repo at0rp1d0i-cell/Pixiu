@@ -443,7 +443,6 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     strategy_specs: list[StrategySpec] = [note.to_strategy_spec() for note in all_notes]
 
     return {
-        **state,
         "research_notes": all_notes,
         "hypotheses": hypotheses,
         "strategy_specs": strategy_specs,

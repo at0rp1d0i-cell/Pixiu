@@ -248,7 +248,7 @@ async def _market_context_async(state: dict) -> dict:
         logger.warning("[Stage 1] MarketAnalyst 失败，使用空上下文: %s", e)
         memo = _empty_memo(str(e), active_islands=active_islands)
 
-    return {**state, "market_context": memo}
+    return {"market_context": memo}
 
 
 def market_context_node(state: dict) -> MarketContextOutput:

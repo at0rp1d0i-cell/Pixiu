@@ -18,7 +18,8 @@ ACTIVE_ISLANDS: List[str] = os.getenv(
 def market_context_node(state: AgentState) -> MarketContextOutput:
     """Stage 1: MarketAnalyst + LiteratureMiner，生成 MarketContextMemo。"""
     from src.agents.market_analyst import market_context_node as _market_node
-    from src.core.orchestrator._context import get_scheduler
+    import src.core.orchestrator as _orch_s1
+    get_scheduler = _orch_s1.get_scheduler
     from src.factor_pool.pool import get_factor_pool
 
     logger.info("[Stage 1] 生成市场上下文... (Round %d)", state.current_round)

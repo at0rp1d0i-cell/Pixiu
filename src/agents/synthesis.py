@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 from src.schemas.research_note import FactorResearchNote, SynthesisInsight
 from src.schemas.thresholds import THRESHOLDS
@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 class SynthesisResult:
     """SynthesisAgent 的完整输出。"""
 
-    filtered_notes: List[FactorResearchNote]
-    removed_notes: List[str]                    # 被去重移除的 note_id 列表
-    insights: List[SynthesisInsight]            # 去重 + family 关联
-    families: Dict[str, List[str]]              # family_label → [note_ids]
-    merge_candidates: List[SynthesisInsight]    # 建议跨 island 合并的 pairs
+    filtered_notes: list[FactorResearchNote]
+    removed_notes: list[str]                    # 被去重移除的 note_id 列表
+    insights: list[SynthesisInsight]            # 去重 + family 关联
+    families: dict[str, list[str]]              # family_label → [note_ids]
+    merge_candidates: list[SynthesisInsight]    # 建议跨 island 合并的 pairs
 
 
 class SynthesisAgent:
@@ -46,7 +46,7 @@ class SynthesisAgent:
     """
 
     DEDUP_THRESHOLD: float = THRESHOLDS.synthesis_dedup_threshold
-    FAMILY_THRESHOLD: float = 0.60
+    FAMILY_THRESHOLD: float = THRESHOLDS.synthesis_family_threshold
     MAX_MERGE_CANDIDATES: int = 3
 
     def __init__(self, vectorizer: str = "tfidf") -> None:
@@ -67,7 +67,7 @@ class SynthesisAgent:
 
     async def synthesize(
         self,
-        notes: List[FactorResearchNote],
+        notes: list[FactorResearchNote],
     ) -> SynthesisResult:
         """对给定的 research notes 执行去重、聚类、merge 建议。
 
@@ -140,7 +140,7 @@ class SynthesisAgent:
     # 内部步骤
     # ─────────────────────────────────────────────────────────
 
-    def _vectorize(self, notes: List[FactorResearchNote]):
+    def _vectorize(self, notes: list[FactorResearchNote]):
         """TF-IDF 向量化，返回稀疏矩阵（shape: n_notes × vocab）。"""
         from sklearn.feature_extraction.text import TfidfVectorizer
 
@@ -164,16 +164,16 @@ class SynthesisAgent:
 
     def _deduplicate(
         self,
-        notes: List[FactorResearchNote],
+        notes: list[FactorResearchNote],
         vectors,
-    ) -> Tuple[List[FactorResearchNote], List[str], List[SynthesisInsight]]:
+    ) -> tuple[list[FactorResearchNote], list[str], list[SynthesisInsight]]:
         """cosine similarity > DEDUP_THRESHOLD 的 pair，保留公式更复杂（更长）的一个。"""
         from sklearn.metrics.pairwise import cosine_similarity
         import numpy as np
 
         sim_matrix = cosine_similarity(vectors)
         removed_ids: set[str] = set()
-        insights: List[SynthesisInsight] = []
+        insights: list[SynthesisInsight] = []
 
         for i in range(len(notes)):
             if notes[i].note_id in removed_ids:
@@ -206,9 +206,9 @@ class SynthesisAgent:
 
     def _cluster_families(
         self,
-        notes: List[FactorResearchNote],
+        notes: list[FactorResearchNote],
         vectors,
-    ) -> Tuple[Dict[str, List[str]], List[SynthesisInsight]]:
+    ) -> tuple[dict[str, list[str]], list[SynthesisInsight]]:
         """层次聚类（average linkage），distance threshold = 1 - FAMILY_THRESHOLD。
 
         少于 3 个 notes 时跳过聚类，返回空结果。
@@ -242,7 +242,7 @@ class SynthesisAgent:
         )
 
         # label → note_id 列表
-        raw_families: Dict[str, List[str]] = {}
+        raw_families: dict[str, list[str]] = {}
         for note, label in zip(notes, labels):
             key = f"family_{label}"
             raw_families.setdefault(key, []).append(note.note_id)
@@ -251,7 +251,7 @@ class SynthesisAgent:
         families = {k: v for k, v in raw_families.items() if len(v) > 1}
 
         # 每个 family 中相邻 pair 生成 insight
-        insights: List[SynthesisInsight] = []
+        insights: list[SynthesisInsight] = []
         for family_label, note_ids in families.items():
             for id_a, id_b in zip(note_ids, note_ids[1:]):
                 insights.append(
@@ -270,9 +270,9 @@ class SynthesisAgent:
 
     def _suggest_merges(
         self,
-        notes: List[FactorResearchNote],
+        notes: list[FactorResearchNote],
         vectors,
-    ) -> List[SynthesisInsight]:
+    ) -> list[SynthesisInsight]:
         """在跨 island 的相似但不重复的 pair 上提出合并建议（限制 MAX_MERGE_CANDIDATES）。
 
         相似区间：0.50 < sim < DEDUP_THRESHOLD（既相似又不构成重复）
@@ -280,7 +280,7 @@ class SynthesisAgent:
         from sklearn.metrics.pairwise import cosine_similarity
 
         sim_matrix = cosine_similarity(vectors)
-        candidates: List[Tuple[int, int, float]] = []
+        candidates: list[tuple[int, int, float]] = []
 
         for i in range(len(notes)):
             for j in range(i + 1, len(notes)):
@@ -294,7 +294,7 @@ class SynthesisAgent:
         candidates.sort(key=lambda x: x[2], reverse=True)
         candidates = candidates[: self.MAX_MERGE_CANDIDATES]
 
-        merge_insights: List[SynthesisInsight] = []
+        merge_insights: list[SynthesisInsight] = []
         for i, j, sim in candidates:
             merge_insights.append(
                 SynthesisInsight(
@@ -315,7 +315,7 @@ class SynthesisAgent:
     # ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _get_island(notes: List[FactorResearchNote], note_id: str) -> str:
+    def _get_island(notes: list[FactorResearchNote], note_id: str) -> str:
         """根据 note_id 查找 island 名称；找不到时返回 'unknown'。"""
         for note in notes:
             if note.note_id == note_id:

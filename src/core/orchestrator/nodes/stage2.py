@@ -17,7 +17,8 @@ ACTIVE_ISLANDS: List[str] = os.getenv(
 def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     """Stage 2: 并行调用所有 Island 的 AlphaResearcher，展开 Batch。"""
     from src.agents.researcher import hypothesis_gen_node as _gen_node
-    from src.core.orchestrator._context import get_scheduler
+    import src.core.orchestrator as _orch_s2
+    get_scheduler = _orch_s2.get_scheduler
 
     logger.info("[Stage 2] 并行生成假设... (Round %d)", state.current_round)
 

@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 pytestmark = pytest.mark.unit
 
-from dataclasses import dataclass
 from unittest.mock import patch
 
 from src.factor_pool.pool import FactorPool, _InMemoryClient
@@ -48,17 +47,6 @@ from src.scheduling.subspace_context import (
 )
 
 
-@dataclass
-class FactorHypothesis:
-    """Duck-type shim for pool.register() API."""
-    name: str
-    formula: str
-    hypothesis: str
-    rationale: str
-    expected_direction: str = "unknown"
-    market_observation: str = ""
-
-
 @pytest.fixture()
 def pool(tmp_path):
     return FactorPool(db_path=str(tmp_path / "test_db"))
@@ -70,10 +58,39 @@ def scheduler(pool):
 
 
 def _register(pool, island, name, sharpe):
-    h = FactorHypothesis(name=name, formula=f"Mean($close,5)", hypothesis="test", rationale="test")
-    m = BacktestMetrics(sharpe=sharpe, annualized_return=0.1, max_drawdown=-0.1,
-                        ic_mean=0.03, ic_std=0.01, icir=0.4, turnover_rate=20.0)
-    pool.register(h, m, island_name=island)
+    report = BacktestReport(
+        report_id=f"report-{name}",
+        note_id=f"note-{name}",
+        factor_id=f"{island}_{name}",
+        island=island,
+        formula="Mean($close,5)",
+        metrics=BacktestMetrics(sharpe=sharpe, annualized_return=0.1, max_drawdown=-0.1,
+                                ic_mean=0.03, ic_std=0.01, icir=0.4, turnover_rate=20.0),
+        passed=sharpe > 2.67,
+        execution_time_seconds=1.0,
+        qlib_output_raw="{}",
+    )
+    verdict = CriticVerdict(
+        report_id=f"report-{name}",
+        factor_id=f"{island}_{name}",
+        note_id=f"note-{name}",
+        overall_passed=sharpe > 2.67,
+        decision="promote" if sharpe > 2.67 else "archive",
+        score=0.8 if sharpe > 2.67 else 0.3,
+        checks=[],
+        register_to_pool=True,
+        pool_tags=[],
+        reason_codes=[],
+    )
+    risk = RiskAuditReport(
+        factor_id=f"{island}_{name}",
+        overfitting_score=0.0,
+        overfitting_flag=False,
+        correlation_flags=[],
+        recommendation="clear",
+        audit_notes="ok",
+    )
+    pool.register_factor(report=report, verdict=verdict, risk_report=risk, hypothesis="test")
 
 
 class TestSoftmax:

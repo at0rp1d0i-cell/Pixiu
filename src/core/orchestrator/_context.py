@@ -33,20 +33,3 @@ NODE_LOOP_CONTROL    = "loop_control"
 # ─────────────────────────────────────────────────────────
 _scheduler = None
 _current_run_id: Optional[str] = None
-
-
-def get_scheduler():
-    from src.factor_pool.pool import get_factor_pool
-    from src.factor_pool.scheduler import IslandScheduler
-
-    global _scheduler
-    if _scheduler is None:
-        pool = get_factor_pool()
-        _scheduler = IslandScheduler(pool=pool)
-    return _scheduler
-
-
-def get_state_store():
-    from src.control_plane.state_store import get_state_store as _get_state_store
-
-    return _get_state_store()

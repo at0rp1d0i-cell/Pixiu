@@ -457,4 +457,4 @@ def prefilter_node(state: dict) -> PrefilterOutput:
         "[Prefilter Node] %d → %d approved, %d filtered (regime=%s)",
         len(notes), len(approved), filtered_count, current_regime,
     )
-    return {**state, "approved_notes": approved}
+    return {"approved_notes": approved, "filtered_count": filtered_count}

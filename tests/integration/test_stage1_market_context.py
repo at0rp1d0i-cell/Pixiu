@@ -21,29 +21,9 @@ from src.agents.market_analyst import (
     _empty_memo,
     market_context_node,
 )
-from dataclasses import dataclass
 from src.factor_pool.pool import FactorPool
-
-
-@dataclass
-class FactorHypothesis:
-    name: str
-    formula: str
-    hypothesis: str
-    rationale: str
-    expected_direction: str = "unknown"
-    market_observation: str = ""
-
-
-@dataclass
-class BacktestMetrics:
-    sharpe: float = 0.0
-    ic: float = 0.0
-    icir: float = 0.0
-    turnover: float = 0.0
-    parse_success: bool = False
-    annualized_return: float = 0.0
-    max_drawdown: float = 0.0
+from src.schemas.backtest import BacktestMetrics, BacktestReport
+from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.market_context import HistoricalInsight, MarketContextMemo
 from src.schemas.state import AgentState
 
@@ -76,23 +56,47 @@ def _seed_pool(pool: FactorPool):
         ("momentum", "mom_fail", "Ref($close,1)/$close-1", 0.5),
     ]
     for island, name, formula, sharpe in factors:
-        hyp = FactorHypothesis(
-            name=name,
+        report = BacktestReport(
+            report_id=f"report-{name}",
+            note_id=f"note-{name}",
+            factor_id=f"{island}_{name}",
+            island=island,
             formula=formula,
-            hypothesis=f"测试因子 {name}",
-            rationale="测试用",
-            expected_direction="positive",
+            metrics=BacktestMetrics(
+                sharpe=sharpe,
+                annualized_return=15.0,
+                max_drawdown=-8.0,
+                ic_mean=0.03,
+                ic_std=0.01,
+                icir=0.5,
+                turnover_rate=10.0,
+            ),
+            passed=sharpe > 2.67,
+            execution_time_seconds=1.0,
+            qlib_output_raw="{}",
         )
-        metrics = BacktestMetrics(
-            sharpe=sharpe,
-            ic=0.03,
-            icir=0.5,
-            turnover=10.0,
-            annualized_return=15.0,
-            max_drawdown=-8.0,
-            parse_success=True,
+        verdict = CriticVerdict(
+            report_id=f"report-{name}",
+            factor_id=f"{island}_{name}",
+            note_id=f"note-{name}",
+            overall_passed=sharpe > 2.67,
+            decision="promote" if sharpe > 2.67 else "archive",
+            score=0.8 if sharpe > 2.67 else 0.3,
+            checks=[],
+            register_to_pool=True,
+            pool_tags=[],
+            reason_codes=[],
         )
-        pool.register(hypothesis=hyp, metrics=metrics, island_name=island)
+        risk = RiskAuditReport(
+            factor_id=f"{island}_{name}",
+            overfitting_score=0.0,
+            overfitting_flag=False,
+            correlation_flags=[],
+            recommendation="clear",
+            audit_notes="ok",
+        )
+        pool.register_factor(report=report, verdict=verdict, risk_report=risk,
+                             hypothesis=f"测试因子 {name}")
 
     # 写入一条带 failure_mode 的记录（v2 格式需要 passed=False）
     pool._collection.upsert(
