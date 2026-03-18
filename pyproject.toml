@@ -25,6 +25,8 @@ dependencies = [
     "tqdm",
     "scikit-learn",
     "scipy",
+    "fredapi>=0.5.2",
+    "yfinance>=1.2.0",
 ]
 
 [dependency-groups]
