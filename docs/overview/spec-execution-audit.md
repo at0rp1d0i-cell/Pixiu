@@ -29,7 +29,7 @@
 | `stage-2-hypothesis-expansion.md` | implemented | 五子空间已全部实现：ConstraintChecker/RegimeFilter/SynthesisAgent/SymbolicMutator/RegimeDetector，SubspaceScheduler Thompson Sampling 完整，327 smoke/unit tests 通过 |
 | `stage-3-prefilter.md` | implemented/partial | 主过滤链已实现，Filter D (ConstraintChecker) + Filter E (RegimeFilter) 已完成，invalid_regimes 检查已对接 |
 | `stage-4-execution.md` | implemented/partial | 已收敛到 `src/execution/` 主路径，report contract 仍未完全收口 |
-| `stage-5-judgment.md` | implemented/partial | canonical runtime 已收敛到 `src/agents/judgment.py`，FailureMode enum 9 种完全对齐，CriticVerdict.regime_at_judgment 字段已添加，`critic.py / factor_pool_writer.py / cio_report_renderer.py` 仅保留兼容职责 |
+| `stage-5-judgment.md` | implemented | canonical runtime 收敛到 `src/agents/judgment.py`，FailureMode enum 9 种完全对齐，CriticVerdict.regime_at_judgment 字段已添加；兼容层 `critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py` 已全部删除（phase3b） |
 | `stage-45-golden-path.md` | active | 当前 Stage 4→5 收口入口 |
 | `factor-pool.md` | implemented/partial | richer metadata 写回已完成，FactorPoolRecord.subspace_origin 已加入，register_factor() 传入 note 参数并写入溯源信息；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例 |
 | `data-sources.md` | planned/partial | 免费数据主干已存在，扩展数据源尚未收口 |

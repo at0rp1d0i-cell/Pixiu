@@ -112,11 +112,10 @@ A 股 alpha 大量藏在叙事层而非 price signal：
 ## 关键路径
 
 - Schema 真相：`src/schemas/`
-- 主编排：`src/core/orchestrator.py`
+- 主编排：`src/core/orchestrator/`（graph.py + nodes/ + _context.py）
 - 控制平面：`src/control_plane/state_store.py`
 - Factor 沉淀：`src/factor_pool/pool.py`
 - Stage 5 canonical runtime：`src/agents/judgment.py`
-- 兼容层（非主实现）：`src/agents/critic.py`, `src/agents/factor_pool_writer.py`, `src/agents/cio_report_renderer.py`
 
 ## 文档体系
 

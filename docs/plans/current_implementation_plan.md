@@ -75,9 +75,9 @@
 
 ### Phase 3B（计划）: 代码清理
 
-- [ ] 归档兼容层文件（critic.py / factor_pool_writer.py / cio_report_renderer.py 确认无独立消费者后标注 deprecated 或迁至 archive）
-- [ ] 清理 src/agents/schemas.py 中的重复 BacktestMetrics 定义
-- [ ] 删除 src/schemas/factor_pool_record.py legacy re-export wrapper
+- [x] 归档兼容层文件（critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py / factor_pool_record.py 全部删除，phase3b）
+- [x] 清理 src/agents/schemas.py 中的重复 BacktestMetrics 定义（已删除，phase3b）
+- [x] 删除 src/schemas/factor_pool_record.py legacy re-export wrapper（已删除，phase3b）
 
 ### Phase 3C（计划）: 数据源扩展
 

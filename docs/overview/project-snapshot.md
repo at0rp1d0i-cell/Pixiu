@@ -96,6 +96,6 @@ Pixiu 当前应当同时用两句话理解：
 3. ~~继续收紧 `BacktestReport / CriticVerdict / FactorPoolRecord`~~ ✅ Phase 3A 已完成（FailureMode 对齐、regime_at_judgment 字段、decision 枚举、subspace_origin 溯源）
 4. ~~Phase 3 模块化收口~~：orchestrator/judgment 包拆分，Stage I/O TypedDicts，测试42→20文件，THRESHOLDS 单例，register() 删除 ✅ Phase 3 已完成
 5. 数据源扩展：NARRATIVE_MINING（新闻/公告）+ REGIME_CONDITIONAL（更多 regime 特征量）优先
-6. 代码清理：归档兼容层（critic.py / factor_pool_writer.py / cio_report_renderer.py），确认无独立消费者后迁至 archive
+6. ~~代码清理：归档兼容层（critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py / factor_pool_record.py）~~ ✅ 已完成（phase3b 全部删除）
 7. MiroFish 协议层（NarrativePrediction schema + MiroFishAdapter）与控制平面扩展
 8. 最后再补 live / e2e 和更完整的产品壳

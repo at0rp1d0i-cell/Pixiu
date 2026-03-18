@@ -30,17 +30,9 @@ if not api_key:
 
 **修复**：统一从 `src/schemas/thresholds.py` 的 `THRESHOLDS` 对象读取，删除所有 literal 数值。
 
-### C3. Stage 5 兼容层仍待进一步收缩
+### ~~C3. Stage 5 兼容层仍待进一步收缩~~ ✅ 已解决（phase3b）
 
-**文件**：`src/agents/critic.py`、`src/agents/factor_pool_writer.py`、`src/agents/cio_report_renderer.py`
-
-**问题**：当前唯一主路径已经收敛到 `src/agents/judgment.py`，但为了兼容旧测试和窄场景导出，还保留了 3 个 Stage 5 兼容文件。
-
-**修复**：
-
-- 保持 `src/agents/judgment.py` 为唯一主实现
-- 逐步把外部调用迁到 canonical path
-- 在没有调用方后，删除这些兼容层，而不是继续向里面加新逻辑
+**文件**：`critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py / factor_pool_record.py` 已全部删除。`src/agents/judgment.py` 为唯一 Stage 5 主实现。
 
 ---
 
