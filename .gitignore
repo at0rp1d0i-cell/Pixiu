@@ -45,3 +45,6 @@ results/
 data/qlib_download_progress.json
 data/parquet_staging/baostock_raw/
 logs/qlib_download.log
+
+# Experiment run snapshots (generated data, not source)
+data/experiment_runs/

@@ -319,3 +319,285 @@ def test_industry_pe(tools):
     result = asyncio.run(tool.ainvoke({}))
     data = json.loads(result) if isinstance(result, str) else result
     assert isinstance(data, list) or "error" in data
+
+
+# ─────────────────────────────────────────────────────────
+# RSS MCP Server tests  (unit)
+# ─────────────────────────────────────────────────────────
+
+def _make_feedparser_entry(title="测试标题", link="http://example.com/1",
+                           entry_id="http://example.com/1",
+                           published_parsed=None):
+    """Build a minimal feedparser-like entry object."""
+    entry = MagicMock()
+    entry.title = title
+    entry.link = link
+    entry.id = entry_id
+    entry.summary = "这是一段测试摘要内容"
+    entry.published_parsed = published_parsed
+    entry.updated_parsed = None
+    return entry
+
+
+def _make_feedparser_result(entries):
+    feed = MagicMock()
+    feed.entries = entries
+    return feed
+
+
+def _recent_struct():
+    """Return a UTC struct_time for 1 hour ago (within any since_hours >= 1 window)."""
+    import time
+    return time.gmtime(time.time() - 3600)
+
+
+def _old_struct():
+    """Return a UTC struct_time for 48 hours ago (outside a since_hours=1 window)."""
+    import time
+    return time.gmtime(time.time() - 48 * 3600)
+
+
+class TestFetchRssFeedFormat:
+    @pytest.mark.asyncio
+    async def test_returns_required_fields(self):
+        """fetch_rss_feed 返回 JSON 且包含必要顶层字段。"""
+        mock_resp = MagicMock()
+        mock_resp.text = "<rss></rss>"
+        mock_resp.raise_for_status = MagicMock()
+
+        entry = _make_feedparser_entry(published_parsed=_recent_struct())
+        parsed_feed = _make_feedparser_result([entry])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with patch("feedparser.parse", return_value=parsed_feed):
+                from mcp_servers.rss_server import fetch_rss_feed
+                result = json.loads(await fetch_rss_feed(sources=["csrc"], max_items=5, since_hours=24))
+
+        assert "items" in result
+        assert "sources_ok" in result
+        assert "sources_failed" in result
+        assert "fetched_at" in result
+        assert "total_items" in result
+
+    @pytest.mark.asyncio
+    async def test_item_fields_present(self):
+        """每个 item 包含 source / title / url / published_at 字段。"""
+        mock_resp = MagicMock()
+        mock_resp.text = "<rss></rss>"
+        mock_resp.raise_for_status = MagicMock()
+
+        entry = _make_feedparser_entry(published_parsed=_recent_struct())
+        parsed_feed = _make_feedparser_result([entry])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with patch("feedparser.parse", return_value=parsed_feed):
+                from mcp_servers.rss_server import fetch_rss_feed
+                result = json.loads(await fetch_rss_feed(sources=["csrc"], max_items=5, since_hours=24))
+
+        for item in result["items"]:
+            assert {"source", "title", "url", "published_at"}.issubset(item.keys())
+
+
+class TestFetchRssFeedTimeFilter:
+    @pytest.mark.asyncio
+    async def test_old_entries_excluded(self):
+        """since_hours=1 时，超过 1 小时的条目不应出现在结果中。"""
+        mock_resp = MagicMock()
+        mock_resp.text = "<rss></rss>"
+        mock_resp.raise_for_status = MagicMock()
+
+        recent_entry = _make_feedparser_entry(
+            title="新条目", link="http://example.com/new", entry_id="http://example.com/new",
+            published_parsed=_recent_struct(),
+        )
+        old_entry = _make_feedparser_entry(
+            title="旧条目", link="http://example.com/old", entry_id="http://example.com/old",
+            published_parsed=_old_struct(),
+        )
+        parsed_feed = _make_feedparser_result([recent_entry, old_entry])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        # Clear dedup cache before test to avoid cross-test contamination
+        import mcp_servers.rss_server as rss_mod
+        rss_mod._seen_ids.clear()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with patch("feedparser.parse", return_value=parsed_feed):
+                result = json.loads(await rss_mod.fetch_rss_feed(sources=["pboc"], max_items=10, since_hours=1))
+
+        titles = [item["title"] for item in result["items"]]
+        assert "旧条目" not in titles
+
+    @pytest.mark.asyncio
+    async def test_no_published_time_entry_kept(self):
+        """发布时间缺失的条目默认保留（宁可多返回）。"""
+        mock_resp = MagicMock()
+        mock_resp.text = "<rss></rss>"
+        mock_resp.raise_for_status = MagicMock()
+
+        entry = _make_feedparser_entry(
+            title="无时间条目", link="http://example.com/notime",
+            entry_id="http://example.com/notime",
+            published_parsed=None,
+        )
+        parsed_feed = _make_feedparser_result([entry])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        import mcp_servers.rss_server as rss_mod
+        rss_mod._seen_ids.clear()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with patch("feedparser.parse", return_value=parsed_feed):
+                result = json.loads(await rss_mod.fetch_rss_feed(sources=["eastmoney"], max_items=5, since_hours=1))
+
+        assert any(item["title"] == "无时间条目" for item in result["items"])
+
+
+class TestFetchRssFeedSourceIsolation:
+    @pytest.mark.asyncio
+    async def test_failing_source_in_sources_failed(self):
+        """单个源失败时进入 sources_failed，不影响其他源。"""
+        import httpx as httpx_mod
+
+        mock_resp_ok = MagicMock()
+        mock_resp_ok.text = "<rss></rss>"
+        mock_resp_ok.raise_for_status = MagicMock()
+
+        entry = _make_feedparser_entry(published_parsed=_recent_struct())
+        parsed_feed = _make_feedparser_result([entry])
+
+        def side_effect_get(url, **kwargs):
+            if "csrc" in url:
+                raise httpx_mod.ConnectError("connection refused")
+            return mock_resp_ok
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(side_effect=side_effect_get)
+
+        import mcp_servers.rss_server as rss_mod
+        rss_mod._seen_ids.clear()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with patch("feedparser.parse", return_value=parsed_feed):
+                result = json.loads(
+                    await rss_mod.fetch_rss_feed(sources=["csrc", "eastmoney"], max_items=5, since_hours=24)
+                )
+
+        assert "csrc" in result["sources_failed"]
+        assert "eastmoney" in result["sources_ok"]
+        assert len(result["items"]) > 0
+
+
+class TestFetchFullArticle:
+    @pytest.mark.asyncio
+    async def test_returns_content_and_fields(self):
+        """fetch_full_article 返回 url / jina_url / content / truncated 字段。"""
+        fake_content = "# Article\n\nThis is the article body."
+        mock_resp = MagicMock()
+        mock_resp.text = fake_content
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            from mcp_servers.rss_server import fetch_full_article
+            result = json.loads(await fetch_full_article("https://example.com/article"))
+
+        assert result["content"] == fake_content
+        assert "url" in result
+        assert "jina_url" in result
+        assert result["truncated"] is False
+        assert "r.jina.ai" in result["jina_url"]
+
+    @pytest.mark.asyncio
+    async def test_truncates_long_content(self):
+        """全文超过 3000 字时，content 被截断，truncated 为 True。"""
+        long_content = "字" * 5000
+        mock_resp = MagicMock()
+        mock_resp.text = long_content
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            from mcp_servers.rss_server import fetch_full_article
+            result = json.loads(await fetch_full_article("https://example.com/long"))
+
+        assert len(result["content"]) <= 3000
+        assert result["truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_handles_timeout(self):
+        """网络超时时返回 error 字段。"""
+        import httpx as httpx_mod
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(side_effect=httpx_mod.TimeoutException("timeout"))
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            from mcp_servers.rss_server import fetch_full_article
+            result = json.loads(await fetch_full_article("https://slow.example.com"))
+
+        assert "error" in result
+
+
+class TestFetchAnnouncement:
+    @pytest.mark.asyncio
+    async def test_returns_required_fields(self):
+        """fetch_announcement 返回 symbol / exchange / fetched_at / items / note。"""
+        mock_df = pd.DataFrame([{
+            "公告标题": "平安银行关于某事的公告",
+            "公告链接": "http://www.szse.cn/announcement/1",
+            "公告时间": "2026-03-18 09:00:00",
+        }])
+
+        with patch("akshare.stock_notice_report", return_value=mock_df):
+            from mcp_servers.rss_server import fetch_announcement
+            result = json.loads(await fetch_announcement("000001", max_items=5))
+
+        assert result["symbol"] == "000001"
+        assert "exchange" in result
+        assert "fetched_at" in result
+        assert "items" in result
+        assert "note" in result
+        assert len(result["items"]) == 1
+        assert result["items"][0]["title"] == "平安银行关于某事的公告"
+
+    @pytest.mark.asyncio
+    async def test_akshare_failure_returns_note(self):
+        """AKShare 抛异常时，items 为空，note 包含错误信息。"""
+        with patch("akshare.stock_notice_report", side_effect=Exception("network error")):
+            from mcp_servers.rss_server import fetch_announcement
+            result = json.loads(await fetch_announcement("600519", max_items=5))
+
+        assert result["items"] == []
+        assert "AKShare error" in result["note"]
+        assert result["symbol"] == "600519"
+        assert result["exchange"] == "SSE"

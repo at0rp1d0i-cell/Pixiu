@@ -26,6 +26,10 @@ MCP_SERVER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "akshare_server.py")
 )
 
+RSS_SERVER_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "rss_server.py")
+)
+
 MARKET_ANALYST_SYSTEM_PROMPT = """你是 Pixiu 的市场分析师，负责每日开盘前生成市场上下文备忘录。
 
 今天的日期：{today}
@@ -238,7 +242,12 @@ async def _market_context_async(state: dict) -> dict:
                 "command": "python",
                 "args": [mcp_server_path],
                 "transport": "stdio",
-            }
+            },
+            "rss": {
+                "command": "python",
+                "args": [RSS_SERVER_PATH],
+                "transport": "stdio",
+            },
         })
         tools = await mcp_client.get_tools()
         analyst = MarketAnalyst(mcp_tools=tools)

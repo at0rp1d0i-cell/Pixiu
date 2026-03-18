@@ -244,6 +244,46 @@ class TestLoopControlNode:
 # From test_orchestrator_stage4b.py
 # ─────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────
+# ExperimentLogger snapshot integration: loop_control_node writes JSON
+# ─────────────────────────────────────────────────────────
+
+class TestLoopControlSnapshotWritten:
+    def test_snapshot_json_created_after_loop_control(self, tmp_path):
+        """loop_control_node 正常运行后 data/experiment_runs/ 下应产生 JSON 快照。"""
+        import src.core.experiment_logger as _exp_mod
+        from src.core.experiment_logger import ExperimentLogger
+
+        # 用 tmp_path 隔离实验目录，覆盖单例
+        run_id = "test_run_snapshot"
+        test_logger = ExperimentLogger(run_id=run_id, runs_dir=tmp_path)
+        _exp_mod._logger_instance = test_logger
+
+        try:
+            state = _make_state(current_round=5)
+            with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+                mock_get_sched.return_value = MagicMock()
+                with patch("src.factor_pool.pool.get_factor_pool") as mock_pool:
+                    mock_pool.return_value = MagicMock(
+                        get_passed_factors=MagicMock(return_value=[])
+                    )
+                    loop_control_node(state)
+
+            # round_005.json should have been written
+            snapshot_path = tmp_path / run_id / "round_005.json"
+            assert snapshot_path.exists(), f"快照文件不存在: {snapshot_path}"
+
+            import json as _json
+            data = _json.loads(snapshot_path.read_text(encoding="utf-8"))
+            assert data["round"] == 5
+            assert "timestamp" in data
+            assert "subspace_generated" in data
+            assert "verdicts" in data
+        finally:
+            # 恢复单例，避免污染其他测试
+            _exp_mod._logger_instance = None
+
+
 def test_orchestrator_stage4b_uses_execution_coder_path():
     note = _make_note("momentum_20260309_01")
     state = AgentState(approved_notes=[note], backtest_reports=[])

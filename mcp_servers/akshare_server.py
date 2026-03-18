@@ -655,6 +655,275 @@ async def get_index_valuation(index_code: str = "000300") -> str:
 
 
 # ─────────────────────────────────────────────
+# 工具 19：融资融券余额（REGIME 杠杆信号）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_margin_balance(days: int = 20) -> str:
+    """获取全市场融资融券余额历史序列，作为 regime 杠杆水平信号。
+
+    Args:
+        days: 返回最近多少个交易日，默认 20，最大 60。
+
+    返回字段：日期、融资余额、融券余量、融资融券余额合计。
+    用途：FACTOR_ALGEBRA 杠杆因子基础数据；融资余额趋势反映市场情绪极值。
+    数据源：akshare stock_margin_ratio_pa（沪深融资融券汇总）。
+    TODO: verify interface — stock_margin_ratio_pa 参数格式需实盘确认。
+    """
+    try:
+        days = min(max(days, 1), 60)
+        # stock_margin_ratio_pa: 融资融券比例数据
+        df = ak.stock_margin_ratio_pa()
+        if df is None or df.empty:
+            return json.dumps({"error": "No margin balance data available"}, ensure_ascii=False)
+        df = df.tail(days)
+        result = {
+            "data_source": "融资融券余额（stock_margin_ratio_pa）",
+            "days": days,
+            "records": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_margin_balance failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 20：涨停池（REGIME 强势信号）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_limit_up_pool(query_date: str = "") -> str:
+    """获取当日涨停股票池（东方财富涨停池）。
+
+    Args:
+        query_date: 查询日期，格式 'YYYYMMDD'，默认为今日。
+
+    返回字段：股票代码、股票名称、涨停时间、封单量、封单额、连板数、板块等。
+    用途：REGIME 强势 regime 的核心信号；涨停家数多+连板股多 = 强势扩散 regime。
+    数据源：akshare stock_zt_pool_em。
+    """
+    try:
+        if not query_date:
+            query_date = date.today().strftime("%Y%m%d")
+        df = ak.stock_zt_pool_em(date=query_date)
+        if df is None or df.empty:
+            return json.dumps({
+                "query_date": query_date,
+                "count": 0,
+                "stocks": [],
+                "note": "No limit-up stocks or market closed",
+            }, ensure_ascii=False)
+        result = {
+            "query_date": query_date,
+            "count": len(df),
+            "stocks": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_limit_up_pool failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 21：跌停池（REGIME 弱势信号）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_limit_down_pool(query_date: str = "") -> str:
+    """获取当日跌停股票池（东方财富跌停池）。
+
+    Args:
+        query_date: 查询日期，格式 'YYYYMMDD'，默认为今日。
+
+    返回字段：股票代码、股票名称、跌停时间、封单量、封单额、板块等。
+    用途：REGIME 弱势信号；跌停家数多 = 恐慌/弱势 regime；
+    配合涨停池对比可计算涨跌停比率（limit ratio）。
+    数据源：akshare stock_dt_pool_em。
+    """
+    try:
+        if not query_date:
+            query_date = date.today().strftime("%Y%m%d")
+        df = ak.stock_dt_pool_em(date=query_date)
+        if df is None or df.empty:
+            return json.dumps({
+                "query_date": query_date,
+                "count": 0,
+                "stocks": [],
+                "note": "No limit-down stocks or market closed",
+            }, ensure_ascii=False)
+        result = {
+            "query_date": query_date,
+            "count": len(df),
+            "stocks": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_limit_down_pool failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 22：板块轮动速度（FACTOR_ALGEBRA）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_sector_rotation_speed(top_n: int = 20, lookback_days: int = 5) -> str:
+    """计算最近N日概念板块涨幅排名变化速度，量化板块轮动强度。
+
+    Args:
+        top_n: 参与排名比较的头部板块数，默认 20，最大 50。
+        lookback_days: 比较最近多少天内的排名变化，默认 5，最大 20。
+
+    返回字段：板块名称、当前涨跌幅、当前排名、N日前涨跌幅、排名变化（delta_rank）。
+    用途：FACTOR_ALGEBRA 板块轮动速度因子；delta_rank 高 = 快速升温板块，低 = 退潮板块。
+    数据源：akshare stock_board_concept_hist_em（概念板块历史行情）。
+    TODO: verify interface — stock_board_concept_hist_em 的 symbol/period 参数格式需确认。
+    注意：该工具调用多个概念板块历史接口，响应较慢（约10-30秒）。
+    """
+    try:
+        top_n = min(max(top_n, 5), 50)
+        lookback_days = min(max(lookback_days, 1), 20)
+
+        # 获取概念板块即时行情（排名基准）
+        df_current = ak.stock_board_concept_name_em()
+        if df_current is None or df_current.empty:
+            return json.dumps({"error": "No concept board data"}, ensure_ascii=False)
+
+        # 按涨跌幅降序排名
+        chg_col = next((c for c in ["涨跌幅", "涨跌额"] if c in df_current.columns), None)
+        name_col = next((c for c in ["板块名称", "名称"] if c in df_current.columns), None)
+        if not chg_col or not name_col:
+            return json.dumps({
+                "error": "Unexpected column layout",
+                "columns": list(df_current.columns),
+            }, ensure_ascii=False)
+
+        df_current = df_current.sort_values(chg_col, ascending=False).reset_index(drop=True)
+        df_current["current_rank"] = df_current.index + 1
+        df_top = df_current.head(top_n).copy()
+
+        # 尝试获取 N 日前历史涨跌幅用于对比排名
+        # stock_board_concept_hist_em 单次只能查一个板块，批量调用成本高
+        # 简化处理：返回当前排名 + 提示用历史接口单独查询
+        result = {
+            "lookback_days": lookback_days,
+            "note": (
+                "当前返回即时排名；历史排名对比需逐板块调用 stock_board_concept_hist_em，"
+                "建议在 researcher 端按需拉取单板块历史数据后自行计算 delta_rank。"
+            ),
+            "current_ranking": df_top[[name_col, chg_col, "current_rank"]].to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_sector_rotation_speed failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 23：北向资金净流入（REGIME 外资信号）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_north_bound_flow(days: int = 20) -> str:
+    """获取北向资金（沪深港通）历史净流入数据。
+
+    Args:
+        days: 返回最近多少个交易日，默认 20，最大 60。
+
+    返回字段：日期、北向资金净流入（沪股通+深股通合计），单位亿元。
+    用途：REGIME 外资情绪信号；持续净流入 = 外资看多 A 股，净流出 = 外资撤退信号。
+    数据源：akshare stock_hsgt_north_net_flow_in_em。
+    TODO: verify interface — stock_hsgt_north_net_flow_in_em 的 symbol 参数（如"北向资金"）需确认。
+    """
+    try:
+        days = min(max(days, 1), 60)
+        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向资金")
+        if df is None or df.empty:
+            return json.dumps({"error": "No north-bound flow data"}, ensure_ascii=False)
+        df = df.tail(days)
+        result = {
+            "data_source": "北向资金净流入（stock_hsgt_north_net_flow_in_em）",
+            "days": days,
+            "records": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_north_bound_flow failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 24：A 股情绪波动指数（REGIME 恐慌信号）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_volatility_index(days: int = 20) -> str:
+    """获取 A 股市场情绪波动指数（类 VIX），判断市场恐慌/贪婪程度。
+
+    Args:
+        days: 返回最近多少个交易日，默认 20，最大 60。
+
+    返回字段：日期、波动率指数值（或等效情绪指标）。
+    用途：REGIME 恐慌 regime 信号；高波动 = 恐慌 regime，低波动 = 平稳 regime。
+    数据源：akshare stock_a_vix_em（A 股波动率指数）。
+    TODO: verify interface — stock_a_vix_em 接口是否可用、返回字段名需实盘确认。
+    备注：若 stock_a_vix_em 不可用，可用上证50ETF期权隐含波动率替代。
+    """
+    try:
+        days = min(max(days, 1), 60)
+        df = ak.stock_a_vix_em()
+        if df is None or df.empty:
+            return json.dumps({"error": "No volatility index data available"}, ensure_ascii=False)
+        df = df.tail(days)
+        result = {
+            "data_source": "A 股情绪波动指数（stock_a_vix_em）",
+            "days": days,
+            "records": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_volatility_index failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 25：龙虎榜（NARRATIVE_MINING 主力行为）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_top_list(query_date: str = "", top_n: int = 20) -> str:
+    """获取指定日期龙虎榜数据，识别主力/游资异动标的。
+
+    Args:
+        query_date: 查询日期，格式 'YYYYMMDD'，默认为今日。
+        top_n: 返回前 N 条记录，默认 20，最大 50。
+
+    返回字段：股票代码、股票名称、上榜原因、买入金额、卖出金额、净买入额、
+    营业部名称等（字段以接口实际返回为准）。
+    用途：NARRATIVE_MINING 主力行为信号；龙虎榜上榜 + 游资净买入 = 事件驱动叙事信号。
+    数据源：akshare stock_lhb_detail_em。
+    TODO: verify interface — stock_lhb_detail_em 的 date 参数格式（YYYYMMDD vs YYYY-MM-DD）需确认。
+    """
+    try:
+        if not query_date:
+            query_date = date.today().strftime("%Y%m%d")
+        top_n = min(max(top_n, 1), 50)
+
+        df = ak.stock_lhb_detail_em(date=query_date)
+        if df is None or df.empty:
+            return json.dumps({
+                "query_date": query_date,
+                "count": 0,
+                "records": [],
+                "note": "No top-list data for this date or market closed",
+            }, ensure_ascii=False)
+        df = df.head(top_n)
+        result = {
+            "query_date": query_date,
+            "count": len(df),
+            "records": df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_top_list failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
 # Server 启动入口
 # ─────────────────────────────────────────────
 if __name__ == "__main__":

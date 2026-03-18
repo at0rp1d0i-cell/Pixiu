@@ -3,6 +3,7 @@ import logging
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import HumanGateOutput, LoopControlOutput
+from src.core.experiment_logger import get_experiment_logger
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +85,30 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
 
     next_round = state.current_round + 1
     logger.info(
+        "[Loop Control] Round %d 完成: subspace_generated=%s, filtered=%d, "
+        "approved=%d, verdicts_passed=%d",
+        state.current_round,
+        dict(state.subspace_generated) if state.subspace_generated else {},
+        state.filtered_count,
+        len(state.approved_notes),
+        sum(1 for v in state.critic_verdicts if v.overall_passed),
+    )
+    logger.info(
         "[Loop Control] 进入第 %d 轮 (scheduler warm_start=%s, total_passed=%s)",
         next_round,
         updated_sched_state.warm_start,
         sum(updated_sched_state.total_passed.values()),
     )
+
+    # 透明度层：在清除 state 之前写入本轮快照，失败不影响主链路
+    try:
+        get_experiment_logger().snapshot(
+            round_n=state.current_round,
+            state=state,
+            scheduler=subspace_scheduler,
+        )
+    except Exception as _snap_exc:
+        logger.warning("[Loop Control] 快照写入异常: %s", _snap_exc)
 
     return {
         "current_round": next_round,
