@@ -80,36 +80,34 @@ final_formula: str
 
 ### Step 2. deterministic compile
 
-`Coder` 的本质应视为 `FormulaCompiler + BacktestRunner`。
+`Coder` 的本质应视为一个 deterministic executor。
 
 输入：
 
-- `formula`
-- `backtest_config`
+- `FactorResearchNote.final_formula`
 - `universe`
 - `date_range`
-- `benchmark`
-- `freq`
+- 运行时固定模板
 
 输出：
 
 ```python
-class ExecutionBundle(BaseModel):
+class BacktestReport(BaseModel):
+    report_id: str
     run_id: str
     note_id: str
-    factor_expression: str
-    rendered_script_path: str
-    config_path: str
-    output_dir: str
-    engine: Literal["qlib"]
-    template_version: str
+    factor_id: str
+    formula: str
+    metrics: BacktestMetrics
+    artifacts: ArtifactRefs
+    error_message: Optional[str]
 ```
 
 必须 deterministic 的部分：
 
 - 模板文件固定
-- config 生成逻辑固定
-- 输出目录规则固定
+- 模板渲染逻辑固定
+- artifact 落盘规则固定
 - stdout/stderr 采集位置固定
 - 解析器版本固定
 
@@ -128,14 +126,10 @@ class ExecutionBundle(BaseModel):
   - stdout
   - stderr
   - rendered script
-  - runtime metadata
-  - 原始回测结果文件
-  - trace/log
 - `structured summary`
-  - metrics summary
-  - runtime summary
-  - status
-  - error type
+  - `BacktestMetrics`
+  - `status / failure_reason`
+  - `execution_meta`
 
 Stage 5 只能消费结构化摘要，不能直接读 raw log。
 
@@ -357,44 +351,32 @@ FactorPool 第一职责是结果索引和可检索元数据，不是垃圾填埋
 
 ## 6. `CIOReport` 的最小版
 
-第一版 `CIOReport` 只是验收产物，不追求华丽表达。
+第一版 `CIOReport` 是 round-level 审批材料，不是单因子详报。
 
 ```markdown
-# CIO Review: {factor_id}
+# CIO Review: round-{current_round}
 
-## Factor Summary
-- Note ID:
-- Island ID:
+## Summary
+- Tested factors:
+- Approved factors:
+- Best factor:
+- Best Sharpe:
+
+## Best Factor
 - Formula:
 - Hypothesis:
 - Economic rationale:
 
-## Backtest Context
-- Universe:
-- Benchmark:
-- Date range:
-- Engine/template version:
+## Portfolio
+- Total factors:
+- Expected portfolio Sharpe:
+- Expected portfolio IC:
 
-## Core Metrics
-- Sharpe:
-- Annual return:
-- Max drawdown:
-- IC mean:
-- ICIR:
-- Turnover:
-- Coverage:
+## Failures
+- factor_id: failure_mode
 
-## Verdict
-- Decision:
-- Score:
-- Passed checks:
-- Failed checks:
-- Reason codes:
-
-## Artifact References
-- stdout
-- stderr
-- raw result
+## Decisions
+- factor_id: decision / score / reason_codes
 ```
 
 第一版报告先模板化，不让 LLM 自由发挥。
@@ -406,45 +388,32 @@ FactorPool 第一职责是结果索引和可检索元数据，不是垃圾填埋
 当前编排层即使保留 12 节点主图，也应该明确一条最小主链：
 
 ```text
-stage4_prepare_execution
-→ stage4_run_backtest
-→ stage4_parse_report
-→ stage5_critic
-→ stage5_write_factor_pool
-→ stage5_render_cio_report
-→ done
+coder
+→ judgment
+→ portfolio
+→ report
+→ human_gate
 ```
 
 每个节点约束：
 
-- 只做一件事
-- 只接收/输出一个强类型对象
-- 失败只返回有限状态
-- 不允许隐式 side effect
+ - `coder` 产出 `BacktestReport`
+ - `judgment` 产出 `CriticVerdict` 与 `RiskAuditReport`，并负责 pool / constraint 写回
+ - `portfolio` 基于本轮通过因子生成最小 allocation
+ - `report` 生成 `CIOReport`
+ - `human_gate` 显式挂起等待人类审批
 
-建议最小状态模型：
+当前 active orchestrator 仍以 `12_orchestrator.md` 和实际 `src/core/orchestrator/` 代码为准；这里强调的是 Stage 4 -> 5 的最小收口意图，而不是重新定义另一套运行时对象。
 
-```python
-class PixiuRunState(BaseModel):
-    note: FactorResearchNote
+如果需要补一个最小状态视图，也应直接围绕当前对象来写：
 
-    execution_bundle: Optional[ExecutionBundle] = None
-    backtest_report: Optional[BacktestReport] = None
-    critic_verdict: Optional[CriticVerdict] = None
-    factor_pool_record_id: Optional[str] = None
-    cio_report_path: Optional[str] = None
-
-    status: Literal[
-        "pending",
-        "running",
-        "backtest_failed",
-        "judged",
-        "persisted",
-        "completed",
-    ] = "pending"
-
-    errors: list[str] = []
-```
+- `backtest_reports`
+- `critic_verdicts`
+- `risk_audit_reports`
+- `portfolio_allocation`
+- `cio_report`
+- `awaiting_human_approval`
+- `errors`
 
 state 必须保持瘦身，否则 orchestrator 很快会退化成状态泥潭。
 
@@ -625,9 +594,9 @@ FactorResearchNote fixture
 
 ## 已做决策
 
-- 当前 Stage 4→5 先走 deterministic MVP，不做完整 judgment stack。
+- 当前 Stage 4→5 先走 deterministic MVP，不做更复杂的 judgment / optimization / narrative 扩展栈。
 - `BacktestReport` 是 Stage 4→5 的唯一判定边界。
-- Stage 5 第一版只保留 `Critic` 和模板化 `CIOReport`。
+- 当前 Stage 5 MVP 已包含 `Critic -> RiskAuditor -> PortfolioManager -> ReportWriter`。
 - `FactorPool` 第一版只存结果摘要、可检索元信息和 artifact 引用。
 
 ## 未决问题
