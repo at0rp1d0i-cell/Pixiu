@@ -3,6 +3,8 @@ import json
 import asyncio
 from unittest.mock import patch, MagicMock
 
+pytestmark = pytest.mark.unit
+
 # 等待实现的模块
 from src.execution.coder import Coder
 from src.execution.docker_runner import DockerRunner, ExecutionResult

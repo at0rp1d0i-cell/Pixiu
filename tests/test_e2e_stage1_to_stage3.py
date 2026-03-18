@@ -13,6 +13,8 @@ Tier: integration（mock LLM，不依赖网络）
 import asyncio
 import json
 import pytest
+
+pytestmark = pytest.mark.integration
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.market_context import (

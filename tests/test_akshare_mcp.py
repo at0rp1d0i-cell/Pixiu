@@ -4,6 +4,8 @@ import os
 import sys
 import pytest
 
+pytestmark = pytest.mark.integration
+
 # 将项目根目录加入 path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

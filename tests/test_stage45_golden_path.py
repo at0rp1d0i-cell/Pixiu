@@ -1,10 +1,11 @@
 import asyncio
 import json
+import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from src.agents.cio_report_renderer import CIOReportRenderer
-from src.agents.factor_pool_writer import FactorPoolWriter
+pytestmark = pytest.mark.unit
+
 from src.agents.judgment import Critic, PortfolioManager, ReportWriter, RiskAuditor
 from src.execution.coder import Coder
 from src.execution.docker_runner import ExecutionResult
@@ -110,25 +111,3 @@ def test_stage45_golden_path_runs_end_to_end(tmp_path):
     assert "decision=promote" in cio_report.full_report_markdown
 
 
-def test_teammate_writer_and_renderer_stay_compatible_with_current_contract(tmp_path):
-    note = _make_note()
-    pool = FactorPool(db_path=str(tmp_path / "pool"))
-    exec_result = _make_exec_result()
-
-    with patch("src.execution.coder.DockerRunner.run_python", new=AsyncMock(return_value=exec_result)):
-        report = asyncio.run(Coder().run_backtest(note))
-
-    verdict = asyncio.run(Critic().evaluate(report))
-
-    writer = FactorPoolWriter(pool)
-    factor_id = writer.write_record(report, verdict)
-    assert factor_id.startswith(note.island)
-
-    rows = pool._collection.get(ids=[factor_id], include=["metadatas", "documents"])
-    assert rows["ids"] == [factor_id]
-    assert rows["metadatas"][0]["decision"] == verdict.decision
-
-    markdown = CIOReportRenderer.render(report, verdict, factor_id)
-    assert "# CIO Review:" in markdown
-    assert factor_id in markdown
-    assert verdict.decision.upper() in markdown

@@ -3,6 +3,9 @@
 验证 to_hypothesis() 和 to_strategy_spec() 方法
 """
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion
 
 

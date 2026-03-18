@@ -4,6 +4,8 @@ Stage 3 PreFilter TDD Tests
 """
 import pytest
 import asyncio
+
+pytestmark = pytest.mark.unit
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.research_note import FactorResearchNote

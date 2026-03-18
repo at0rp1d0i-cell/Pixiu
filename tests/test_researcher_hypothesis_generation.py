@@ -4,6 +4,9 @@
 这里测试 AlphaResearcher 生成的 notes 可以正确转换
 """
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec
 

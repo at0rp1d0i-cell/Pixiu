@@ -7,10 +7,25 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.agents.schemas import BacktestMetrics, FactorHypothesis
+pytestmark = pytest.mark.unit
+
+from dataclasses import dataclass, field
 from src.factor_pool.pool import FactorPool
-from src.schemas.backtest import BacktestMetrics as V2BacktestMetrics, BacktestReport, FactorSpecSnapshot
+from src.schemas.backtest import BacktestMetrics, BacktestReport, FactorSpecSnapshot
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
+
+
+@dataclass
+class FactorHypothesis:
+    """Duck-type shim for legacy pool.register() API."""
+    name: str
+    formula: str
+    hypothesis: str
+    rationale: str
+    expected_direction: str = "unknown"
+    market_observation: str = ""
+
+
 
 
 @pytest.fixture()
@@ -28,10 +43,10 @@ def _make_hypothesis(name="test_factor", formula="Mean($close, 5) / Ref($close, 
     )
 
 
-def _make_metrics(sharpe=2.0, ic=0.03, icir=0.4, turnover=20.0, success=True):
+def _make_metrics(sharpe=2.0, ic_mean=0.03, icir=0.4, turnover_rate=20.0):
     return BacktestMetrics(
-        sharpe=sharpe, ic=ic, icir=icir, turnover=turnover,
-        parse_success=success,
+        sharpe=sharpe, annualized_return=0.1, max_drawdown=-0.1,
+        ic_mean=ic_mean, ic_std=0.01, icir=icir, turnover_rate=turnover_rate,
     )
 
 
@@ -69,13 +84,13 @@ class TestReads:
         # 相似失败 (Sharpe 低于基线)
         pool.register(
             _make_hypothesis("fail1", "$close / Ref($close, 5)"),
-            _make_metrics(sharpe=1.0, success=True),
+            _make_metrics(sharpe=1.0),
             "momentum"
         )
         # 相似成功 (Sharpe 高于基线)
         pool.register(
             _make_hypothesis("success1", "$close / Ref($close, 5) + 1"),
-            _make_metrics(sharpe=3.0, success=True),
+            _make_metrics(sharpe=3.0),
             "momentum"
         )
         
@@ -125,7 +140,7 @@ class TestReads:
                 hypothesis="趋势延续",
                 economic_rationale="资金流和惯性共同驱动。",
             ),
-            metrics=V2BacktestMetrics(
+            metrics=BacktestMetrics(
                 sharpe=3.0,
                 annualized_return=0.2,
                 max_drawdown=0.1,

@@ -1,6 +1,8 @@
 import asyncio
+import pytest
 
-from src.agents.critic import Critic as CompatibilityCritic
+pytestmark = pytest.mark.unit
+
 from src.agents.judgment import Critic, PortfolioManager, ReportWriter, RiskAuditor
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.state import AgentState
@@ -78,17 +80,6 @@ def test_critic_rejects_low_coverage():
     assert verdict.overall_passed is False
     assert "coverage" in verdict.failed_checks
     assert "LOW_COVERAGE" in verdict.reason_codes
-
-
-def test_legacy_critic_alias_matches_canonical_runtime():
-    report = _make_report()
-
-    canonical = asyncio.run(Critic().evaluate(report))
-    compatibility = asyncio.run(CompatibilityCritic().evaluate(report))
-
-    assert compatibility.decision == canonical.decision
-    assert compatibility.score == canonical.score
-    assert compatibility.reason_codes == canonical.reason_codes
 
 
 class _StubPool:

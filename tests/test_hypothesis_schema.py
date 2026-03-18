@@ -3,6 +3,9 @@
 按照 docs/design/interface-contracts.md 和 stage-2-hypothesis-expansion.md 设计
 """
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from datetime import datetime
 
 from src.schemas.hypothesis import (

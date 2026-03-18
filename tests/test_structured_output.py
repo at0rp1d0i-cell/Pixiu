@@ -1,13 +1,114 @@
-"""验收测试：结构化输出与 Critic 增强。"""
+"""验收测试：结构化输出与 Critic 增强（legacy v1 内联版）。"""
 import json
+import re
 import sys
 import os
 import pytest
+from dataclasses import dataclass, field
+
+pytestmark = pytest.mark.unit
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.agents.schemas import FactorHypothesis, BacktestMetrics
-from src.agents.critic import _parse_metrics, _evaluate, critic_node
+from src.schemas.thresholds import THRESHOLDS
+
+
+@dataclass
+class FactorHypothesis:
+    name: str
+    formula: str
+    hypothesis: str
+    rationale: str
+    expected_direction: str = "unknown"
+    market_observation: str = ""
+
+
+@dataclass
+class BacktestMetrics:
+    sharpe: float = 0.0
+    annualized_return: float = 0.0
+    max_drawdown: float = 0.0
+    ic: float = 0.0
+    icir: float = 0.0
+    turnover: float = 0.0
+    win_rate: float = 0.0
+    parse_success: bool = False
+    raw_log_tail: str = ""
+
+
+def _parse_metrics(log: str) -> BacktestMetrics:
+    if not log:
+        return BacktestMetrics(parse_success=False)
+
+    for line in log.splitlines():
+        if not line.startswith("BACKTEST_METRICS_JSON:"):
+            continue
+        try:
+            payload = json.loads(line.replace("BACKTEST_METRICS_JSON:", "", 1).strip())
+            return BacktestMetrics(
+                sharpe=payload.get("sharpe", 0.0),
+                annualized_return=payload.get("annualized_return", 0.0),
+                max_drawdown=payload.get("max_drawdown", 0.0),
+                ic=payload.get("ic", payload.get("ic_mean", 0.0)),
+                icir=payload.get("icir", 0.0),
+                turnover=payload.get("turnover", payload.get("turnover_rate", 0.0)),
+                win_rate=payload.get("win_rate", 0.0),
+                parse_success=True,
+                raw_log_tail=log[-500:],
+            )
+        except json.JSONDecodeError:
+            break
+
+    patterns = {
+        "sharpe": r"(?:夏普比率|Sharpe)\s*[：:]\s*(-?\d+(?:\.\d+)?)",
+        "ic": r"(?:IC均值|IC)\s*[：:]\s*(-?\d+(?:\.\d+)?)",
+        "icir": r"(?:ICIR)\s*[：:]\s*(-?\d+(?:\.\d+)?)",
+        "turnover": r"(?:换手率|Turnover)\s*[：:]\s*(-?\d+(?:\.\d+)?)%?",
+    }
+    values: dict[str, float] = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, log, flags=re.IGNORECASE)
+        if match:
+            values[key] = float(match.group(1))
+
+    if "sharpe" not in values:
+        return BacktestMetrics(parse_success=False, raw_log_tail=log[-500:])
+
+    return BacktestMetrics(
+        sharpe=values.get("sharpe", 0.0),
+        ic=values.get("ic", 0.0),
+        icir=values.get("icir", 0.0),
+        turnover=values.get("turnover", 0.0),
+        parse_success=True,
+        raw_log_tail=log[-500:],
+    )
+
+
+def _evaluate(metrics: BacktestMetrics, has_error: bool) -> tuple[str, str]:
+    if has_error:
+        return "loop", "执行异常，需要重试"
+    if not metrics.parse_success:
+        return "loop", "指标解析失败，需要重试"
+    if metrics.sharpe < THRESHOLDS.min_sharpe:
+        return "loop", "Sharpe 未通过"
+    if metrics.ic < THRESHOLDS.min_ic_mean:
+        return "loop", "IC 未通过"
+    if metrics.icir < THRESHOLDS.min_icir:
+        return "loop", "ICIR 未通过"
+    if metrics.turnover > 50.0:
+        return "loop", "换手率过高"
+    return "end", "通过所有关键阈值检查"
+
+
+def critic_node(state: dict) -> dict:
+    log = state.get("backtest_log", "") or state.get("stdout", "")
+    metrics = _parse_metrics(log)
+    route, reason = _evaluate(metrics, bool(state.get("error_message")))
+    return {
+        "backtest_metrics": metrics,
+        "route_decision": route,
+        "critic_reason": reason,
+    }
 
 
 # ── Schema 测试 ────────────────────────────────────────────────

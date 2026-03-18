@@ -10,6 +10,8 @@ Tier C: Local Integration
 import asyncio
 import pytest
 from unittest.mock import MagicMock
+
+pytestmark = pytest.mark.integration
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec
 from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker

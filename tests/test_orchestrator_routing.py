@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from src.core.orchestrator import (
     NODE_LOOP_CONTROL,
     NODE_REPORT,

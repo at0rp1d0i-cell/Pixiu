@@ -6,9 +6,23 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.agents.schemas import BacktestMetrics, FactorHypothesis
+pytestmark = pytest.mark.unit
+
+from dataclasses import dataclass
 from src.factor_pool.pool import FactorPool
 from src.factor_pool.scheduler import IslandScheduler, VIRGIN_ISLAND_SHARPE, T_INIT, T_MIN
+from src.schemas.backtest import BacktestMetrics
+
+
+@dataclass
+class FactorHypothesis:
+    """Duck-type shim for pool.register() API."""
+    name: str
+    formula: str
+    hypothesis: str
+    rationale: str
+    expected_direction: str = "unknown"
+    market_observation: str = ""
 
 
 @pytest.fixture()
@@ -23,7 +37,8 @@ def scheduler(pool):
 
 def _register(pool, island, name, sharpe):
     h = FactorHypothesis(name=name, formula=f"Mean($close,5)", hypothesis="test", rationale="test")
-    m = BacktestMetrics(sharpe=sharpe, parse_success=True, ic=0.03, icir=0.4, turnover=20.0)
+    m = BacktestMetrics(sharpe=sharpe, annualized_return=0.1, max_drawdown=-0.1,
+                        ic_mean=0.03, ic_std=0.01, icir=0.4, turnover_rate=20.0)
     pool.register(h, m, island_name=island)
 
 

@@ -456,29 +456,3 @@ def hypothesis_gen_node(state: dict) -> dict:
     """LangGraph 同步入口。"""
     return asyncio.run(_hypothesis_gen_async(state))
 
-
-# ====================================================
-# 向后兼容：旧版 research_node（Legacy v1 路径）
-# ====================================================
-def research_node(state: dict) -> dict:
-    """Legacy v1 单 Island 研究节点（兼容旧 orchestrator）。"""
-    import asyncio
-    island_name = state.get("island_name", "momentum")
-    researcher = AlphaResearcher(island=island_name)
-
-    async def _run():
-        batch = await researcher.generate_batch(
-            context=state.get("market_context"),
-            iteration=state.get("current_iteration", 0),
-        )
-        # v1 兼容：取第一个 note 转成旧 schema
-        if batch.notes:
-            note = batch.notes[0]
-            return {
-                "factor_proposal": note.proposed_formula,
-                "factor_hypothesis": None,
-                "messages": [],
-            }
-        return {"factor_proposal": "", "factor_hypothesis": None, "messages": []}
-
-    return asyncio.run(_run())

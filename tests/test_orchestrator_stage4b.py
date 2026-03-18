@@ -1,4 +1,7 @@
+import pytest
 from unittest.mock import AsyncMock, patch
+
+pytestmark = pytest.mark.unit
 
 from src.core.orchestrator import coder_node
 from src.schemas.backtest import BacktestMetrics, BacktestReport

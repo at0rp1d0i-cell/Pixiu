@@ -21,8 +21,29 @@ from src.agents.market_analyst import (
     _empty_memo,
     market_context_node,
 )
-from src.agents.schemas import BacktestMetrics, FactorHypothesis
+from dataclasses import dataclass
 from src.factor_pool.pool import FactorPool
+
+
+@dataclass
+class FactorHypothesis:
+    name: str
+    formula: str
+    hypothesis: str
+    rationale: str
+    expected_direction: str = "unknown"
+    market_observation: str = ""
+
+
+@dataclass
+class BacktestMetrics:
+    sharpe: float = 0.0
+    ic: float = 0.0
+    icir: float = 0.0
+    turnover: float = 0.0
+    parse_success: bool = False
+    annualized_return: float = 0.0
+    max_drawdown: float = 0.0
 from src.schemas.market_context import HistoricalInsight, MarketContextMemo
 from src.schemas.state import AgentState
 

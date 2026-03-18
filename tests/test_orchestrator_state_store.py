@@ -1,4 +1,7 @@
+import pytest
 from unittest.mock import AsyncMock, patch
+
+pytestmark = pytest.mark.unit
 
 from src.control_plane.state_store import StateStore
 from src.core import orchestrator

@@ -16,7 +16,6 @@ from typing import Optional
 import chromadb
 from chromadb.config import Settings
 
-from src.agents.schemas import BacktestMetrics, FactorHypothesis
 from src.schemas.thresholds import THRESHOLDS
 from src.schemas.backtest import BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
@@ -170,8 +169,8 @@ class FactorPool:
     # ─────────────────────────────────────────────
     def register(
         self,
-        hypothesis: FactorHypothesis,
-        metrics: BacktestMetrics,
+        hypothesis,
+        metrics,
         island_name: str,
         run_id: Optional[str] = None,
     ) -> str:
@@ -207,16 +206,16 @@ class FactorPool:
             "market_observation": hypothesis.market_observation or "",
             # 回测指标
             "sharpe": metrics.sharpe,
-            "ic": metrics.ic,
+            "ic": getattr(metrics, "ic_mean", getattr(metrics, "ic", 0.0)),
             "icir": metrics.icir,
-            "turnover": metrics.turnover,
+            "turnover": getattr(metrics, "turnover_rate", getattr(metrics, "turnover", 0.0)),
             "annualized_return": metrics.annualized_return,
             "max_drawdown": metrics.max_drawdown,
-            "parse_success": metrics.parse_success,
+            "parse_success": getattr(metrics, "parse_success", True),
             # 时间戳
             "registered_at": datetime.now().isoformat(),
             # 是否达到基线（方便过滤）
-            "beats_baseline": metrics.sharpe > THRESHOLDS.min_sharpe and metrics.parse_success,
+            "beats_baseline": metrics.sharpe > THRESHOLDS.min_sharpe and getattr(metrics, "parse_success", True),
         }
 
         self._collection.upsert(

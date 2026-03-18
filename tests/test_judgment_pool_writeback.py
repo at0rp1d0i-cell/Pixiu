@@ -6,7 +6,10 @@ judgment_node → FactorPool 写回测试
 - hypothesis 参数被正确从 approved_notes 传入
 - verdict.register_to_pool=False 时不调用 pool
 """
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+pytestmark = pytest.mark.unit
 
 from src.core.orchestrator import judgment_node
 from src.schemas.backtest import BacktestMetrics, BacktestReport

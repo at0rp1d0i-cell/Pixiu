@@ -12,6 +12,8 @@ ONNX embedding 模型网络下载（测试环境无网络/代理问题）。
 import pytest
 from unittest.mock import patch
 
+pytestmark = pytest.mark.unit
+
 from src.factor_pool.pool import FactorPool, _InMemoryClient
 from src.factor_pool.scheduler import (
     IslandScheduler,

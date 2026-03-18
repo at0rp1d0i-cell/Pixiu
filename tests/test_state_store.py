@@ -1,4 +1,7 @@
+import pytest
 from datetime import UTC, datetime, timedelta
+
+pytestmark = pytest.mark.unit
 
 from src.control_plane.state_store import StateStore
 from src.schemas.control_plane import ArtifactRecord, HumanDecisionRecord, RunSnapshot

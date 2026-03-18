@@ -3,6 +3,9 @@
 验证探索子空间的配置和管理
 """
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from src.schemas.exploration import (
     PrimitiveCategory,
     SubspaceConfig,

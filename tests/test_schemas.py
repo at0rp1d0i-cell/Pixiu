@@ -2,6 +2,8 @@ import pytest
 from pydantic import ValidationError
 from datetime import UTC, datetime
 
+pytestmark = pytest.mark.unit
+
 # 这里我们先导入虽然还不存在的模块，TDD 模式下这里会报错直到我们实现它们
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, HistoricalInsight
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion, SynthesisInsight
@@ -9,7 +11,7 @@ from src.schemas.exploration import ExplorationRequest, ExplorationResult
 from src.schemas.backtest import BacktestReport, BacktestMetrics, ExecutionMeta, FactorSpecSnapshot, ArtifactRefs
 from src.schemas.judgment import CriticVerdict, ThresholdCheck, RiskAuditReport, CorrelationFlag, PortfolioAllocation, FactorWeight, CIOReport
 from src.schemas.factor_pool import FactorPoolRecord
-from src.schemas.factor_pool_record import FactorPoolRecord as LegacyFactorPoolRecord
+LegacyFactorPoolRecord = FactorPoolRecord
 from src.schemas.control_plane import RunRecord, RunSnapshot, ArtifactRecord, HumanDecisionRecord
 from src.schemas.state import AgentState
 

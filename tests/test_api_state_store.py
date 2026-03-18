@@ -1,4 +1,7 @@
+import pytest
 from datetime import UTC, datetime
+
+pytestmark = pytest.mark.unit
 
 from src.api import server
 from src.control_plane.state_store import StateStore

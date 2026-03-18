@@ -9,6 +9,8 @@ Stage 2: hypothesis_gen_node 产出 Hypothesis + StrategySpec 验证测试
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+pytestmark = pytest.mark.unit
+
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 from src.scheduling.subspace_scheduler import SubspaceScheduler

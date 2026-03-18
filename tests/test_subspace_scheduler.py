@@ -4,6 +4,8 @@ import random
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from src.schemas.hypothesis import ExplorationSubspace
 from src.scheduling.subspace_scheduler import (
     SchedulerState,

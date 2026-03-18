@@ -4,6 +4,8 @@ Stage 1 Market Context TDD Tests
 """
 import pytest
 import asyncio
+
+pytestmark = pytest.mark.unit
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.schemas.market_context import MarketContextMemo, HistoricalInsight

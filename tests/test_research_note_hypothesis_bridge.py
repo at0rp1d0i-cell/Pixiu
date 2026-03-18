@@ -3,6 +3,9 @@
 按照 docs/design/interface-contracts.md §4 Runtime Bridge 设计
 """
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion
 from src.schemas.hypothesis import Hypothesis, StrategySpec
 
