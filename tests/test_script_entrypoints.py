@@ -13,6 +13,7 @@ pytestmark = pytest.mark.unit
     [
         "download_fundamental_data.py",
         "download_daily_basic_data.py",
+        "download_moneyflow_hsgt.py",
         "download_margin_history.py",
         "convert_daily_basic_to_qlib.py",
     ],

@@ -67,6 +67,7 @@ $open, $high, $low, $close, $volume, $factor, $amount
 
 - 部分 staging 已存在
 - `fina_indicator` / `daily_basic` → Qlib bins 正在收口
+- `moneyflow_hsgt` 正进入结构化 staging，优先服务 Stage 1 / northbound 上下文
 - 运行时字段可用性不再只看设计文档，而要看本地 `qlib_bin/features/**` 的真实覆盖率
 
 ### Layer 4: 新闻/叙事搜索层
@@ -106,6 +107,8 @@ $open, $high, $low, $close, $volume, $factor, $amount
 | northbound | 价量代理 | 更丰富特征仍待补 |
 | valuation | 价格均值回归代理 | 基本面入库后会明显增强 |
 | sentiment / narrative | 上下文有限 | 新闻、公告、叙事数据仍待扩展 |
+
+当前更优先补的是 `moneyflow_hsgt` 这类连续日级资金流，而不是依赖已断档的 `hk_hold` 增量。
 
 ## 5. Future Work Boundary
 

@@ -252,6 +252,17 @@ if p.exists():
 PY
 ```
 
+当前进度文件除了 `done / failed` 外，还可能包含：
+
+- `empty_counts`
+- `empty_done`
+
+含义是：
+
+- 一次空响应不会立刻永久判定成功
+- 连续两次空响应才会转成 `empty_done`
+- 所以重跑脚本可以补回偶发的 API 空结果
+
 ### `scripts/convert_fundamental_to_qlib.py`
 
 适用场景：
@@ -264,6 +275,14 @@ PY
 - 脚本按 `ann_date <= t` 做 PIT forward-fill
 - 写入位置和价量 bins 共用 `data/qlib_bin/features/{symbol}/`
 - 这一步不负责下载，只负责转换
+- 如果要刷新已存在的旧 bin，可使用 `--overwrite`
+
+常用命令：
+
+```bash
+uv run python scripts/convert_fundamental_to_qlib.py
+uv run python scripts/convert_fundamental_to_qlib.py --overwrite
+```
 
 ### `scripts/convert_daily_basic_to_qlib.py`
 
@@ -277,6 +296,14 @@ PY
 - 这条线按 `trade_date` 直接对齐交易日历
 - `circ_mv` 会映射成运行时字段 `float_mv`
 - 写入位置和价量 bins 共用 `data/qlib_bin/features/{symbol}/`
+- 如果要刷新已存在的旧 bin，可使用 `--overwrite`
+
+常用命令：
+
+```bash
+uv run python scripts/convert_daily_basic_to_qlib.py
+uv run python scripts/convert_daily_basic_to_qlib.py --overwrite
+```
 
 ### `scripts/download_margin_history.py`
 
