@@ -4,7 +4,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-19
 
 > 创建：2026-03-09
 > 前置依赖：`.../overview/03_architecture-overview.md`、`11_interface-contracts.md`
@@ -36,7 +36,8 @@ Last Reviewed: 2026-03-18
 典型覆盖：
 - `tests/test_schemas.py`
 - `tests/test_prefilter.py` 中纯逻辑部分
-- `tests/test_stage2_batch.py` 中 mock 驱动的生成逻辑
+- `tests/test_formula_capabilities.py`
+- `tests/test_cli_smoke.py`
 
 ### Tier B: Unit
 
@@ -52,6 +53,7 @@ Last Reviewed: 2026-03-18
 - `Critic` 的解析/判定逻辑
 - `ExplorationAgent` 的脚本提取逻辑
 - `FactorPool` 的格式化和过滤逻辑
+- `StateStore` / CLI 的最小联通 smoke
 
 ### Tier C: Local Integration
 
@@ -63,11 +65,10 @@ Last Reviewed: 2026-03-18
 - 不依赖互联网和真实交易数据源
 
 典型覆盖：
-- `tests/test_execution.py`
 - `tests/test_factor_pool.py`
 - `tests/test_state_store.py`
-- `tests/test_orchestrator_state_store.py`
-- `tests/test_api_state_store.py`
+- `tests/test_orchestrator.py`
+- `tests/test_script_entrypoints.py`
 - CLI / API 的最小接口联通
 
 ### Tier D: Live Integration
@@ -80,7 +81,10 @@ Last Reviewed: 2026-03-18
 - 失败优先视为环境或上游依赖问题，不直接阻塞普通开发
 
 典型覆盖：
-- `tests/test_akshare_mcp.py`
+- `tests/test_mcp_servers.py` 中的 AKShare / cross-market 段落
+- `tests/integration/test_stage1_live.py`
+- `tests/integration/test_stage2_live.py`
+- `tests/integration/test_e2e_live.py`
 
 ### Tier E: End-to-End
 
@@ -91,6 +95,10 @@ Last Reviewed: 2026-03-18
 - 需要真实环境（Qlib 数据、Docker 镜像、必要 env）
 - 只在专门时段或手动触发执行
 
+典型覆盖：
+- `tests/integration/test_e2e_pipeline.py`
+- `tests/integration/test_e2e_live.py`
+
 ---
 
 ## 3. 目录和命名规则
@@ -100,7 +108,7 @@ Last Reviewed: 2026-03-18
 - 任何会在 import 阶段执行 `sys.exit()`、真实网络请求或长时间任务的文件，不得进入默认 pytest 收集路径。
 
 当前已知违规项：
-- 仓库根的 `test_experiment_4.py` 不是测试，而是实验脚本，后续实现应迁出默认测试入口。
+- 旧实验脚本已经迁出默认测试入口；`tests/` 下的测试文件都应保持可被默认 `pytest` 发现。
 
 ---
 
@@ -116,16 +124,17 @@ Last Reviewed: 2026-03-18
 当前状态：
 
 ```bash
-pytest ...
+uv run pytest -q tests -m "smoke or unit"
 ```
 
 ### Async 测试
 
-长期目标仍然是统一 async 测试策略，但当前仓库已经把关键路径测试收敛成“同步包装 async 逻辑”的方式，因此默认绿色入口暂时不依赖 `pytest-asyncio`。
+长期目标仍然是统一 async 测试策略，但当前仓库已经把关键路径测试收敛成“同步包装 async 逻辑”的方式，并且少量边界测试仍保留原生 async。
 
 当前状态：
 - pytest 配置中已注册 `asyncio` marker
-- `tests/test_execution.py` 已改为同步包装，不再阻塞默认测试入口
+- `pytest-asyncio` 已安装
+- 默认绿色入口继续以同步包装为主，不要求所有新测试改成 async
 
 后续二选一：
 - 正式引入 `pytest-asyncio`，统一回到原生 async 测试
@@ -199,17 +208,17 @@ pytest -q tests -m e2e
 - `22_stage-3-prefilter.md` 必须映射到 prefilter 测试。
 - `23_stage-4-execution.md` 必须映射到 execution 测试。
 - `24_stage-5-judgment.md` 必须映射到 judgment 测试。
-- 当前 CLI/API 最小实现（`src/cli/main.py`, `src/api/server.py`）必须至少有 import 和接口 smoke 测试。
+- 当前 CLI/API 最小实现（`src/cli/main.py`, `src/api/server.py`）应至少有 import 和接口 smoke 测试；当前对应覆盖已落在 `tests/test_cli_smoke.py`、`tests/test_state_store.py` 与 `tests/test_script_entrypoints.py`。
 
 ---
 
 ## 8. 当前缺口
 
-截至 2026-03-09，仓库仍存在以下问题：
+截至 2026-03-19，仓库仍存在以下问题：
 
-- `live / e2e` 仍缺少稳定环境说明和自动化触发策略
-- async 测试的长期方案尚未定稿，当前是同步包装而不是统一插件方案
-- `FactorPool` 的 persistent backend 在部分环境下仍不稳定，本地 integration 依赖 in-memory fallback
-- 仓库根仍保留实验脚本 `test_experiment_4.py`，虽然已被 `testpaths = ["tests"]` 隔离出默认收集路径，但后续仍应迁入 `experiments/`
+- `live / e2e` 仍缺少稳定环境说明和自动化触发策略，默认 merge gate 继续排除这两层
+- async 测试的长期方案尚未定稿，当前是同步包装与少量原生 async 并存
+- 默认 `smoke or unit` 基线当前为 `511 passed, 26 deselected`
+- CLI / API 的最小联通 smoke 已补齐；后续重点是保持 approval / report / human-gate 路径与真实 graph 路由一致
 
 本规格的目标，就是把这些问题从“口头约定”提升为明确的工程约束。
