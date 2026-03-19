@@ -45,6 +45,7 @@ from src.scheduling.subspace_context import (
     build_narrative_mining_context,
     build_subspace_context,
 )
+from src.formula.capabilities import get_runtime_formula_capabilities
 
 
 @pytest.fixture()
@@ -614,8 +615,10 @@ class TestSubspaceRegistryDefaults:
     def test_primitives_cover_categories(self, registry):
         cats = {p.category for p in registry.primitives}
         assert PrimitiveCategory.PRICE_VOLUME in cats
-        assert PrimitiveCategory.FUNDAMENTAL in cats
         assert PrimitiveCategory.TEMPORAL_TRANSFORM in cats
+        capabilities = get_runtime_formula_capabilities()
+        if capabilities.available_experimental_fields:
+            assert PrimitiveCategory.FUNDAMENTAL in cats
 
     def test_primitive_fields(self, registry):
         for p in registry.primitives:

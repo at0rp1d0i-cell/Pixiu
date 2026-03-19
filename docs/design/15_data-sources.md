@@ -65,8 +65,9 @@ $open, $high, $low, $close, $volume, $factor, $amount
 
 当前状态：
 
-- 仍未进入当前主路径
-- 仍属于未来扩展
+- 部分 staging 已存在
+- `fina_indicator` / `daily_basic` → Qlib bins 正在收口
+- 运行时字段可用性不再只看设计文档，而要看本地 `qlib_bin/features/**` 的真实覆盖率
 
 ### Layer 4: 新闻/叙事搜索层
 
@@ -93,6 +94,7 @@ $open, $high, $low, $close, $volume, $factor, $amount
 - 所有进入回测层的数据都必须满足 point-in-time 对齐
 - Agent 上下文层信号默认不直接进入回测公式
 - 数据源扩展优先服务 Stage 1/2，不应把“智能”推回执行层
+- Stage 2/3 的字段白名单应派生自本地 feature store 的真实能力，而不是手写在 prompt/skills 中
 
 ## 4. Coverage Snapshot
 

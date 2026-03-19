@@ -15,12 +15,12 @@ Pixiu v2 Stage 3：前置过滤层（PreFilter）
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.formula.capabilities import get_allowed_formula_fields, get_approved_formula_operators
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
@@ -38,40 +38,16 @@ _MAX_REJECTION_SAMPLES = 5
 # Filter A：Validator（A 股硬约束，扩展自 v1 validator.py）
 # ─────────────────────────────────────────────────────────
 
-_BASE_FIELDS = {
-    "$close", "$open", "$high", "$low", "$volume", "$factor", "$amount", "$vwap",
-}
-
-_FUNDAMENTAL_FIELDS = {
-    "$pe_ttm", "$pb", "$roe", "$revenue_yoy", "$profit_yoy",
-    "$turnover_rate", "$float_mv",
-}
-
-FUNDAMENTAL_FIELDS_ENABLED = os.getenv("FUNDAMENTAL_FIELDS_ENABLED", "false").lower() == "true"
-
-APPROVED_FIELDS = _BASE_FIELDS | (_FUNDAMENTAL_FIELDS if FUNDAMENTAL_FIELDS_ENABLED else set())
-
-APPROVED_OPERATORS = {
-    "Mean", "Std", "Var", "Max", "Min", "Sum",
-    "Ref", "Delta", "Slope", "Rsquare", "Resi",
-    "Rank", "Abs", "Sign",
-    "Log", "Power", "Sqrt",
-    "Corr", "Cov",
-    "If", "Gt", "Lt", "Ge", "Le", "Eq", "Ne",
-    "And", "Or", "Not",
-    "Add", "Sub", "Mul", "Div",
-    "IdxMax", "IdxMin", "Comb", "Count", "Mad",
-    "WMA", "EMA",
-    # qlib Ts_* 时序算子
-    "Ts_Mean", "Ts_Std", "Ts_Max", "Ts_Min", "Ts_Sum",
-    "Ts_Rank", "Ts_Corr", "Ts_Cov", "Ts_WMA", "Ts_Slope",
-    # 其他合法 qlib 算子
-    "SignedPower", "Greater", "Less",
-}
-
-
 class Validator:
     """Filter A: A 股 Qlib 公式硬约束检查。"""
+
+    def __init__(
+        self,
+        allowed_fields: Optional[set[str]] = None,
+        approved_operators: Optional[set[str]] = None,
+    ):
+        self.allowed_fields = allowed_fields or set(get_allowed_formula_fields())
+        self.approved_operators = approved_operators or set(get_approved_formula_operators())
 
     def validate(self, note: FactorResearchNote) -> tuple[bool, str]:
         """返回 (passed: bool, reason: str)"""
@@ -100,13 +76,13 @@ class Validator:
 
         # 规则 4：字段名合法性
         used_fields = set(re.findall(r'\$\w+', formula))
-        invalid_fields = used_fields - APPROVED_FIELDS
+        invalid_fields = used_fields - self.allowed_fields
         if invalid_fields:
             return False, f"使用了未注册字段：{invalid_fields}"
 
         # 规则 5：算子白名单
         used_operators = set(re.findall(r'\b([A-Za-z][A-Za-z0-9]*)\s*\(', formula))
-        invalid_ops = used_operators - APPROVED_OPERATORS
+        invalid_ops = used_operators - self.approved_operators
         if invalid_ops:
             return False, f"使用了未批准的算子：{invalid_ops}"
 
@@ -364,8 +340,8 @@ class RegimeFilter:
 class PreFilter:
     """Stage 3 四重过滤器组合执行器。"""
 
-    def __init__(self, factor_pool: FactorPool):
-        self.validator = Validator()
+    def __init__(self, factor_pool: FactorPool, validator: Optional[Validator] = None):
+        self.validator = validator or Validator()
         self.novelty = NoveltyFilter(pool=factor_pool, threshold=THRESHOLDS.min_novelty_threshold)
         self.alignment = AlignmentChecker()
         self.constraint_checker = ConstraintChecker(pool=factor_pool)

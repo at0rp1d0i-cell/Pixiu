@@ -6,17 +6,25 @@
 
 ## 合法字段（数据源）
 
-```
-$open    $high    $low    $close    $volume    $vwap    $factor
+当前可用字段**以运行时注入的可用字段列表为准**，不要假设某个字段一定存在。
+
+常见稳定基础字段通常包括：
+
+```text
+$open    $high    $low    $close    $volume    $vwap    $amount    $factor
 ```
 
 - 前缀 `$` 是必须的
 - 字段名区分大小写，全部小写
-- 不存在 `$price`、`$turnover_rate` 等字段（换手率需用 $volume/$float_shares 计算）
+- 如果当前运行时没有显式列出某个可选字段，就不要在公式里使用它
 
 ---
 
-## 合法算子（完整列表）
+## 合法算子（运行时真相优先）
+
+算子以运行时 allowlist 为准。不要因为某个 skill 或历史文档提到了某个算子，就默认它当前可用。
+
+以下是当前常见稳定算子类别与示例，而不是永远不变的硬编码总表。
 
 ### 时序算子（需要 lookback 参数 N）
 | 算子 | 含义 | 示例 |
@@ -35,13 +43,10 @@ $open    $high    $low    $close    $volume    $vwap    $factor
 | `Corr(e1, e2, N)` | N 日相关系数 | `Corr($close/Ref($close,1), $volume/Ref($volume,1), 20)` |
 | `Cov(e1, e2, N)` | N 日协方差 | `Cov($close, $volume, 10)` |
 
-### 截面算子（在同一天所有股票间计算）
+### 截面算子
 | 算子 | 含义 |
 |---|---|
-| `CSRank(expr)` | 截面排名（0~1） |
-| `CSZScore(expr)` | 截面 Z-score 标准化 |
-| `CSMax(expr)` | 截面最大值 |
-| `CSMin(expr)` | 截面最小值 |
+| 以运行时 allowlist 为准 | 不要假设某个截面算子一定可用 |
 
 ### 数学算子
 | 算子 | 含义 |
@@ -90,9 +95,6 @@ Corr($close / Ref($close, 1), $volume / Ref($volume, 1), 20)
 
 # 相对成交量（当日成交量 vs 近期均量）
 $volume / Mean($volume, 20)
-
-# 截面动量排名
-CSRank($close / Ref($close, 20) - 1)
 
 # 波动率
 Std($close / Ref($close, 1) - 1, 20)

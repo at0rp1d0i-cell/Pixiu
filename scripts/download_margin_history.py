@@ -37,6 +37,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.core.env import load_dotenv_if_available
+
+load_dotenv_if_available()
+
 # ── Logging ─────────────────────────────────────────────────────────────────────
 
 LOG_DIR = Path(__file__).resolve().parents[1] / "logs"

@@ -6,16 +6,8 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
+from src.core.env import load_dotenv_if_available
 from .settings import get_llm_profile_settings
-
-
-def load_dotenv_if_available() -> None:
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()
-    except ImportError:
-        pass
 
 
 def get_researcher_llm_kwargs(

@@ -47,7 +47,11 @@ from pathlib import Path
 import pandas as pd
 import tushare as ts
 
+from src.core.env import load_dotenv_if_available
+
 # ── Logging ────────────────────────────────────────────────────────────────────
+
+load_dotenv_if_available()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = PROJECT_ROOT / "logs"

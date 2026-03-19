@@ -12,6 +12,9 @@ from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker, Pre
 
 pytestmark = pytest.mark.unit
 
+_TEST_ALLOWED_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$amount", "$factor", "$roe"}
+_TEST_APPROVED_OPERATORS = {"Mean", "Ref", "Log", "Corr", "If", "Gt", "Abs", "Std"}
+
 
 def _make_note(**kwargs) -> FactorResearchNote:
     defaults = dict(
@@ -28,6 +31,13 @@ def _make_note(**kwargs) -> FactorResearchNote:
     return FactorResearchNote(**defaults)
 
 
+def _make_validator() -> Validator:
+    return Validator(
+        allowed_fields=set(_TEST_ALLOWED_FIELDS),
+        approved_operators=set(_TEST_APPROVED_OPERATORS),
+    )
+
+
 # ─────────────────────────────────────────────
 # Validator Tests
 # ─────────────────────────────────────────────
@@ -35,7 +45,7 @@ def _make_note(**kwargs) -> FactorResearchNote:
 def test_validator_valid_formula():
     """合法公式应通过"""
     note = _make_note(proposed_formula="Mean($close, 5) / Mean($close, 20) - 1")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert passed, reason
 
@@ -43,7 +53,7 @@ def test_validator_valid_formula():
 def test_validator_future_ref_rejected():
     """Ref($close, -N) 是未来数据，必须被拒绝"""
     note = _make_note(proposed_formula="Ref($close, -5) / $close - 1")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "偏移量" in reason
@@ -52,7 +62,7 @@ def test_validator_future_ref_rejected():
 def test_validator_invalid_field_rejected():
     """未注册字段名应被拒绝"""
     note = _make_note(proposed_formula="Mean($earnings_per_share, 5)")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "字段" in reason
@@ -61,7 +71,7 @@ def test_validator_invalid_field_rejected():
 def test_validator_unmatched_parenthesis():
     """括号不匹配应被拒绝"""
     note = _make_note(proposed_formula="Mean($close, 5")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "括号" in reason
@@ -70,7 +80,7 @@ def test_validator_unmatched_parenthesis():
 def test_validator_invalid_operator():
     """未批准算子应被拒绝"""
     note = _make_note(proposed_formula="FancyNN($close, 10)")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "算子" in reason
@@ -79,10 +89,17 @@ def test_validator_invalid_operator():
 def test_validator_log_without_protection():
     """Log() 参数未添加 +1 保护应被拒绝"""
     note = _make_note(proposed_formula="Log($close / Ref($close, 5))")
-    v = Validator()
+    v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "Log" in reason
+
+
+def test_validator_accepts_runtime_available_experimental_field():
+    note = _make_note(proposed_formula="Mean($roe, 4)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert passed, reason
 
 
 # ─────────────────────────────────────────────
@@ -224,7 +241,7 @@ def test_prefilter_top_k_limit():
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
         mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
-            prefilter = PreFilter(factor_pool=mock_pool)
+            prefilter = PreFilter(factor_pool=mock_pool, validator=_make_validator())
             approved, filtered = asyncio.run(prefilter.filter_batch(notes))
 
     assert len(approved) <= THRESHOLDS.stage3_top_k
@@ -245,7 +262,7 @@ def test_prefilter_empty_result():
     ]
 
     with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
-        prefilter = PreFilter(factor_pool=mock_pool)
+        prefilter = PreFilter(factor_pool=mock_pool, validator=_make_validator())
         approved, filtered = asyncio.run(prefilter.filter_batch(notes))
 
     assert approved == []
@@ -254,7 +271,7 @@ def test_prefilter_empty_result():
 
 def test_prefilter_tracks_rejection_diagnostics():
     """PreFilter 应聚合每个过滤器的拒绝计数和样本。"""
-    prefilter = PreFilter(factor_pool=MagicMock())
+    prefilter = PreFilter(factor_pool=MagicMock(), validator=_make_validator())
     notes = [
         _make_note(note_id="reject_validator"),
         _make_note(note_id="reject_alignment"),

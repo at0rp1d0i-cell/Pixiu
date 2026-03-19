@@ -23,7 +23,9 @@ Last Reviewed: 2026-03-19
 |---|---|---|---|---|
 | A 股价量 Qlib 数据 | Stage 4 回测直接读取 | 是 | `data/qlib_bin/` | `scripts/download_qlib_data.py` |
 | 基本面 parquet 暂存 | 基本面原始 staging | 否 | `data/fundamental_staging/fina_indicator/` | `scripts/download_fundamental_data.py` |
-| 基本面 Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_fundamental_to_qlib.py` |
+| `daily_basic` parquet 暂存 | 市场派生字段原始 staging | 否 | `data/fundamental_staging/daily_basic/` | `scripts/download_daily_basic_data.py` |
+| `fina_indicator` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_fundamental_to_qlib.py` |
+| `daily_basic` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_daily_basic_to_qlib.py` |
 | 融资融券历史 parquet | 结构化 staging / 后续特征扩展 | 否 | `data/fundamental_staging/margin_history/margin_history.parquet` | `scripts/download_margin_history.py` |
 
 最小可运行集只有一项：
@@ -86,9 +88,9 @@ uv run python scripts/download_qlib_data.py
 
 脚本头部注明，全量大约需要 `2-4` 小时，重跑即可续传。
 
-### 4.2 想补基本面实验字段
+### 4.2 想补实验扩展字段
 
-先下载原始基本面 parquet：
+先下载 `fina_indicator` 原始 parquet：
 
 ```bash
 uv run python scripts/download_fundamental_data.py
@@ -107,7 +109,12 @@ uv run python scripts/download_fundamental_data.py --list-only
 - 进度写到 `data/fundamental_download_progress.json`
 - 日志写到 `logs/fundamental_download.log`
 
-然后把基本面转成 Qlib bins：
+这条线当前主要覆盖：
+
+- `roe`
+- `eps / roa / gross_margin / current_ratio / assets_turn` 等会计类字段
+
+然后把 `fina_indicator` 转成 Qlib bins：
 
 ```bash
 uv run python scripts/convert_fundamental_to_qlib.py
@@ -118,7 +125,26 @@ uv run python scripts/convert_fundamental_to_qlib.py
 - `data/fundamental_staging/fina_indicator/` 已有 parquet
 - `data/qlib_bin/calendars/day.txt` 已存在
 
-也就是说，它默认依赖你已经先跑过 `download_qlib_data.py`。
+再下载 `daily_basic` 原始 parquet：
+
+```bash
+uv run python scripts/download_daily_basic_data.py
+```
+
+这条线当前覆盖：
+
+- `pe_ttm`
+- `pb`
+- `turnover_rate`
+- `float_mv`
+
+然后把 `daily_basic` 转成 Qlib bins：
+
+```bash
+uv run python scripts/convert_daily_basic_to_qlib.py
+```
+
+这两条转换链都默认依赖你已经先跑过 `download_qlib_data.py`。
 
 ### 4.3 想补融资融券历史
 
@@ -174,6 +200,18 @@ tail -f logs/qlib_download.log
 - `data/fundamental_download_progress.json`
 - `logs/fundamental_download.log`
 
+### `scripts/download_daily_basic_data.py`
+
+适用场景：
+
+- 想引入 `pb / pe_ttm / turnover_rate / float_mv` 等市场派生字段
+
+关键文件：
+
+- `data/fundamental_staging/daily_basic/{ts_code}.parquet`
+- `data/daily_basic_download_progress.json`
+- `logs/daily_basic_download.log`
+
 ### `scripts/convert_fundamental_to_qlib.py`
 
 适用场景：
@@ -186,6 +224,19 @@ tail -f logs/qlib_download.log
 - 脚本按 `ann_date <= t` 做 PIT forward-fill
 - 写入位置和价量 bins 共用 `data/qlib_bin/features/{symbol}/`
 - 这一步不负责下载，只负责转换
+
+### `scripts/convert_daily_basic_to_qlib.py`
+
+适用场景：
+
+- 已经拿到 `daily_basic` parquet
+- 需要把 `pb / pe_ttm / turnover_rate / float_mv` 写入 Qlib bins
+
+关键事实：
+
+- 这条线按 `trade_date` 直接对齐交易日历
+- `circ_mv` 会映射成运行时字段 `float_mv`
+- 写入位置和价量 bins 共用 `data/qlib_bin/features/{symbol}/`
 
 ### `scripts/download_margin_history.py`
 
@@ -212,7 +263,8 @@ find data/qlib_bin/features -maxdepth 2 -name '*.day.bin' | head
 
 ```bash
 find data/fundamental_staging/fina_indicator -maxdepth 1 -name '*.parquet' | head
-find data/qlib_bin/features -maxdepth 2 \\( -name 'roe.day.bin' -o -name 'roa.day.bin' \\) | head
+find data/fundamental_staging/daily_basic -maxdepth 1 -name '*.parquet' | head
+find data/qlib_bin/features -maxdepth 2 \\( -name 'roe.day.bin' -o -name 'pb.day.bin' -o -name 'pe_ttm.day.bin' -o -name 'turnover_rate.day.bin' -o -name 'float_mv.day.bin' \\) | head
 ```
 
 ### 融资融券检查
@@ -239,5 +291,6 @@ uv run pixiu run --mode single --island momentum
 
 - `download_qlib_data.py` 是主路径硬依赖；其余脚本都属于增强项
 - 基本面和融资融券数据即使下载完成，也不代表当前默认回测模板会自动使用它们
+- Stage 2/3 当前会根据本地 `data/qlib_bin/features/` 的真实 bin 覆盖率动态识别哪些字段可用
 - 想排查下载进度，优先看 `logs/*.log` 和 `data/*_progress.json`
 - 多个脚本都设计成可重跑，不建议手动删进度文件后“硬重来”，除非你明确要全量重建

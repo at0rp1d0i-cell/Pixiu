@@ -6,6 +6,7 @@ Exploration schemas
 from typing import List, Dict, Optional, Any
 from enum import Enum
 from pydantic import Field
+from src.formula.capabilities import BASE_FIELD_SPECS, EXPERIMENTAL_FIELD_SPECS, get_runtime_formula_capabilities
 from src.schemas import PixiuBase
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
 from src.schemas.research_note import ExplorationQuestion
@@ -123,13 +124,24 @@ class SubspaceRegistry(PixiuBase):
     @classmethod
     def get_default_registry(cls) -> "SubspaceRegistry":
         """获取默认注册表配置（含原语词汇表、机制模板、叙事类别）"""
+        capabilities = get_runtime_formula_capabilities()
+        available_fields = set(capabilities.available_fields)
+        available_field_specs = [
+            spec
+            for spec in BASE_FIELD_SPECS + EXPERIMENTAL_FIELD_SPECS
+            if spec.formula_name in available_fields
+        ]
+        if not available_field_specs:
+            available_field_specs = list(BASE_FIELD_SPECS)
+            available_fields = {spec.formula_name for spec in available_field_specs}
+
         configs = {
             "factor_algebra": SubspaceConfig(
                 subspace=ExplorationSubspace.FACTOR_ALGEBRA,
                 enabled=True,
                 priority=5,
                 description="原语空间搜索 - 基于受约束的数据原语组合",
-                allowed_primitives=["$close", "$open", "$high", "$low", "$volume", "$vwap", "$amount", "$turn", "$factor"],
+                allowed_primitives=list(available_fields),
             ),
             "symbolic_mutation": SubspaceConfig(
                 subspace=ExplorationSubspace.SYMBOLIC_MUTATION,
@@ -156,20 +168,18 @@ class SubspaceRegistry(PixiuBase):
 
         # ── 因子原语词汇表（15+ 个） ──
         primitives = [
-            # Price-Volume
-            FactorPrimitive(name="$close", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$close", description="收盘价"),
-            FactorPrimitive(name="$open", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$open", description="开盘价"),
-            FactorPrimitive(name="$high", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$high", description="最高价"),
-            FactorPrimitive(name="$low", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$low", description="最低价"),
-            FactorPrimitive(name="$volume", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$volume", description="成交量"),
-            FactorPrimitive(name="$vwap", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$vwap", description="成交量加权均价"),
-            FactorPrimitive(name="$amount", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$amount", description="成交额"),
-            FactorPrimitive(name="$turn", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$turn", description="换手率"),
-            FactorPrimitive(name="$factor", category=PrimitiveCategory.PRICE_VOLUME, qlib_syntax="$factor", description="复权因子"),
-            # Fundamental
-            FactorPrimitive(name="$pe_ttm", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$pe_ttm", description="滚动市盈率"),
-            FactorPrimitive(name="$pb", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$pb", description="市净率"),
-            FactorPrimitive(name="$roe", category=PrimitiveCategory.FUNDAMENTAL, qlib_syntax="$roe", description="净资产收益率"),
+            FactorPrimitive(
+                name=spec.formula_name,
+                category=(
+                    PrimitiveCategory.PRICE_VOLUME
+                    if spec.category == "price_volume"
+                    else PrimitiveCategory.FUNDAMENTAL
+                ),
+                qlib_syntax=spec.formula_name,
+                description=spec.description,
+            )
+            for spec in available_field_specs
+        ] + [
             # Temporal Transforms
             FactorPrimitive(name="Ref", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Ref($field, -N)", description="N 日前的值"),
             FactorPrimitive(name="Mean", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Mean($field, N)", description="N 日均值"),
