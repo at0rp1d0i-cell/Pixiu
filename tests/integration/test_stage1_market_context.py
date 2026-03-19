@@ -240,7 +240,7 @@ def test_market_context_node_with_mock_llm(mcp_tools):
     mock_llm.ainvoke = AsyncMock(return_value=mock_response)
     mock_llm.bind_tools = MagicMock(return_value=mock_llm)
 
-    with patch("src.agents.market_analyst.ChatOpenAI", return_value=mock_llm):
+    with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
         analyst = MarketAnalyst(mcp_tools=mcp_tools)
 
     memo = asyncio.run(analyst.analyze())

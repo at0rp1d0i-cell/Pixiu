@@ -127,10 +127,9 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
         mock_pool_factory.return_value = mock_pool
 
         # AlignmentChecker 的 LLM 调用 mock
-        with patch("src.agents.prefilter.ChatOpenAI") as mock_llm_cls:
-            mock_llm = MagicMock()
-            mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-            mock_llm_cls.return_value = mock_llm
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
+        with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
             stage3_result = prefilter_node(initial_state)
 
     state_after_prefilter = initial_state.model_copy(update=stage3_result)

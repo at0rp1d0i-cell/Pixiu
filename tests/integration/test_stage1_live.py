@@ -14,12 +14,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-# 加载 .env
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from src.llm.openai_compat import load_dotenv_if_available
+load_dotenv_if_available()
 
 # 没有 API key 就跳过整个模块
 pytestmark = pytest.mark.skipif(

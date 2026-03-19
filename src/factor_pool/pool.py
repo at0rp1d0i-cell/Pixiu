@@ -22,6 +22,7 @@ from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.factor_pool import FactorPoolRecord
 from src.schemas.failure_constraint import FailureConstraint, FailureMode
+from .chroma_runtime import build_default_chroma_embedding_function
 from .islands import ISLANDS
 
 
@@ -119,7 +120,7 @@ class _InMemoryClient:
     def __init__(self):
         self._collections: dict[str, _InMemoryCollection] = {}
 
-    def get_or_create_collection(self, name: str):
+    def get_or_create_collection(self, name: str, **kwargs):
         if name not in self._collections:
             self._collections[name] = _InMemoryCollection(name)
         return self._collections[name]
@@ -145,24 +146,33 @@ class FactorPool:
             )
             self._client = _InMemoryClient()
             self._storage_mode = "in_memory"
+        self._embedding_function = build_default_chroma_embedding_function()
         # v1 已有：因子回测结果
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
         )
+        self._attach_embedding_function(self._collection)
         # v2 新增：研究笔记归档（供 SynthesisAgent 语义检索）
         self._notes_collection = self._client.get_or_create_collection(
             name="research_notes",
         )
+        self._attach_embedding_function(self._notes_collection)
         # v2 新增：EDA 探索结果归档
         self._explorations_collection = self._client.get_or_create_collection(
             name="exploration_results",
         )
+        self._attach_embedding_function(self._explorations_collection)
         # v2 新增：结构化失败约束
         self._constraints_collection = self._client.get_or_create_collection(
             name=self.CONSTRAINT_COLLECTION,
         )
+        self._attach_embedding_function(self._constraints_collection)
         logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", db_path, self._storage_mode)
         logger.info("[FactorPool] 当前存储因子数量：%d", self._collection.count())
+
+    def _attach_embedding_function(self, collection: object) -> None:
+        if hasattr(collection, "_embedding_function"):
+            collection._embedding_function = self._embedding_function
 
     # ─────────────────────────────────────────────
     # 读取：Island 最优因子

@@ -20,11 +20,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from src.llm.openai_compat import load_dotenv_if_available
+load_dotenv_if_available()
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("RESEARCHER_API_KEY"),
@@ -160,12 +157,11 @@ def test_e2e_stage1_to_stage5(tmp_path):
 
     # ── Stage 3: 纯逻辑过滤（AlignmentChecker mock）──
     print("\n[E2E] Stage 3: 过滤候选...")
+    mock_llm = MagicMock()
+    from unittest.mock import AsyncMock
+    mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
     with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool), \
-         patch("src.agents.prefilter.ChatOpenAI") as mock_llm_cls:
-        mock_llm = MagicMock()
-        from unittest.mock import AsyncMock
-        mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-        mock_llm_cls.return_value = mock_llm
+         patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
         s3_result = prefilter_node(state)
 
     approved = s3_result.get("approved_notes", [])

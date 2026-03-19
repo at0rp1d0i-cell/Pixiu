@@ -187,11 +187,10 @@ class TestE2EStage1ToStage3:
             assert hyp.hypothesis_id == spec.hypothesis_id
 
         # ── Stage 3: PreFilter ──
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
         with patch("src.core.orchestrator.get_factor_pool", return_value=_make_mock_pool()):
-            with patch("src.agents.prefilter.ChatOpenAI") as mock_llm_cls:
-                mock_llm = MagicMock()
-                mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-                mock_llm_cls.return_value = mock_llm
+            with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
                 stage3_result = orch_prefilter(state_after_s2)
 
         state_after_s3 = state_after_s2.model_copy(update=stage3_result)
@@ -221,9 +220,9 @@ class TestE2EStage1ToStage3:
             resp.content = _make_llm_batch_response("momentum", "factor_algebra")
             return resp
 
-        with patch("src.agents.researcher.ChatOpenAI") as MockLLM:
-            mock_chat = MockLLM.return_value
-            mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_chat):
             with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
                 researcher = AlphaResearcher(island="momentum")
                 asyncio.run(researcher.generate_batch(
@@ -249,9 +248,9 @@ class TestE2EStage1ToStage3:
             mock_resp = MagicMock()
             mock_resp.content = _make_llm_batch_response("momentum", ss.value)
 
-            with patch("src.agents.researcher.ChatOpenAI") as MockLLM:
-                mock_chat = MockLLM.return_value
-                mock_chat.ainvoke = AsyncMock(return_value=mock_resp)
+            mock_chat = MagicMock()
+            mock_chat.ainvoke = AsyncMock(return_value=mock_resp)
+            with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_chat):
                 with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
                     researcher = AlphaResearcher(island="momentum")
                     batch = asyncio.run(researcher.generate_batch(
@@ -426,11 +425,9 @@ def test_alignment_checker_with_strategy_spec():
     assert "$close" in spec.required_fields
 
     # mock LLM 初始化，验证 AlignmentChecker 的降级放行逻辑
-    with patch("src.agents.prefilter.ChatOpenAI") as mock_llm_cls:
-        mock_llm = MagicMock()
-        mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM 不可用"))
-        mock_llm_cls.return_value = mock_llm
-
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM 不可用"))
+    with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
         checker = AlignmentChecker()
         is_aligned, reason = asyncio.run(checker.check(note))
 

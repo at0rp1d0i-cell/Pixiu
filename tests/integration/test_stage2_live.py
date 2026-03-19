@@ -14,11 +14,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from src.llm.openai_compat import load_dotenv_if_available
+load_dotenv_if_available()
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("RESEARCHER_API_KEY"),

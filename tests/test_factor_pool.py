@@ -1,17 +1,13 @@
 """验收测试：FactorPool ChromaDB 数据层。"""
-import json
-import os
-import sys
-import tempfile
+from unittest.mock import patch
+
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-pytestmark = pytest.mark.unit
 
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport, FactorSpecSnapshot
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
@@ -89,6 +85,50 @@ class TestRegister:
         for i in range(3):
             _register(pool, f"test_factor_{i}", island="momentum")
         assert pool._collection.count() == 3
+
+    def test_factor_pool_passes_embedding_function_to_all_collections(self, tmp_path):
+        embedding_function = object()
+
+        class _StubCollection:
+            def __init__(self):
+                self._embedding_function = None
+
+            def count(self):
+                return 0
+
+        class _StubClient:
+            def __init__(self):
+                self.calls = []
+
+            def get_or_create_collection(self, name, embedding_function=None):
+                collection = _StubCollection()
+                self.calls.append((name, embedding_function, collection))
+                return collection
+
+        stub_client = _StubClient()
+
+        with patch(
+            "src.factor_pool.pool.build_default_chroma_embedding_function",
+            return_value=embedding_function,
+        ), patch(
+            "src.factor_pool.pool.chromadb.PersistentClient",
+            return_value=stub_client,
+        ):
+            FactorPool(db_path=str(tmp_path / "test_db"))
+
+        assert [name for name, _, _ in stub_client.calls] == [
+            "factor_experiments",
+            "research_notes",
+            "exploration_results",
+            "failure_constraints",
+        ]
+        assert all(
+            requested_embedding is None for _, requested_embedding, _ in stub_client.calls
+        )
+        assert all(
+            collection._embedding_function is embedding_function
+            for _, _, collection in stub_client.calls
+        )
 
 
 class TestReads:
