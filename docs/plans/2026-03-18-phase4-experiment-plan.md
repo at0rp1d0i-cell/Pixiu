@@ -16,7 +16,7 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 - `NARRATIVE_MINING` 子空间缺乏新闻/公告数据支撑
 - regime 特征层缺乏融资余额、市场宽度、涨停池等特征量（这些特征将通过 `FACTOR_ALGEBRA` 和 `NARRATIVE_MINING` 的 prompt context 注入，不作为独立子空间追踪）
 - `AlphaResearcher` 仍是纯 `llm.ainvoke()` 调用，不能直接使用 MCP 工具；RSS 数据当前只能先由 Stage 1 消费，再通过 `MarketContextMemo` 间接影响 Stage 2
-- `FactorPoolRecord.subspace_origin` schema 已存在，但 Stage 5 现行写回路径还没有把 `note` 传给 `register_factor()`；实验前需先补齐，否则该指标会系统性为空
+- `FactorPoolRecord.subspace_origin` 已进入主路径写回，可直接作为实验统计维度使用
 - SubspaceScheduler Thompson Sampling 处于 cold start 期，缺乏多轮 track record
 
 **Phase 4A** 补齐两类数据源：
@@ -115,7 +115,7 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 | Stage 1 RSS 摘要注入命中次数 | `MarketContextMemo.raw_summary` + Stage 1 日志 | RSS 数据是否已进入当前运行时主链 |
 | FACTOR_ALGEBRA / NARRATIVE_MINING 在有/无新 AKShare regime 数据时的表现差异 | 对比引用 regime 特征关键词的假设与未引用者的 Stage 3 通过率 | 新 regime 特征量是否实质提升假设质量 |
 | 含 narrative 关键词的假设占比 | `FactorResearchNote.hypothesis` 文本分析（关键词：政策/公告/预期/叙事）| 叙事信号是否实质影响假设生成 |
-| `FactorPoolRecord.subspace_origin` 分布 | `FactorPool.get_passed_factors()` 返回的 metadata | 有效因子来自哪个子空间；前提是 Stage 5 已补齐 `note` 写回 |
+| `FactorPoolRecord.subspace_origin` 分布 | `FactorPool.get_passed_factors()` 返回的 metadata | 有效因子来自哪个子空间 |
 
 ---
 
@@ -279,7 +279,7 @@ print(f"子空间分布: {dict(subspace_dist)}")
 | 产出物 | 说明 | 用途 |
 |--------|------|------|
 | 50 轮完整日志 | `logs/phase4b_experiment.log` | 事后分析原始数据 |
-| FactorPool 快照 | ChromaDB 持久化（`data/factor_pool_db/`）| 如已补齐 Stage 5 写回链路，则每个因子含 `subspace_origin` 可追溯 |
+| FactorPool 快照 | ChromaDB 持久化（`data/factor_pool_db/`）| 每个因子含 `subspace_origin` 可追溯 |
 | Thompson Sampling 权重历史 | 从 `AgentState.scheduler_state` 每轮提取 | 可视化子空间竞争演化过程 |
 | island × subspace Stage 3 通过率矩阵 | 从日志聚合 | 发现当前 regime 下的有效信号组合 |
 | MiroFish 接入 Go/No-Go 备忘录 | 基于第 6 节决策框架填写 | Phase 4C 启动依据 |

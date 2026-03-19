@@ -62,7 +62,11 @@ logger = logging.getLogger("qlib_downloader")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR     = PROJECT_ROOT / "data"
-QLIB_DIR     = DATA_DIR / "qlib_bin"
+_qlib_env = os.getenv("QLIB_DATA_DIR")
+if _qlib_env:
+    QLIB_DIR = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env
+else:
+    QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 STAGING_DIR  = DATA_DIR / "parquet_staging" / "baostock_raw"
 PROGRESS_FILE = DATA_DIR / "qlib_download_progress.json"
 

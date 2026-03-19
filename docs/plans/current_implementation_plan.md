@@ -70,7 +70,7 @@
 - [x] CriticVerdict.decision → Literal["promote","archive","reject","retry"]（明确决策枚举）
 - [x] _diagnose_failure() 直接返回 Optional[FailureMode]（删除 _FAILURE_MODE_MAP bridge，消除二次解析）
 - [x] FactorPoolRecord.subspace_origin: Optional[str]（假设来源子空间溯源）
-- [ ] Stage 5 → FactorPool 端到端 `subspace_origin` 写回（`register_factor()` 签名已支持 `note`，当前调用链仍未传入）
+- [x] Stage 5 → FactorPool 端到端 `subspace_origin` 写回（`register_factor()` 已通过 `note` 完成主路径写回）
 - [x] factor_pool_writer.py factor_spec None guard（处理历史兼容对象）
 
 ### Phase 3B（计划）: 代码清理

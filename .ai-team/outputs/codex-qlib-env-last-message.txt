@@ -1,0 +1,23 @@
+Implemented the `QLIB_DATA_DIR` env override (with fallback to `PROJECT_ROOT/data/qlib_bin`) in all 5 requested files:
+
+- [src/execution/docker_runner.py](/home/torpedo/Workspace/ML/Pixiu/src/execution/docker_runner.py)
+- [src/core/run_baseline.py](/home/torpedo/Workspace/ML/Pixiu/src/core/run_baseline.py)
+- [src/data_pipeline/format_to_qlib.py](/home/torpedo/Workspace/ML/Pixiu/src/data_pipeline/format_to_qlib.py)
+- [scripts/download_qlib_data.py](/home/torpedo/Workspace/ML/Pixiu/scripts/download_qlib_data.py)
+- [scripts/convert_fundamental_to_qlib.py](/home/torpedo/Workspace/ML/Pixiu/scripts/convert_fundamental_to_qlib.py)
+
+Notes:
+- Absolute env path: used directly.
+- Relative env path: resolved against `PROJECT_ROOT`.
+- `docker_runner.py` keeps `QLIB_DATA_PATH` as `str` (via `str(...)`).
+- `run_baseline.py` now passes `str(QLIB_DIR)` to `qlib.init(...)`.
+
+Verification run:
+- `uv run python -m py_compile src/execution/docker_runner.py src/core/run_baseline.py src/data_pipeline/format_to_qlib.py scripts/download_qlib_data.py scripts/convert_fundamental_to_qlib.py`
+- Result: passed (no syntax errors).
+
+Status file written:
+- [.ai-team/outputs/codex-qlib-env-status.json](/home/torpedo/Workspace/ML/Pixiu/.ai-team/outputs/codex-qlib-env-status.json)
+
+Blocker:
+- Could not stage changes because this environment has `.git` as read-only (`cannot create .git/index.lock`). So changes are applied but not staged.

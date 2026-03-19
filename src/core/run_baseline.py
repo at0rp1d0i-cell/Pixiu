@@ -9,11 +9,17 @@ import qlib
 from qlib.constant import REG_CN
 from qlib.utils import init_instance_by_config
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from qlib.workflow import R
 
-QLIB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "qlib_bin"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_qlib_env = os.getenv("QLIB_DATA_DIR")
+if _qlib_env:
+    QLIB_DIR = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env
+else:
+    QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "results"))
 
 def run_baseline():
@@ -25,7 +31,7 @@ def run_baseline():
     R.start_run(run_name="baseline_Alpha158_LGBM")
     
     logging.info("Step 1: 初始化 Qlib...")
-    qlib.init(provider_uri=QLIB_DIR, region=REG_CN)
+    qlib.init(provider_uri=str(QLIB_DIR), region=REG_CN)
     logging.info("  ✅ Qlib 初始化成功。\n")
 
     # ============ Step 2: Alpha158 数据集 ============

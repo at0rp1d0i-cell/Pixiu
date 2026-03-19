@@ -37,7 +37,7 @@ Last Reviewed: 2026-03-18
 | `23_stage-4-execution.md` | implemented/partial | 已收敛到 `src/execution/` 主路径，report contract 仍未完全收口 |
 | `24_stage-5-judgment.md` | implemented | canonical runtime 收敛到 `src/agents/judgment/` 包，FailureMode enum 9 种完全对齐，CriticVerdict.regime_at_judgment 字段已添加；兼容层 `critic.py / factor_pool_writer.py / cio_report_renderer.py / schemas.py` 已全部删除（phase3b） |
 | `25_stage-45-golden-path.md` | active | 当前 Stage 4→5 收口入口 |
-| `14_factor-pool.md` | implemented/partial | richer metadata 写回已基本落地，FactorPoolRecord.subspace_origin 已加入，register_factor() 签名已支持 note 参数并可写入溯源信息；但 Stage 5 现行调用链尚未把 note 传入，subspace_origin 仍未端到端写回；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例 |
+| `14_factor-pool.md` | implemented | richer metadata 写回已进入主干，FactorPoolRecord.subspace_origin 已加入，register_factor() 已支持 note 参数，Stage 5 judgment_node 已传入 note，subspace_origin 已进入主路径写回；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例 |
 | `15_data-sources.md` | planned/partial | 免费数据主干已存在，扩展数据源尚未收口 |
 | `../futures/terminal-dashboard.md` | planned/partial | 已移出 active design 层；CLI/API 最小实现已有，但更完整的 Dashboard 仍未开始 |
 | `30_agent-team.md` | active | Agent 角色与边界已拆出 |

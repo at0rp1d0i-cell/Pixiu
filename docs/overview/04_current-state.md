@@ -20,7 +20,7 @@ Last Reviewed: 2026-03-18
 
 - Stage 2 的四个活跃子空间和 regime 基础设施层已经进入主干
 - `AlphaResearcher` 仍是纯 LLM 调用，尚未具备主动 MCP/tool access
-- `FactorPoolRecord.subspace_origin` 的 schema 和存储位点已存在，但 Stage 5 写回链还没完全接通
+- `FactorPoolRecord.subspace_origin` 已完成主路径写回，但 richer metadata 仍在持续收口
 - 控制平面仍是 MVP，不是完整读模型和审计面
 - CLI/API 是当前产品入口，但 Dashboard 仍未进入实现阶段
 

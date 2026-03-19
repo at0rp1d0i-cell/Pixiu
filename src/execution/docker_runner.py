@@ -20,9 +20,13 @@ class DockerRunner:
     """
     IMAGE = "Pixiu-coder:latest"
     
-    # 选项 A: 动态获取项目根目录下的 data/qlib_bin 路径
-    _project_root = Path(__file__).parent.parent.parent.resolve()
-    QLIB_DATA_PATH = str(_project_root / "data" / "qlib_bin")
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    _qlib_env = os.getenv("QLIB_DATA_DIR")
+    if _qlib_env:
+        _qlib_path = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env
+    else:
+        _qlib_path = PROJECT_ROOT / "data" / "qlib_bin"
+    QLIB_DATA_PATH = str(_qlib_path)
 
     async def run_python(
         self,

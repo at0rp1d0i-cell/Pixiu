@@ -24,6 +24,7 @@ Usage:
 
 import struct
 import sys
+import os
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +35,11 @@ import pandas as pd
 PROJECT_ROOT   = Path(__file__).resolve().parents[1]
 DATA_DIR       = PROJECT_ROOT / "data"
 STAGING_DIR    = DATA_DIR / "fundamental_staging" / "fina_indicator"
-QLIB_DIR       = DATA_DIR / "qlib_bin"
+_qlib_env = os.getenv("QLIB_DATA_DIR")
+if _qlib_env:
+    QLIB_DIR = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env
+else:
+    QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 CALENDAR_FILE  = QLIB_DIR / "calendars" / "day.txt"
 FEATURES_DIR   = QLIB_DIR / "features"
 

@@ -239,7 +239,7 @@ class FactorPool:
     # get_global_statistics()    ← 已有，保留
 ```
 
-当前代码已经支持 `subspace_origin` 写回，但 Stage 5 现行调用链还没有把 `note` 传进 `register_factor()`，所以这条溯源信息仍未端到端落库。最新偏差以 `../overview/05_spec-execution-audit.md` 为准。
+当前代码已经支持 `subspace_origin` 写回，且 Stage 5 主路径已把 `note` 传进 `register_factor()`，因此这条溯源信息已进入主路径落库。若后续 richer metadata 再发生漂移，以 `../overview/05_spec-execution-audit.md` 为准。
 
 ---
 

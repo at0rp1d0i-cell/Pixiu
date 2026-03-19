@@ -83,7 +83,7 @@ Stage 2 的地位因此明显上升，它不再只是“多生成几个候选”
 - richer contracts 已大体进入运行时
 - Stage 2 的子空间运行时已经进入主干
 - 但 `AlphaResearcher` 仍是纯 LLM 调用，尚不能直接消费 RSS / MCP 新数据源
-- `subspace_origin` 等 metadata 仍有端到端写回缺口
+- `subspace_origin` 已进入主路径写回，但 richer metadata 仍在继续收口
 
 ## 7. Best Next Reads
 

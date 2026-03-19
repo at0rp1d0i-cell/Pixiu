@@ -40,7 +40,7 @@ Pixiu 的核心产物是 research objects、evaluation artifacts 和 failure con
 - Stage 2 仍缺主动 MCP/tool access
 - 数据源扩展还没真正进入 Stage 2 主消费路径
 - 控制平面仍是 MVP，不是稳定读模型
-- `subspace_origin` 写回仍未完全端到端收口
+- `subspace_origin` 已进入主路径写回，但更丰富的研究元数据仍在继续收口
 - 产品层仍以 CLI/API 最小形态为主
 
 ## 5. Core Architectural Judgment

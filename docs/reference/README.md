@@ -13,6 +13,8 @@
 
 ## 当前内容
 
+- `agent_research_os_sota.md`
+  - 面向 Pixiu 的 agent runtime、memory、MCP、skills 与经济学式研究流程前沿参考
 - `llm_quant_projects_and_papers.md`
   - LLM 量化研究相关的项目、论文和数据源索引
 - `a_share_quant_frameworks.md`

@@ -1,0 +1,12 @@
+{
+  "status": "partial",
+  "files_modified": [
+    "src/execution/docker_runner.py",
+    "src/core/run_baseline.py",
+    "src/data_pipeline/format_to_qlib.py",
+    "scripts/download_qlib_data.py",
+    "scripts/convert_fundamental_to_qlib.py"
+  ],
+  "summary": "All five qlib path references now read QLIB_DATA_DIR with PROJECT_ROOT/data/qlib_bin fallback and support absolute/relative env values, and syntax checks passed.",
+  "blockers": "Could not stage changes because .git is read-only in this environment (cannot create .git/index.lock)."
+}
