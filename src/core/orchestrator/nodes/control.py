@@ -106,6 +106,7 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
             round_n=state.current_round,
             state=state,
             scheduler=subspace_scheduler,
+            scheduler_state_snapshot=updated_sched_state.model_dump(),
         )
     except Exception as _snap_exc:
         logger.warning("[Loop Control] 快照写入异常: %s", _snap_exc)

@@ -10,41 +10,33 @@ Output:
 from __future__ import annotations
 
 import argparse
-import json
-import logging
 import os
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-import tushare as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.env import clear_localhost_proxy_env, load_dotenv_if_available
-from src.data_pipeline.moneyflow import MONEYFLOW_STAGING_DIR, get_moneyflow_field_string, normalize_moneyflow_frame
-
-load_dotenv_if_available()
-_cleared_proxy_vars = clear_localhost_proxy_env()
-
-LOG_DIR = PROJECT_ROOT / "logs"
-LOG_DIR.mkdir(exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / "moneyflow_download.log", encoding="utf-8"),
-    ],
+from src.data_pipeline.moneyflow import MONEYFLOW_STAGING_DIR, get_moneyflow_field_string, normalize_moneyflow_frame  # noqa: E402
+from src.data_pipeline.tushare_batch import (  # noqa: E402
+    bootstrap_tushare_script,
+    fetch_listed_stock_codes,
+    get_tushare_pro,
+    load_progress_file,
+    log_batch_banner,
+    run_per_stock_download,
+    save_progress_file,
 )
-logger = logging.getLogger("moneyflow_downloader")
-if _cleared_proxy_vars:
-    logger.info("Cleared localhost proxy vars for direct Tushare access: %s", ", ".join(_cleared_proxy_vars))
+
+logger = bootstrap_tushare_script(
+    project_root=PROJECT_ROOT,
+    logger_name="moneyflow_downloader",
+    log_filename="moneyflow_download.log",
+)
 
 DATA_DIR = PROJECT_ROOT / "data"
 PROGRESS_FILE = DATA_DIR / "moneyflow_download_progress.json"
@@ -59,47 +51,20 @@ _pro = None
 def _get_pro():
     global _pro
     if _pro is None:
-        token = os.getenv("TUSHARE_TOKEN")
-        if not token:
-            raise RuntimeError("TUSHARE_TOKEN environment variable is not set.")
-        _pro = ts.pro_api(token)
-        logger.info("Tushare Pro API initialized.")
+        _pro = get_tushare_pro(logger)
     return _pro
 
 
 def load_progress() -> dict:
-    if PROGRESS_FILE.exists():
-        with open(PROGRESS_FILE, encoding="utf-8") as handle:
-            progress = json.load(handle)
-            progress.setdefault("done", [])
-            progress.setdefault("failed", {})
-            progress.setdefault("empty_counts", {})
-            progress.setdefault("empty_done", [])
-            return progress
-    return {
-        "done": [],
-        "failed": {},
-        "empty_counts": {},
-        "empty_done": [],
-        "started_at": datetime.now().isoformat(),
-    }
+    return load_progress_file(PROGRESS_FILE, track_empty_retries=True, logger=logger)
 
 
 def save_progress(progress: dict) -> None:
-    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    progress["updated_at"] = datetime.now().isoformat()
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as handle:
-        json.dump(progress, handle, indent=2, ensure_ascii=False)
+    save_progress_file(PROGRESS_FILE, progress)
 
 
 def fetch_stock_list() -> list[str]:
-    pro = _get_pro()
-    df = pro.stock_basic(list_status="L", fields="ts_code")
-    if df is None or df.empty:
-        raise RuntimeError("pro.stock_basic returned empty result — check token/connection")
-    codes = df["ts_code"].tolist()
-    logger.info("[Phase 1] Total listed stocks: %d", len(codes))
-    return codes
+    return fetch_listed_stock_codes(_get_pro(), logger)
 
 
 def fetch_moneyflow(ts_code: str) -> pd.DataFrame | None:
@@ -114,73 +79,20 @@ def fetch_moneyflow(ts_code: str) -> pd.DataFrame | None:
 
 def download_all(progress: dict, stock_codes: list[str]) -> None:
     MONEYFLOW_STAGING_DIR.mkdir(parents=True, exist_ok=True)
-    done_set = set(progress["done"])
-    failed_dict: dict[str, str] = progress.get("failed", {})
-    empty_counts: dict[str, int] = progress.get("empty_counts", {})
-    empty_done_set = set(progress.get("empty_done", []))
-
-    pending = [code for code in stock_codes if code not in done_set and code not in empty_done_set]
-    logger.info(
-        "[Phase 2] Pending: %d / %d (skipped %d already done)",
-        len(pending),
-        len(stock_codes),
-        len(stock_codes) - len(pending),
+    run_per_stock_download(
+        progress=progress,
+        progress_file=PROGRESS_FILE,
+        stock_codes=stock_codes,
+        fetch_frame=fetch_moneyflow,
+        persist_frame=lambda ts_code, df: normalize_moneyflow_frame(df).to_parquet(
+            MONEYFLOW_STAGING_DIR / f"{ts_code}.parquet",
+            index=False,
+        ),
+        logger=logger,
+        checkpoint_every=CHECKPOINT_EVERY,
+        sleep_between=SLEEP_BETWEEN_STOCKS,
+        empty_retry_limit=2,
     )
-
-    for i, ts_code in enumerate(pending, 1):
-        try:
-            df = fetch_moneyflow(ts_code)
-            if df is not None and not df.empty:
-                out_path = MONEYFLOW_STAGING_DIR / f"{ts_code}.parquet"
-                normalize_moneyflow_frame(df).to_parquet(out_path, index=False)
-                done_set.add(ts_code)
-                progress["done"] = list(done_set)
-                failed_dict.pop(ts_code, None)
-                empty_counts.pop(ts_code, None)
-                empty_done_set.discard(ts_code)
-            else:
-                empty_attempts = empty_counts.get(ts_code, 0) + 1
-                empty_counts[ts_code] = empty_attempts
-                if empty_attempts >= 2:
-                    empty_done_set.add(ts_code)
-                    logger.warning(
-                        "[Phase 2] [%d/%d] %s — empty result twice, marking empty_done",
-                        i,
-                        len(pending),
-                        ts_code,
-                    )
-                else:
-                    logger.warning(
-                        "[Phase 2] [%d/%d] %s — empty result, will retry on next run",
-                        i,
-                        len(pending),
-                        ts_code,
-                    )
-        except Exception as exc:
-            failed_dict[ts_code] = str(exc)
-            progress["failed"] = failed_dict
-            logger.error("[Phase 2] [%d/%d] FAILED %s: %s", i, len(pending), ts_code, exc)
-
-        if i % CHECKPOINT_EVERY == 0:
-            progress["failed"] = failed_dict
-            progress["empty_counts"] = empty_counts
-            progress["empty_done"] = list(empty_done_set)
-            save_progress(progress)
-            logger.info(
-                "[Phase 2] Checkpoint %d/%d — done: %d, failed: %d, empty_done: %d",
-                i,
-                len(pending),
-                len(done_set),
-                len(failed_dict),
-                len(empty_done_set),
-            )
-
-        time.sleep(SLEEP_BETWEEN_STOCKS)
-
-    progress["failed"] = failed_dict
-    progress["empty_counts"] = empty_counts
-    progress["empty_done"] = list(empty_done_set)
-    save_progress(progress)
 
 
 def parse_args() -> argparse.Namespace:
@@ -195,11 +107,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    logger.info("=" * 60)
-    logger.info("Pixiu — Tushare moneyflow Batch Downloader")
-    logger.info("Output: %s", MONEYFLOW_STAGING_DIR)
-    logger.info("Progress: %s", PROGRESS_FILE)
-    logger.info("=" * 60)
+    log_batch_banner(
+        logger,
+        title="Pixiu — Tushare moneyflow Batch Downloader",
+        output_path=MONEYFLOW_STAGING_DIR,
+        progress_file=PROGRESS_FILE,
+    )
 
     token = os.getenv("TUSHARE_TOKEN")
     if not token:

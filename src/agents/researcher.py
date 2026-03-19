@@ -96,27 +96,6 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 每个假设必须声明 applicable_regimes（适用市场环境）和 invalid_regimes（失效环境）。
 """
 
-# 子空间到 prompt 指令的映射
-_SUBSPACE_PROMPTS = {
-    ExplorationSubspace.FACTOR_ALGEBRA: (
-        "本轮优先使用【因子代数搜索】方法：基于价量/基本面原语的受约束组合，"
-        "关注时间变换、截面算子、交互项构造。"
-    ),
-    ExplorationSubspace.NARRATIVE_MINING: (
-        "本轮优先使用【经济叙事挖掘】方法：从政策口径、产业链叙事、"
-        "市场预期错位中抽取机制假设，将定性洞察转化为可测因子。"
-    ),
-    ExplorationSubspace.SYMBOLIC_MUTATION: (
-        "本轮优先使用【符号变异】方法：对已知因子做结构化变异——"
-        "添加/移除算子、交换时间窗口、改变归一化、修改交互项。"
-    ),
-    ExplorationSubspace.CROSS_MARKET: (
-        "本轮优先使用【跨市场模式迁移】方法：从美股/港股/商品/利率的"
-        "已知 alpha 机制中提取逻辑骨架，适配 A 股市场特征。"
-    ),
-}
-
-
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 

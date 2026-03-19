@@ -8,8 +8,6 @@ Sources:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-pytestmark = pytest.mark.unit
-
 from src.core.orchestrator import (
     NODE_LOOP_CONTROL,
     NODE_REPORT,
@@ -23,6 +21,8 @@ from src.schemas.failure_constraint import FailureMode
 from src.schemas.judgment import CriticVerdict, ThresholdCheck
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────────────────
@@ -329,6 +329,13 @@ class TestLoopControlSnapshotWritten:
             assert data["judgment"]["failure_mode_counts"]["low_sharpe"] == 1
             assert data["judgment"]["failed_check_counts"]["sharpe"] == 1
             assert data["judgment"]["sample_failures"][0]["factor_id"] == "failing_factor"
+            assert set(data["scheduler_weights"]) == {
+                "factor_algebra",
+                "symbolic_mutation",
+                "cross_market",
+                "narrative_mining",
+            }
+            assert sum(data["scheduler_weights"].values()) == pytest.approx(1.0)
         finally:
             # 恢复单例，避免污染其他测试
             _exp_mod._logger_instance = None

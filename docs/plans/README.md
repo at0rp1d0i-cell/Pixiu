@@ -20,10 +20,6 @@
   - 当前数据能力收口设计
 - `2026-03-19-data-capability-alignment-implementation.md`
   - 当前数据能力收口实施计划
-- `2026-03-19-multi-agent-skills-expansion-design.md`
-  - Skills 扩展设计稿（待收口为可执行版）
-- `2026-03-19-skills-expansion-implementation.md`
-  - Skills 扩展实施计划（待修订）
 - `2026-03-19-tushare-p1-expansion-implementation.md`
   - Tushare P1 数据面扩展计划（`moneyflow / stk_limit` staging 与下载期收口）
 - 仍在指导当前工作的临时专题计划
@@ -45,6 +41,8 @@
 - `2026-03-18-docs-reorganization-design.md`
 - `2026-03-18-docs-reorganization-implementation-plan.md`
 - `2026-03-19-experiment-round-observability-implementation.md`
+- `2026-03-19-multi-agent-skills-expansion-design.md`
+- `2026-03-19-skills-expansion-implementation.md`
 
 ## 不适合放在这里的内容
 

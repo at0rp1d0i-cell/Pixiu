@@ -34,20 +34,35 @@ class ExperimentLogger:
                 "[ExperimentLogger] 无法创建目录 %s: %s", self._base_dir, e
             )
 
-    def snapshot(self, round_n: int, state: "AgentState", scheduler=None) -> None:
+    def snapshot(
+        self,
+        round_n: int,
+        state: "AgentState",
+        scheduler=None,
+        scheduler_state_snapshot: Optional[dict] = None,
+    ) -> None:
         """在 loop_control_node 清除 state 之前调用，保存当轮完整数据。
 
         写入失败只 log warning，不向上抛出异常。
         """
         try:
-            self._write_snapshot(round_n, state, scheduler)
+            self._write_snapshot(
+                round_n,
+                state,
+                scheduler,
+                scheduler_state_snapshot=scheduler_state_snapshot,
+            )
         except Exception as e:
             logger.warning(
                 "[ExperimentLogger] Round %d 快照写入失败: %s", round_n, e
             )
 
     def _write_snapshot(
-        self, round_n: int, state: "AgentState", scheduler=None
+        self,
+        round_n: int,
+        state: "AgentState",
+        scheduler=None,
+        scheduler_state_snapshot: Optional[dict] = None,
     ) -> None:
         verdicts_passed = sum(
             1 for v in state.critic_verdicts if v.overall_passed
@@ -71,18 +86,18 @@ class ExperimentLogger:
             if r.passed
         ]
 
-        # 获取 scheduler 权重
+        # 获取 scheduler 权重：只记录可由持久化状态复原的真实分配权重
         scheduler_weights: dict = {}
-        if scheduler is not None:
+        if scheduler is not None and scheduler_state_snapshot:
             try:
-                # SubspaceScheduler 有 COLD_START_WEIGHTS 属性
-                raw_weights = getattr(scheduler, "weights", None)
-                if raw_weights is None:
-                    raw_weights = getattr(scheduler, "COLD_START_WEIGHTS", {})
-                # 将枚举 key 转为字符串
+                from src.scheduling.subspace_scheduler import SchedulerState
+
+                allocations = scheduler.allocate(
+                    SchedulerState(**scheduler_state_snapshot)
+                )
                 scheduler_weights = {
-                    (k.value if hasattr(k, "value") else str(k)): v
-                    for k, v in raw_weights.items()
+                    allocation.subspace.value: allocation.weight
+                    for allocation in allocations
                 }
             except Exception:
                 scheduler_weights = {}

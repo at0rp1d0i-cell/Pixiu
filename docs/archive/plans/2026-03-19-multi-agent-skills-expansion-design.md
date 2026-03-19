@@ -1,8 +1,13 @@
 # Multi-Agent Skills Expansion — Design Document
 
-**Date:** 2026-03-19
-**Status:** Approved — Ready for Implementation
-**Scope:** Phase 4B 前置工程，不依赖实验数据，可与 exp_002 并行推进
+Status: historical
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
+> Archived on 2026-03-19. The multi-agent SkillLoader expansion has already landed in
+> `src/skills/loader.py`, `src/agents/market_analyst.py`, `src/agents/researcher.py`,
+> `src/agents/prefilter.py`, and `src/execution/exploration_agent.py`. This document is
+> kept for traceability, not as an active plan.
 
 ---
 

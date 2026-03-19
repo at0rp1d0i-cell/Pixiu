@@ -1,3 +1,10 @@
+Status: historical
+Owner: research infra
+Last Reviewed: 2026-03-19
+
+> Archived on 2026-03-19. The actionable guidance here has been absorbed by
+> `docs/reference/data-download-guide.md`. Keep this note only for historical context.
+
 # 深度检索与架构重构：A股日线数据至 Microsoft Qlib 底层.bin 格式的完美转换实践
 
 （本篇内容由多轮对话的历史研报提炼，包含必须遵循的极端数据清洗与序列化规范）

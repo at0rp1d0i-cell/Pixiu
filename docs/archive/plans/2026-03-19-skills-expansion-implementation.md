@@ -1,6 +1,15 @@
 # Skills Expansion Implementation Plan (v2 — Executable)
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+Status: historical
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
+> Archived on 2026-03-19. The implementation described here has already landed in the
+> live runtime and tests. Keep this file only as historical execution trace, not as an
+> active implementation checklist.
+
+> **For Claude:** Historical note. This plan has been executed and should not be treated as
+> an active task list.
 
 **Goal:** Extend SkillLoader from Researcher-only to all LLM-driven agents (MarketAnalyst, PreFilter, ExplorationAgent), add island-specific skills, fix `_state_proxy` gap, and add integration tests that verify actual prompt injection.
 
@@ -8,7 +17,7 @@
 
 **Tech Stack:** Python, existing `SkillLoader` class, markdown skill files, pytest
 
-**Design Doc:** `docs/plans/2026-03-19-multi-agent-skills-expansion-design.md`
+**Design Doc:** `docs/archive/plans/2026-03-19-multi-agent-skills-expansion-design.md`
 
 **Pre-condition:** `src/skills/loader.py` already has `load_for_agent()`, `_apply_conditional_rules()`, `ISLAND_FILE_MAP`, `_ROLE_SKILLS`, `_ROLE_CONSTRAINTS`. Legacy `load_for_researcher()` delegates to `load_for_agent()`.
 

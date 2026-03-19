@@ -1,3 +1,13 @@
+Purpose: Provide background context on the A-share open-source quant ecosystem and framework tradeoffs.
+Status: active
+Audience: implementer
+Canonical: no
+Owner: research
+Last Reviewed: 2026-03-19
+
+> Use this as ecosystem background only. For current Pixiu adoption guidance, prefer
+> `docs/reference/agent_research_os_sota.md`.
+
 # A股开源量化基础设施调研报告
 
 这份文档是 A 股开源量化基础设施的背景调研，用于帮助评估底层研究与执行框架。

@@ -1,3 +1,13 @@
+Purpose: Maintain a broader index of LLM-native quant projects, papers, and data-source references beyond Pixiu's immediate adoption set.
+Status: active
+Audience: implementer
+Canonical: no
+Owner: research
+Last Reviewed: 2026-03-19
+
+> This file is a supporting catalog. For Pixiu-specific adoption priorities, prefer
+> `docs/reference/agent_research_os_sota.md`.
+
 # LLM 量化研究项目与论文索引
 
 > 最后更新：2026-03-08

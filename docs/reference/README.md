@@ -13,18 +13,26 @@
 
 ## 当前内容
 
+### 主参考
+
 - `agent_research_os_sota.md`
-  - 面向 Pixiu 的 agent runtime、memory、MCP、skills 与经济学式研究流程前沿参考
-- `llm_quant_projects_and_papers.md`
-  - LLM 量化研究相关的项目、论文和数据源索引
-- `a_share_quant_frameworks.md`
-  - A 股开源量化基础设施背景调研
+  - Pixiu 下一阶段 agent runtime、retrieval、memory、MCP 与 skills 采用建议的主参考
 - `data-download-guide.md`
-  - Pixiu 本地数据下载、转换、增量更新和验证的执行指南
+  - 当前本地数据下载、转换、增量更新和验证的执行指南
 - `tushare-dataset-matrix.md`
   - Tushare 官方数据面与 Pixiu 接入优先级矩阵
-- `qlib_data_pipeline_best_practices.md`
-  - Qlib 日线数据管线的关键约束与清洗实践
+
+### 辅助背景
+
+- `llm_quant_projects_and_papers.md`
+  - 更宽口径的项目与论文索引；当需要 Pixiu 采用建议时，优先回到 `agent_research_os_sota.md`
+- `a_share_quant_frameworks.md`
+  - A 股开源量化基础设施背景调研；更适合作为生态扫盲资料，而不是当前选型真相
+
+### 已归档的旧 memo
+
+- `docs/archive/reference/qlib_data_pipeline_best_practices.md`
+  - 早期 Qlib 数据管线备忘，已被 `data-download-guide.md` 吸收
 
 ## 不适合放在这里的内容
 

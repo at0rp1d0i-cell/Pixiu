@@ -36,42 +36,33 @@ Usage:
 """
 
 import argparse
-import json
-import logging
 import os
 import sys
-import time
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-import tushare as ts
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.env import clear_localhost_proxy_env, load_dotenv_if_available
+from src.data_pipeline.tushare_batch import (  # noqa: E402
+    bootstrap_tushare_script,
+    fetch_listed_stock_codes,
+    get_tushare_pro,
+    load_progress_file,
+    log_batch_banner,
+    run_per_stock_download,
+    save_progress_file,
+)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
-load_dotenv_if_available()
-_cleared_proxy_vars = clear_localhost_proxy_env()
-
-LOG_DIR = PROJECT_ROOT / "logs"
-LOG_DIR.mkdir(exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / "fundamental_download.log", encoding="utf-8"),
-    ],
+logger = bootstrap_tushare_script(
+    project_root=PROJECT_ROOT,
+    logger_name="fundamental_downloader",
+    log_filename="fundamental_download.log",
 )
-logger = logging.getLogger("fundamental_downloader")
-if _cleared_proxy_vars:
-    logger.info("Cleared localhost proxy vars for direct Tushare access: %s", ", ".join(_cleared_proxy_vars))
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -97,54 +88,25 @@ def _get_pro():
     """Lazy-init Tushare Pro API instance (mirrors tushare_server.py pattern)."""
     global _pro
     if _pro is None:
-        token = os.getenv("TUSHARE_TOKEN")
-        if not token:
-            raise RuntimeError(
-                "TUSHARE_TOKEN environment variable is not set. "
-                "Export it before running: export TUSHARE_TOKEN=<your_token>"
-            )
-        _pro = ts.pro_api(token)
-        logger.info("Tushare Pro API initialized.")
+        _pro = get_tushare_pro(logger)
     return _pro
 
 
 # ── Progress helpers ───────────────────────────────────────────────────────────
 
 def load_progress() -> dict:
-    if PROGRESS_FILE.exists():
-        with open(PROGRESS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        logger.info(
-            "Loaded progress: %d done, %d failed",
-            len(data.get("done", [])),
-            len(data.get("failed", {})),
-        )
-        return data
-    return {
-        "done": [],
-        "failed": {},
-        "started_at": datetime.now().isoformat(),
-    }
+    return load_progress_file(PROGRESS_FILE, track_empty_retries=False, logger=logger)
 
 
 def save_progress(progress: dict) -> None:
-    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    progress["updated_at"] = datetime.now().isoformat()
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        json.dump(progress, f, indent=2, ensure_ascii=False)
+    save_progress_file(PROGRESS_FILE, progress)
 
 
 # ── Phase 1: Stock list ────────────────────────────────────────────────────────
 
 def fetch_stock_list() -> list[str]:
     """Return all listed A-share ts_codes via pro.stock_basic."""
-    pro = _get_pro()
-    df = pro.stock_basic(list_status="L", fields="ts_code")
-    if df is None or df.empty:
-        raise RuntimeError("pro.stock_basic returned empty result — check token/connection")
-    codes = df["ts_code"].tolist()
-    logger.info("[Phase 1] Total listed stocks: %d", len(codes))
-    return codes
+    return fetch_listed_stock_codes(_get_pro(), logger)
 
 
 # ── Phase 2: Download fina_indicator ──────────────────────────────────────────
@@ -168,51 +130,20 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
     Checkpoints every CHECKPOINT_EVERY stocks.
     """
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
-
-    done_set = set(progress["done"])
-    failed_dict: dict[str, str] = progress.get("failed", {})
-
-    pending = [c for c in stock_codes if c not in done_set]
-    skipped = len(stock_codes) - len(pending)
-    logger.info(
-        "[Phase 2] Pending: %d / %d  (skipped %d already done)",
-        len(pending), len(stock_codes), skipped,
+    run_per_stock_download(
+        progress=progress,
+        progress_file=PROGRESS_FILE,
+        stock_codes=stock_codes,
+        fetch_frame=fetch_fina_indicator,
+        persist_frame=lambda ts_code, df: df.to_parquet(
+            STAGING_DIR / f"{ts_code}.parquet",
+            index=False,
+        ),
+        logger=logger,
+        checkpoint_every=CHECKPOINT_EVERY,
+        sleep_between=SLEEP_BETWEEN_STOCKS,
+        empty_retry_limit=None,
     )
-
-    for i, ts_code in enumerate(pending, 1):
-        try:
-            df = fetch_fina_indicator(ts_code)
-
-            if df is not None and not df.empty:
-                out_path = STAGING_DIR / f"{ts_code}.parquet"
-                df.to_parquet(out_path, index=False)
-            else:
-                # Empty result is still a valid "done" — stock may have no filings yet
-                logger.warning("[Phase 2] [%d/%d] %s — empty result, marking done", i, len(pending), ts_code)
-
-            done_set.add(ts_code)
-            progress["done"] = list(done_set)
-            # Remove from failed if it previously failed and now succeeded
-            failed_dict.pop(ts_code, None)
-
-        except Exception as e:
-            err_msg = str(e)
-            failed_dict[ts_code] = err_msg
-            progress["failed"] = failed_dict
-            logger.error("[Phase 2] [%d/%d] FAILED %s: %s", i, len(pending), ts_code, err_msg)
-
-        if i % CHECKPOINT_EVERY == 0:
-            progress["failed"] = failed_dict
-            save_progress(progress)
-            logger.info(
-                "[Phase 2] Checkpoint %d/%d — done: %d, failed: %d",
-                i, len(pending), len(done_set), len(failed_dict),
-            )
-
-        time.sleep(SLEEP_BETWEEN_STOCKS)
-
-    progress["failed"] = failed_dict
-    save_progress(progress)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -242,12 +173,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
-    logger.info("=" * 60)
-    logger.info("Pixiu — Tushare fina_indicator Batch Downloader")
-    logger.info("Output: %s", STAGING_DIR)
-    logger.info("Progress: %s", PROGRESS_FILE)
-    logger.info("=" * 60)
+    log_batch_banner(
+        logger,
+        title="Pixiu — Tushare fina_indicator Batch Downloader",
+        output_path=STAGING_DIR,
+        progress_file=PROGRESS_FILE,
+    )
 
     # Validate token early
     token = os.getenv("TUSHARE_TOKEN")
