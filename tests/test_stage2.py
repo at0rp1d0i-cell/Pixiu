@@ -17,6 +17,7 @@ import pytest
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch, ExplorationQuestion
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
+from src.schemas.market_context import MarketContextMemo
 from src.scheduling.subspace_scheduler import SubspaceScheduler
 
 pytestmark = pytest.mark.unit
@@ -244,6 +245,91 @@ def test_batch_notes_carry_exploration_subspace():
             ))
 
     assert batch.notes[0].exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA
+
+
+def test_alpha_researcher_injects_market_regime_skill_from_context():
+    """当 generate_batch() 收到 market context 时，system prompt 应包含 regime skill。"""
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = """{
+            "notes": [{
+                "note_id": "x",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "动量测试",
+                "economic_intuition": "趋势延续",
+                "proposed_formula": "Mean($close, 5) / Mean($close, 20) - 1",
+                "risk_factors": [],
+                "market_context_date": "2026-03-19"
+            }],
+            "generation_rationale": "测试"
+        }"""
+        return response
+
+    context = MarketContextMemo(
+        date="2026-03-19",
+        northbound=None,
+        macro_signals=[],
+        hot_themes=["中字头"],
+        historical_insights=[],
+        suggested_islands=["momentum"],
+        market_regime="bull_trend",
+        raw_summary="市场趋势向上",
+    )
+
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            researcher = AlphaResearcher(island="momentum")
+            asyncio.run(researcher.generate_batch(context=context, iteration=1))
+
+    assert captured_messages
+    system_message = captured_messages[0][0]
+    assert "市场状态识别规范" in system_message.content
+
+
+def test_alpha_researcher_injects_island_skill_marker():
+    """Researcher 应把当前 island 传给 SkillLoader，而不是只加载通用 researcher skills。"""
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = """{
+            "notes": [{
+                "note_id": "x",
+                "island": "volume",
+                "iteration": 1,
+                "hypothesis": "量能测试",
+                "economic_intuition": "换手率异常",
+                "proposed_formula": "Mean($volume, 5) / Mean($volume, 20) - 1",
+                "risk_factors": [],
+                "market_context_date": "2026-03-19"
+            }],
+            "generation_rationale": "测试"
+        }"""
+        return response
+
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            researcher = AlphaResearcher(island="volume")
+            asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert captured_messages
+    system_message = captured_messages[0][0]
+    assert "<!-- SKILL:ISLAND_VOLUME -->" in system_message.content
 
 
 # ─────────────────────────────────────────────────────────

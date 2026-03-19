@@ -5,6 +5,9 @@ from src.schemas.research_note import FactorResearchNote, ExplorationQuestion
 from src.schemas.exploration import ExplorationResult
 from src.execution.docker_runner import DockerRunner
 from src.llm.openai_compat import build_researcher_llm
+from src.skills.loader import SkillLoader
+
+_SKILL_LOADER = SkillLoader()
 
 EXPLORATION_SYSTEM_PROMPT = """你是一个量化数据分析师，专门用 Python 探索 A 股市场数据。
 你的工作是回答研究员的探索性问题，帮助他们验证假设。
@@ -26,7 +29,8 @@ print("EXPLORATION_RESULT_JSON:" + json.dumps({"findings": "...", "key_statistic
 """
 
 class ExplorationAgent:
-    def __init__(self):
+    def __init__(self, skill_loader: SkillLoader | None = None):
+        self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(temperature=0.3)  # 低温度，代码生成要精确
         self.runner = DockerRunner()
 
@@ -39,9 +43,15 @@ class ExplorationAgent:
 
         # Step 1: 生成 EDA 脚本
         prompt = self._build_prompt(note, question)
+        system_content = EXPLORATION_SYSTEM_PROMPT
+        skill_context = self.skill_loader.load_for_agent("exploration")
+        if skill_context:
+            system_content = (
+                system_content + "\n\n## A 股探索编码约束\n\n" + skill_context
+            )
         # Using a simple list of messages directly
         messages = [
-            {"role": "system", "content": EXPLORATION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": prompt}
         ]
         response = await self.llm.ainvoke(messages)

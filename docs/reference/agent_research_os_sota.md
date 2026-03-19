@@ -86,6 +86,7 @@ Pixiu 现在已经不是一个简单的 RAG agent，而是三类记忆并存：
 |---|---|---|---|---|
 | [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/) | official system blog | `population + evaluator + LLM mutation` 的进化式程序搜索 | 很适合启发“候选假设族群 + evaluator 选择压力 + 自动变异” | `Borrow search pattern` |
 | [AI as a research partner: Advancing theoretical computer science with AlphaEvolve](https://research.google/blog/ai-as-a-research-partner-advancing-theoretical-computer-science-with-alphaevolve/) | official research blog | 强调“先验证、再接受发现”，并把 correctness 当瓶颈管理 | 很适合 Pixiu 的 `Stage 3-5` 审稿逻辑 | `Borrow evaluation philosophy` |
+| [EvoScientist](https://arxiv.org/abs/2603.08127) | paper/system | `Research Agent + Experiment Agent + Evolution Manager`，显式区分 `ideation memory` 和 `experimentation memory` | 是目前最接近 Pixiu 的“研究型 agent OS”参考之一，尤其适合启发跨轮知识蒸馏和研究演化层 | `Borrow strongly` |
 
 对 Pixiu 来说，这一组文献共同支持一个结论：
 
@@ -162,6 +163,136 @@ Letta 的 memory blocks 有两个特征很值得借鉴：
   - 当前轮实验边界
   - 当前 island / subspace 约束
   - 当前 run 的 hard constraints
+
+### 4.4 官方维护生态：Anthropic 更强在插件打包，OpenAI 更强在 agent primitives
+
+如果只看“官方维护、且和 Pixiu 相关”的技能与 MCP 生态，目前可以粗略分成两条路线：
+
+| 生态 | 官方重心 | 对 Pixiu 最有参考价值的部分 | 结论 |
+|---|---|---|---|
+| Anthropic | `plugin / skills / MCP connectors / vertical workflow packaging` | 如何把领域能力打包成可安装、可配置、可治理的插件层 | `Borrow strongly for packaging` |
+| OpenAI | `agents / guardrails / tracing / hosted MCP / apps` | 如何把 agent runtime、MCP、审批、trace、评测做成底层基础设施 | `Borrow strongly for runtime infrastructure` |
+
+#### Anthropic 官方资产
+
+1. `knowledge-work-plugins`
+   - 官方把垂直工作流拆成 `plugin.json + .mcp.json + skills + commands`
+   - 很适合 Pixiu 未来做 `a-share-core / narrative-mining / macro / broker / mirofish` 这类插件层
+   - 来源：
+     - [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main)
+     - [raw README](https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/README.md)
+
+2. `finance` 插件
+   - 值得借的是 workflow packaging，不是财务业务本体
+   - 它的 `.mcp.json` 已预留 `bigquery / slack / microsoft365 / gmail / google-calendar` 等连接面，但 `ERP / analytics` 仍更多是类别占位符
+   - 这说明它更像“高风险知识工作的插件模板”，而不是开箱即用的 finance OS
+   - 来源：
+     - [finance README](https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/README.md)
+     - [finance .mcp.json](https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/.mcp.json)
+     - [finance CONNECTORS](https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/CONNECTORS.md)
+
+3. `claude-plugins-official`
+   - 这是 Anthropic 官方维护的 Claude Code 插件目录
+   - README 明确给出标准结构：`.claude-plugin / .mcp.json / commands / agents / skills / README`
+   - 这对 Pixiu 很有参考价值，因为它说明 Anthropic 不是只把 skills 当 prompt，而是把 `agents + skills + MCP` 当成同一安装单元
+   - 来源：
+     - [claude-plugins-official](https://github.com/anthropics/claude-plugins-official)
+
+4. `life-sciences`
+   - 这是官方垂直 marketplace 的更强样板
+   - 里面不是一个插件，而是一组行业插件，可通过 `/plugin marketplace add ...` 和 `/plugin install ...` 装入
+   - 对 Pixiu 的启发是：未来完全可以做“量化研究 marketplace”而不是单一大插件
+   - 来源：
+     - [life-sciences](https://github.com/anthropics/life-sciences)
+
+5. `Anthropic MCP connector`
+   - Claude API 现在官方支持直接通过 Messages API 连远程 MCP server
+   - 当前限制是：只支持 `tool calls`
+   - 对 Pixiu 的启发是，未来如果要支持远程 Researcher tool plane，这条官方路径值得关注
+   - 来源：
+     - [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)
+
+#### OpenAI 官方资产
+
+1. `OpenAI Agents SDK`
+   - 官方重心是 agent primitives：
+     - agents
+     - tools
+     - handoffs
+     - guardrails
+     - tracing
+   - 这对 Pixiu 的 `Coordinator / Researcher / Evaluator / Human gate` 很有参考意义
+   - 来源：
+     - [Agents SDK](https://openai.github.io/openai-agents-python/)
+
+2. `Agents SDK MCP support`
+   - 官方已经明确支持多种 MCP transport
+   - 同时有 Hosted MCP、tool filtering、approval policies、failure handling 等能力
+   - 这比“会不会接一个 MCP server”更重要，因为它直接对应 Pixiu 的 tool governance
+   - 来源：
+     - [Agents SDK MCP](https://openai.github.io/openai-agents-python/mcp/)
+
+3. `Apps SDK`
+   - 官方 Help Center 明确写了 Apps SDK built on MCP
+   - 这条线更偏 ChatGPT 内部 app packaging 和 UI，但对未来 Pixiu 的 dashboard/plugin 化也有启发
+   - 来源：
+     - [Build with the Apps SDK](https://help.openai.com/en/articles/12515353-build-with-the-apps-sdk)
+     - [Apps in ChatGPT](https://help.openai.com/en/articles/12503483-apps-in-chatgpt-and-the-apps-sdk)
+
+4. `openai-mcpkit`
+   - 这是目前我看到最值得 Pixiu 认真研究的 OpenAI 官方仓库
+   - 它的定位是“为企业私有数据进入 ChatGPT 提供安全的 MCP blueprint”
+   - 仓库里甚至直接有 `synthetic_financial_data/`，明确把金融研究报告、expert calls、alternative data 作为样例
+   - 这和 Pixiu 的未来数据平面很贴近
+   - 来源：
+     - [openai-mcpkit](https://github.com/openai/openai-mcpkit)
+
+5. `金融案例页`
+   - OpenAI 官方没有像 Anthropic 那样直接给出 finance plugin，但有很强的行业案例
+   - 最值得看的是：
+     - [Hebbia](https://openai.com/index/hebbia/)
+   - 它的重点不是插件，而是“多 agent + 私有数据 + 深研究”的 workflow，这对 Pixiu 的 research OS 定位很有启发
+
+#### 对 Pixiu 的结论
+
+- 如果你想学“怎么组织领域能力”，优先看 Anthropic
+- 如果你想学“怎么把 agent runtime、MCP、审批、trace 做扎实”，优先看 OpenAI
+- Pixiu 最合理的路线不是二选一，而是：
+  - `Anthropic-style domain packaging`
+  - `OpenAI-style runtime primitives`
+
+### 4.5 ARIS：更像 research workflow + skills methodology，不是完整 research OS
+
+`Auto-claude-code-research-in-sleep` 更像一套“研究自动化 workflow 方法论 + skills 库”，而不是完整的 research OS。
+
+一手来源：
+
+- [ARIS GitHub](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep)
+- [ARIS README](https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/README.md)
+- [research-review skill](https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/research-review/SKILL.md)
+- [experiment-bridge skill](https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/experiment-bridge/SKILL.md)
+- [novelty-check skill](https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/novelty-check/SKILL.md)
+
+它最值得 Pixiu 借的部分：
+
+- `cross-model review`
+  - 不让同一个模型闭环完成生成、实现、审稿，避免陷入局部最优
+- `markdown-first skills`
+  - 把研究 protocol 显式写成 `SKILL.md`，让研究流程可迁移、可审阅、可版本化
+- `experiment bridge`
+  - 在高成本实验前，先做计划、代码复审和 sanity check
+- `novelty-check workflow`
+  - 先抽 claim，再做多源文献或近邻工作比对，最后进入 reviewer 判断
+
+它不适合直接拿来替代 Pixiu 的部分：
+
+- 它没有 Pixiu 这种 `FactorPool + StateStore + hard gate` 的 durable truth 层
+- 它更像研究 protocol 层，而不是研究资产操作系统
+
+对 Pixiu 的结论：
+
+- `Borrow workflow patterns`
+- `Do not replace control plane or typed memory`
 
 ---
 
@@ -364,6 +495,14 @@ Pixiu 未来可以把这套东西做成：
 
 - `OpenClaw`
   - 借 skills、failover、serialized loop、hook model
+- `EvoScientist`
+  - 借 `ideation memory / experimentation memory` 分层，以及 `Evolution Manager` 风格的跨轮知识蒸馏
+- `ARIS`
+  - 借 cross-model review、experiment bridge、novelty-check 这类研究 protocol skills
+- `Anthropic knowledge-work-plugins / claude-plugins-official`
+  - 借 plugin packaging、skills/agents/MCP 一体化组织方式
+- `OpenAI Agents SDK / MCPKit`
+  - 借 guardrails、tracing、hosted MCP、approval policy、安全授权的数据面 blueprint
 - `MemGPT / Letta`
   - 借 working memory / pinned memory / memory blocks 概念
 - `Mem0 / Zep / A-MEM`
@@ -398,9 +537,11 @@ Pixiu 未来可以把这套东西做成：
    - 这是当前最大的架构缺口
 2. `再补 research eval discipline`
    - 让实验流程更像经济学研究
-3. `再升级 skills + pinned memory`
+3. `再补 evolution-manager-like synthesis`
+   - 把跨轮 run 的失败、成功、边界条件蒸馏成可复用研究知识
+4. `再升级 skills + pinned memory`
    - 把程序性知识和核心上下文显式化
-4. `最后再决定 Mem0 / graph memory 的接入形态`
+5. `最后再决定 Mem0 / graph memory 的接入形态`
    - 作为增强层，而不是真相层
 
 如果只能选一件最重要的事：
@@ -425,6 +566,9 @@ Pixiu 未来可以把这套东西做成：
 - OS-Copilot: https://arxiv.org/abs/2402.07456
 - AlphaEvolve official overview: https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/
 - AlphaEvolve research write-up: https://research.google/blog/ai-as-a-research-partner-advancing-theoretical-computer-science-with-alphaevolve/
+- EvoScientist paper: https://arxiv.org/abs/2603.08127
+- EvoScientist repo: https://github.com/EvoScientist/EvoScientist
+- EvoScientist README: https://raw.githubusercontent.com/EvoScientist/EvoScientist/main/README.md
 
 ### Tooling and runtime docs
 
@@ -434,12 +578,30 @@ Pixiu 未来可以把这套东西做成：
 - OpenClaw skills: https://docs.openclaw.ai/tools/skills
 - OpenClaw memory: https://docs.openclaw.ai/concepts/memory
 - OpenClaw model failover: https://docs.openclaw.ai/concepts/model-failover
+- Anthropic knowledge-work-plugins: https://github.com/anthropics/knowledge-work-plugins/tree/main
+- Anthropic finance plugin: https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/README.md
+- Anthropic finance connectors: https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/CONNECTORS.md
+- Anthropic finance MCP config: https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/main/finance/.mcp.json
+- Anthropic Claude plugins official: https://github.com/anthropics/claude-plugins-official
+- Anthropic life-sciences marketplace: https://github.com/anthropics/life-sciences
+- Anthropic MCP connector: https://platform.claude.com/docs/en/agents-and-tools/mcp-connector
 - Mem0 repo: https://github.com/mem0ai/mem0
 - Mem0 memory types: https://docs.mem0.ai/core-concepts/memory-types
 - Mem0 graph memory: https://docs.mem0.ai/open-source/features/graph-memory
 - Mem0 research: https://mem0.ai/research
 - Letta stateful agents: https://docs.letta.com/guides/core-concepts/stateful-agents/
 - Letta memory blocks: https://docs.letta.com/guides/core-concepts/memory/memory-blocks
+- OpenAI Agents SDK: https://openai.github.io/openai-agents-python/
+- OpenAI Agents SDK MCP: https://openai.github.io/openai-agents-python/mcp/
+- OpenAI Apps SDK overview: https://help.openai.com/en/articles/12515353-build-with-the-apps-sdk
+- OpenAI apps in ChatGPT: https://help.openai.com/en/articles/12503483-apps-in-chatgpt-and-the-apps-sdk
+- OpenAI MCPKit: https://github.com/openai/openai-mcpkit
+- OpenAI Hebbia case study: https://openai.com/index/hebbia/
+- ARIS repo: https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep
+- ARIS README: https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/README.md
+- ARIS research-review skill: https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/research-review/SKILL.md
+- ARIS experiment-bridge skill: https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/experiment-bridge/SKILL.md
+- ARIS novelty-check skill: https://raw.githubusercontent.com/wanshuiyin/Auto-claude-code-research-in-sleep/main/skills/novelty-check/SKILL.md
 
 ### Empirical research methodology
 

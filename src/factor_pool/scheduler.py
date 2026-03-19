@@ -172,6 +172,10 @@ class IslandScheduler:
             logger.warning("[Scheduler] 备用 Island 池已空，无法重置 '%s'", old_island)
             return
 
+        if old_island not in self._active_islands:
+            logger.warning("[Scheduler] Island '%s' 已不在活跃池，跳过重置", old_island)
+            return
+
         new_island = self._reserve_islands.pop(0)
         self._active_islands.remove(old_island)
         self._active_islands.append(new_island)

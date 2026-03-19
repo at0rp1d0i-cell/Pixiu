@@ -104,6 +104,41 @@ def test_market_analyst_loads_dotenv_before_llm_init():
     mock_builder.assert_called_once()
 
 
+def test_market_analyst_injects_context_skill_into_system_prompt():
+    from src.agents.market_analyst import MarketAnalyst
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.tool_calls = []
+        response.content = """{
+            "date": "2026-03-19",
+            "northbound": null,
+            "macro_signals": [],
+            "hot_themes": [],
+            "historical_insights": [],
+            "suggested_islands": ["momentum"],
+            "market_regime": "range_bound",
+            "raw_summary": "测试"
+        }"""
+        return response
+
+    with patch('src.agents.market_analyst.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            analyst = MarketAnalyst(mcp_tools=[])
+            asyncio.run(analyst.analyze())
+
+    assert captured_messages
+    system_message = captured_messages[0][0]
+    assert "<!-- SKILL:MARKET_ANALYST_CONTEXT_FRAMING -->" in system_message.content
+
+
 # ─────────────────────────────────────────────────────────
 # From test_market_context.py — LiteratureMiner Tests
 # ─────────────────────────────────────────────────────────

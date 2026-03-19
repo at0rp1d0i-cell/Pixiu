@@ -200,9 +200,16 @@ class AlphaResearcher:
                 if last_verdict and not last_verdict.overall_passed
                 else None
             ),
+            "market_context": context,
+            "market_regime": (
+                context.market_regime if context is not None else None
+            ),
         }
-        skill_context = self.skill_loader.load_for_researcher(
-            _state_proxy, subspace=subspace_hint
+        skill_context = self.skill_loader.load_for_agent(
+            "researcher",
+            _state_proxy,
+            subspace=subspace_hint,
+            island=self.island,
         )
         system_content = ALPHA_RESEARCHER_SYSTEM_PROMPT
         if skill_context:

@@ -173,6 +173,30 @@ def test_alignment_checker_failure_graceful():
     assert "失败" in reason
 
 
+def test_alignment_checker_injects_prefilter_skill_into_system_prompt():
+    """AlignmentChecker 的 LLM system prompt 应包含 prefilter guidance skill。"""
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = '{"aligned": true, "reason": "一致"}'
+        return response
+
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            checker = AlignmentChecker()
+            note = _make_note()
+            asyncio.run(checker.check(note))
+
+    assert captured_messages
+    system_message = captured_messages[0][0]
+    assert "<!-- SKILL:PREFILTER_GUIDANCE -->" in system_message.content
+
+
 # ─────────────────────────────────────────────
 # PreFilter Integration Tests
 # ─────────────────────────────────────────────

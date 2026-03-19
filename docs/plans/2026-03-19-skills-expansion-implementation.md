@@ -1,231 +1,32 @@
-# Skills Expansion Implementation Plan
+# Skills Expansion Implementation Plan (v2 — Executable)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Extend SkillLoader from Researcher-only to all LLM-driven agents (MarketAnalyst, PreFilter, ExplorationAgent), add island-specific skills, and refactor to generic interface.
+**Goal:** Extend SkillLoader from Researcher-only to all LLM-driven agents (MarketAnalyst, PreFilter, ExplorationAgent), add island-specific skills, fix `_state_proxy` gap, and add integration tests that verify actual prompt injection.
 
-**Architecture:** Refactor `SkillLoader` to a single `load_for_agent(agent_role, state, **kwargs)` entry point with a declarative conditional-injection registry. Each LLM-driven agent calls this with its role name. New skill markdown files provide domain knowledge for each agent.
+**Architecture:** `SkillLoader.load_for_agent(role, state, **kwargs)` already exists (Task 1 from v1 is done). This plan covers: skill file creation, agent call-site injection, `_state_proxy` fix, and properly structured tests.
 
 **Tech Stack:** Python, existing `SkillLoader` class, markdown skill files, pytest
 
 **Design Doc:** `docs/plans/2026-03-19-multi-agent-skills-expansion-design.md`
 
----
-
-### Task 1: Refactor SkillLoader to Generic Interface
-
-**Files:**
-- Modify: `src/skills/loader.py`
-- Test: `tests/test_stage4.py` (existing `TestSkillLoader` class)
-
-**Step 1: Write the failing test**
-
-Add to `tests/test_stage4.py` after existing `TestSkillLoader`:
-
-```python
-class TestSkillLoaderGenericInterface:
-    def test_load_for_agent_researcher_matches_legacy(self, loader):
-        """New generic interface returns same result as legacy method."""
-        state = _state(iteration=2, error="IC低")
-        legacy = loader.load_for_researcher(state)
-        generic = loader.load_for_agent("researcher", state)
-        assert legacy == generic
-
-    def test_load_for_agent_unknown_role_returns_constraints_only(self, loader):
-        result = loader.load_for_agent("unknown_role")
-        # Should still get Type A constraints (shared)
-        assert "T+1" in result or "前视偏差" in result
-
-    def test_load_for_agent_researcher_with_island(self, loader):
-        result = loader.load_for_agent("researcher", _state(iteration=0), island="momentum")
-        # Should include base researcher content
-        assert "Ref(expr, N)" in result or "合法算子" in result
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `uv run pytest tests/test_stage4.py::TestSkillLoaderGenericInterface -v`
-Expected: FAIL with "has no attribute 'load_for_agent'"
-
-**Step 3: Implement `load_for_agent()` in loader.py**
-
-Replace the contents of `src/skills/loader.py` with:
-
-```python
-"""
-Pixiu: SkillLoader — 统一管理 Skill 文档的加载与条件注入
-"""
-import logging
-import os
-from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
-
-_SKILLS_BASE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "knowledge", "skills")
-)
-
-# Island → skill file mapping (only active islands)
-ISLAND_FILE_MAP = {
-    "momentum":   "researcher/islands/momentum.md",
-    "valuation":  "researcher/islands/valuation.md",
-    "volatility": "researcher/islands/volatility.md",
-    "northbound": "researcher/islands/northbound.md",
-}
-
-# Per-role Type B skills (always injected for that role)
-_ROLE_SKILLS: dict[str, list[str]] = {
-    "researcher": ["researcher/alpha_generation.md"],
-    "market_analyst": ["market_analyst/context_framing.md"],
-    "prefilter": ["prefilter/filter_guidance.md"],
-    "exploration": ["exploration/a_share_coding_constraints.md"],
-}
-
-# Per-role Type A constraints (subset of shared constraints relevant to each role)
-_ROLE_CONSTRAINTS: dict[str, list[str]] = {
-    "researcher":     ["constraints/a_share_constraints.md", "constraints/qlib_formula_syntax.md"],
-    "market_analyst": ["constraints/a_share_constraints.md"],
-    "prefilter":      ["constraints/a_share_constraints.md", "constraints/qlib_formula_syntax.md"],
-    "exploration":    ["constraints/qlib_formula_syntax.md"],
-}
-
-# Default constraints for unknown roles
-_DEFAULT_CONSTRAINTS = ["constraints/a_share_constraints.md"]
-
-
-class SkillLoader:
-    """按 Agent 角色和 AgentState 动态加载 Skill 文档。
-
-    三类 Skill：
-      Type A (Rules)  — 永久注入，硬约束
-      Type B (Process)— 永久注入，流程规范
-      Type C (Context)— 按 AgentState 条件注入
-    """
-
-    def load_for_agent(
-        self,
-        agent_role: str,
-        state: Any = None,
-        **kwargs,
-    ) -> str:
-        """通用 skill 加载入口。
-
-        Args:
-            agent_role: "researcher" | "market_analyst" | "prefilter" | "exploration"
-            state: AgentState dict, used for conditional injection
-            **kwargs: role-specific params (e.g. subspace=, island=)
-        """
-        parts = []
-
-        # ── Type A: 硬约束 ──
-        for path in _ROLE_CONSTRAINTS.get(agent_role, _DEFAULT_CONSTRAINTS):
-            parts.append(self._load(path, required=True))
-
-        # ── Type B: 角色固定 skill ──
-        for path in _ROLE_SKILLS.get(agent_role, []):
-            parts.append(self._load(path))
-
-        # ── Type C: 条件注入 ──
-        self._apply_conditional_rules(agent_role, state, kwargs, parts)
-
-        valid_parts = [p for p in parts if p]
-        logger.debug(
-            "[SkillLoader] %s 加载了 %d 个 Skill 文档 (kwargs=%s)",
-            agent_role, len(valid_parts), list(kwargs.keys()),
-        )
-        return "\n\n---\n\n".join(valid_parts)
-
-    def _apply_conditional_rules(
-        self, role: str, state: Any, kwargs: dict, parts: list
-    ) -> None:
-        """Apply Type C conditional injection rules."""
-        if state is None:
-            state = {}
-
-        if role == "researcher":
-            # Iteration > 0: inject island evolution
-            if state.get("current_iteration", 0) > 0:
-                parts.append(self._load("researcher/island_evolution.md"))
-
-            # Has error: inject feedback interpretation
-            if state.get("error_message"):
-                parts.append(self._load("researcher/feedback_interpretation.md"))
-
-            # Market regime context: inject regime detection
-            if state.get("market_regime") or state.get("market_context"):
-                parts.append(self._load("researcher/market_regime_detection.md"))
-
-            # Subspace-specific skill
-            subspace = kwargs.get("subspace")
-            if subspace is not None:
-                subspace_file_map = {
-                    "FACTOR_ALGEBRA": "researcher/subspaces/factor_algebra.md",
-                    "SYMBOLIC_MUTATION": "researcher/subspaces/symbolic_mutation.md",
-                    "CROSS_MARKET": "researcher/subspaces/cross_market.md",
-                    "NARRATIVE_MINING": "researcher/subspaces/narrative_mining.md",
-                }
-                subspace_key = subspace.value if hasattr(subspace, "value") else str(subspace)
-                skill_path = subspace_file_map.get(subspace_key)
-                if skill_path:
-                    parts.append(self._load(skill_path))
-
-            # Island-specific skill
-            island = kwargs.get("island")
-            if island and island in ISLAND_FILE_MAP:
-                parts.append(self._load(ISLAND_FILE_MAP[island]))
-
-    # ── Legacy compatibility ──────────────────────────────
-
-    def load_for_researcher(self, state: Any, subspace: Any = None) -> str:
-        """Legacy wrapper — delegates to load_for_agent."""
-        return self.load_for_agent("researcher", state, subspace=subspace)
-
-    def load_for_coder(self) -> str:
-        """Legacy (dead code — Coder is deterministic, no LLM calls)."""
-        parts = [
-            self._load("constraints/qlib_formula_syntax.md", required=True),
-            self._load("coder/qlib_debugging.md", required=True),
-        ]
-        return "\n\n---\n\n".join(p for p in parts if p)
-
-    def load_for_critic(self) -> str:
-        """Legacy (dead code — Critic is deterministic, no LLM calls)."""
-        parts = [
-            self._load("constraints/a_share_constraints.md", required=True),
-        ]
-        return "\n\n---\n\n".join(p for p in parts if p)
-
-    # ─────────────────────────────────────────────
-    def _load(self, relative_path: str, required: bool = False) -> Optional[str]:
-        """加载单个 Skill 文档。"""
-        full_path = os.path.join(_SKILLS_BASE, relative_path)
-        try:
-            with open(full_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except FileNotFoundError:
-            if required:
-                logger.warning("[SkillLoader] 必要的 Skill 文档缺失：%s", full_path)
-            return None
-        except Exception as e:
-            logger.error("[SkillLoader] 加载 Skill 文档失败 %s: %s", full_path, e)
-            return None
-```
-
-**Step 4: Run tests to verify backward compatibility**
-
-Run: `uv run pytest tests/test_stage4.py::TestSkillLoader tests/test_stage4.py::TestSkillLoaderGenericInterface -v`
-Expected: All PASS (legacy tests unchanged, new tests pass)
-
-**Step 5: Commit**
-
-```bash
-git add src/skills/loader.py tests/test_stage4.py
-git commit -m "refactor(skills): add generic load_for_agent() interface with backward-compatible legacy wrappers"
-```
+**Pre-condition:** `src/skills/loader.py` already has `load_for_agent()`, `_apply_conditional_rules()`, `ISLAND_FILE_MAP`, `_ROLE_SKILLS`, `_ROLE_CONSTRAINTS`. Legacy `load_for_researcher()` delegates to `load_for_agent()`.
 
 ---
 
-### Task 2: Create Skill Files (7 new markdown files)
+## Review Findings Addressed (from v1 coworker review)
+
+| # | Severity | Finding | Fix in this plan |
+|---|----------|---------|-----------------|
+| 1 | HIGH | `_state_proxy` in researcher.py missing `market_context` → `market_regime_detection.md` never fires | Task 4 Step 2 |
+| 2 | HIGH | Tests only verify loader returns non-empty, not actual prompt injection | Task 3/4/5 each have integration test |
+| 3 | MEDIUM | ACTIVE_ISLANDS=6 but only 4 island skills | Task 1 creates all 6 island files |
+| 4 | MEDIUM | All tests crammed into test_stage4.py | Tests go to test_skills.py + per-stage files |
+| 5 | MEDIUM | Task 3 test won't fail before implementation | Each injection test asserts on a unique marker string |
+
+---
+
+### Task 1: Create Skill Files (9 new markdown files)
 
 **Files:**
 - Create: `knowledge/skills/market_analyst/context_framing.md`
@@ -235,6 +36,8 @@ git commit -m "refactor(skills): add generic load_for_agent() interface with bac
 - Create: `knowledge/skills/researcher/islands/valuation.md`
 - Create: `knowledge/skills/researcher/islands/volatility.md`
 - Create: `knowledge/skills/researcher/islands/northbound.md`
+- Create: `knowledge/skills/researcher/islands/volume.md`
+- Create: `knowledge/skills/researcher/islands/sentiment.md`
 
 **Step 1: Create directory structure**
 
@@ -247,194 +50,550 @@ mkdir -p knowledge/skills/researcher/islands
 
 **Step 2: Write each skill file**
 
-Each file should be 50-150 lines of domain-specific guidance in markdown. Content guidelines per file:
+Each file 50-150 lines. Every file MUST contain a unique marker comment on line 1 for test assertions:
 
-**`market_analyst/context_framing.md`** — 指导 MarketAnalyst 从 MCP 工具数据生成结构化 MarketContextMemo：
+**`market_analyst/context_framing.md`** — `<!-- SKILL:MARKET_ANALYST_CONTEXT_FRAMING -->`
 - 从价量数据提炼 regime 信号的规范（趋势/震荡/高波动判定标准）
 - 融资融券余额到 market_sentiment 的映射规则
 - 新闻/公告归类标准（policy_signal / sector_rotation / event_driven）
 - MarketContextMemo 各字段填写标准和优先级
 
-**`prefilter/filter_guidance.md`** — 补充 Filter C（AlignmentChecker）的 LLM 判断规范：
+**`prefilter/filter_guidance.md`** — `<!-- SKILL:PREFILTER_GUIDANCE -->`
 - 必须拒绝的假设特征（look-ahead bias、无经济意义的公式结构）
 - 应该放行的假设特征（IC 预估偏低但机制解释清晰）
 - Novelty 判断标准（实质性差异 vs 参数微调）
 - 常见误判模式（过度保守 / 过度宽松）
 
-**`exploration/a_share_coding_constraints.md`** — ExplorationAgent 的 A 股代码规范：
+**`exploration/a_share_coding_constraints.md`** — `<!-- SKILL:EXPLORATION_CODING -->`
 - qlib API 使用模式（`qlib.init` 路径、`D.features` 用法）
 - 禁止的代码模式（直接访问 .csv、引用未挂载数据）
 - 可用数据字段声明（$close/$open/$high/$low/$volume/$factor/$vwap）
 - 常见陷阱（NaN 处理、日期对齐、universe 泄漏）
 
-**`researcher/islands/momentum.md`** — A 股动量因子特异性：
+**`researcher/islands/momentum.md`** — `<!-- SKILL:ISLAND_MOMENTUM -->`
 - T+1 时滞对动量衰减的影响
 - 追涨杀跌散户行为放大短期动量
 - 涨跌停制度对连续涨幅的截断效应
 - 有效的时间窗口（5/10/20日 vs 美股常见的 12 个月）
 
-**`researcher/islands/valuation.md`** — A 股估值因子适配：
+**`researcher/islands/valuation.md`** — `<!-- SKILL:ISLAND_VALUATION -->`
 - 散户定价 vs 机构定价的差异
 - 壳资源溢价对小市值估值的扭曲
 - 退市新规后估值因子有效性变化
 - PE/PB/PS 在 A 股的适用条件
 
-**`researcher/islands/volatility.md`** — A 股波动率因子特征：
+**`researcher/islands/volatility.md`** — `<!-- SKILL:ISLAND_VOLATILITY -->`
 - 涨跌停制度对已实现波动率的截断
 - 日历效应（周一/月末/季末 波动率异常）
 - 波动率非对称性（下跌波动率 vs 上涨波动率）
 - 低波动异象在 A 股的表现
 
-**`researcher/islands/northbound.md`** — 北向资金因子构建规范：
+**`researcher/islands/northbound.md`** — `<!-- SKILL:ISLAND_NORTHBOUND -->`
 - 数据特征（每日净买入额、持股占比、增减仓幅度）
 - 信号解读（趋势性增仓 vs 短期波动）
 - 与 A 股情绪周期的领先/滞后关系
 - 数据陷阱（节假日缺失、沪深港通差异）
 
-**Step 3: Commit**
+**`researcher/islands/volume.md`** — `<!-- SKILL:ISLAND_VOLUME -->`
+- A 股量价关系的特殊性（散户主导的换手率意义）
+- 量能突变信号（放量突破 vs 缩量回调）
+- 成交额 vs 换手率：哪个更适合做因子
+- 量能分布的时间特征（开盘/尾盘集中成交）
 
-```bash
-git add knowledge/skills/
-git commit -m "feat(skills): add 7 new skill files for MarketAnalyst, PreFilter, ExplorationAgent, and island-specific guidance"
-```
+**`researcher/islands/sentiment.md`** — `<!-- SKILL:ISLAND_SENTIMENT -->`
+- A 股情绪代理变量（融资余额、ETF 申赎、涨跌家数比）
+- 散户情绪 vs 机构情绪的分离度量
+- 情绪反转信号的时间尺度（3-5 日极值反转）
+- 与政策事件的交互效应
 
----
+**Step 3: Update `ISLAND_FILE_MAP` in loader.py**
 
-### Task 3: Inject Skills into MarketAnalyst
-
-**Files:**
-- Modify: `src/agents/market_analyst.py` (line 37, 112)
-
-**Step 1: Write the failing test**
-
-Add to `tests/test_stage4.py`:
+Add `volume` and `sentiment` to `ISLAND_FILE_MAP`:
 
 ```python
-class TestMarketAnalystSkillInjection:
-    def test_market_analyst_skill_loaded(self, loader):
-        result = loader.load_for_agent("market_analyst")
-        # Should include Type A constraint + Type B market_analyst skill
-        assert len(result) > 0
-        # a_share_constraints should be present
-        assert "T+1" in result or "前视偏差" in result
+# In src/skills/loader.py, update ISLAND_FILE_MAP:
+ISLAND_FILE_MAP = {
+    "momentum":   "researcher/islands/momentum.md",
+    "valuation":  "researcher/islands/valuation.md",
+    "volatility": "researcher/islands/volatility.md",
+    "northbound": "researcher/islands/northbound.md",
+    "volume":     "researcher/islands/volume.md",
+    "sentiment":  "researcher/islands/sentiment.md",
+}
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 4: Run existing tests to verify no regression**
 
-Run: `uv run pytest tests/test_stage4.py::TestMarketAnalystSkillInjection -v`
-Expected: FAIL (skill file doesn't exist yet → returns only constraints)
-
-Wait — this test should pass even without the skill file if we just check for constraints. Adjust test to check for market_analyst-specific content after the skill file is created in Task 2.
-
-**Step 3: Modify market_analyst.py**
-
-At `src/agents/market_analyst.py`, add import and inject skill into system prompt:
-
-```python
-# Add import at top
-from src.skills.loader import SkillLoader
-
-# Near line 112, modify the system message construction:
-_skill_loader = SkillLoader()
-_market_analyst_skills = _skill_loader.load_for_agent("market_analyst")
-
-# In the messages list, append skill context to system prompt:
-SystemMessage(content=MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str()) + "\n\n" + _market_analyst_skills),
-```
-
-**Step 4: Run tests**
-
-Run: `uv run pytest tests/test_stage4.py -v -m "smoke or unit"`
+Run: `uv run pytest tests/test_stage4.py::TestSkillLoader -v`
 Expected: All PASS
 
 **Step 5: Commit**
 
 ```bash
-git add src/agents/market_analyst.py tests/test_stage4.py
+git add knowledge/skills/ src/skills/loader.py
+git commit -m "feat(skills): add 9 skill files for all agents and all 6 islands"
+```
+
+---
+
+### Task 2: SkillLoader Unit Tests (new file: tests/test_skills.py)
+
+**Files:**
+- Create: `tests/test_skills.py`
+
+**Step 1: Write tests**
+
+Create `tests/test_skills.py` with comprehensive SkillLoader tests:
+
+```python
+"""SkillLoader 单元测试 — 覆盖 generic interface、条件注入、island 注入。"""
+import pytest
+from src.skills.loader import SkillLoader, ISLAND_FILE_MAP
+
+
+@pytest.fixture()
+def loader():
+    return SkillLoader()
+
+
+def _state(iteration=0, error="", market_context=None):
+    return {
+        "current_iteration": iteration,
+        "error_message": error,
+        "market_context": market_context,
+    }
+
+
+class TestGenericInterface:
+    """load_for_agent() 通用接口测试。"""
+
+    def test_researcher_backward_compat(self, loader):
+        """Generic interface returns same result as legacy for researcher."""
+        state = _state(iteration=2, error="IC低")
+        legacy = loader.load_for_researcher(state)
+        generic = loader.load_for_agent("researcher", state)
+        assert legacy == generic
+
+    def test_unknown_role_gets_default_constraints(self, loader):
+        result = loader.load_for_agent("unknown_role")
+        assert "T+1" in result or "前视偏差" in result
+
+    @pytest.mark.parametrize("role", ["researcher", "market_analyst", "prefilter", "exploration"])
+    def test_all_roles_return_nonempty(self, loader, role):
+        result = loader.load_for_agent(role)
+        assert len(result) > 0, f"load_for_agent('{role}') returned empty"
+
+
+class TestConditionalInjection:
+    """Type C 条件注入测试。"""
+
+    def test_market_regime_injected_when_market_context_present(self, loader):
+        """HIGH fix: market_context in state triggers regime detection skill."""
+        state = _state(market_context={"market_regime": "trending_up"})
+        result = loader.load_for_agent("researcher", state)
+        # market_regime_detection.md should be loaded
+        # (file already exists in knowledge/skills/researcher/)
+        regime_content = loader._load("researcher/market_regime_detection.md")
+        if regime_content:
+            assert regime_content in result
+
+    def test_market_regime_not_injected_without_context(self, loader):
+        result = loader.load_for_agent("researcher", _state())
+        regime_content = loader._load("researcher/market_regime_detection.md")
+        if regime_content:
+            assert regime_content not in result
+
+    def test_iteration_zero_no_evolution(self, loader):
+        result = loader.load_for_agent("researcher", _state(iteration=0))
+        evolution_content = loader._load("researcher/island_evolution.md")
+        if evolution_content:
+            assert evolution_content not in result
+
+    def test_iteration_gt_zero_has_evolution(self, loader):
+        result = loader.load_for_agent("researcher", _state(iteration=1))
+        assert "强制工作流程" in result
+
+    def test_error_message_triggers_feedback(self, loader):
+        result = loader.load_for_agent("researcher", _state(error="Sharpe太低"))
+        assert "上一次失败的错误消息解读" in result
+
+
+class TestIslandSkills:
+    """Island-specific skill 注入测试。"""
+
+    @pytest.mark.parametrize("island", list(ISLAND_FILE_MAP.keys()))
+    def test_island_skill_adds_content(self, loader, island):
+        """Each island skill file adds content beyond base researcher output."""
+        base = loader.load_for_agent("researcher", _state())
+        with_island = loader.load_for_agent("researcher", _state(), island=island)
+        assert len(with_island) > len(base), (
+            f"Island '{island}' skill did not add content"
+        )
+
+    def test_unknown_island_same_as_base(self, loader):
+        base = loader.load_for_agent("researcher", _state())
+        with_unknown = loader.load_for_agent("researcher", _state(), island="nonexistent")
+        assert base == with_unknown
+
+
+class TestRoleSkillMarkers:
+    """Verify each role loads its unique skill content via marker strings."""
+
+    def test_market_analyst_has_marker(self, loader):
+        result = loader.load_for_agent("market_analyst")
+        assert "SKILL:MARKET_ANALYST_CONTEXT_FRAMING" in result
+
+    def test_prefilter_has_marker(self, loader):
+        result = loader.load_for_agent("prefilter")
+        assert "SKILL:PREFILTER_GUIDANCE" in result
+
+    def test_exploration_has_marker(self, loader):
+        result = loader.load_for_agent("exploration")
+        assert "SKILL:EXPLORATION_CODING" in result
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest tests/test_skills.py -v`
+Expected: `TestRoleSkillMarkers` tests FAIL (skill files just created in Task 1 must have exact markers). Other tests should pass if Task 1 was done correctly.
+
+**Step 3: Verify Task 1 markers are correct, fix if needed**
+
+If any marker test fails, fix the corresponding skill file to include the marker.
+
+**Step 4: Run full suite**
+
+Run: `uv run pytest tests/test_skills.py -v`
+Expected: All PASS
+
+**Step 5: Commit**
+
+```bash
+git add tests/test_skills.py
+git commit -m "test(skills): add SkillLoader unit tests with marker assertions and conditional injection coverage"
+```
+
+---
+
+### Task 3: Inject Skills into MarketAnalyst + Integration Test
+
+**Files:**
+- Modify: `src/agents/market_analyst.py` (line 112)
+- Modify: `tests/test_stage1.py` (add integration test)
+
+**Step 1: Write the failing integration test**
+
+Add to `tests/test_stage1.py`:
+
+```python
+class TestMarketAnalystSkillInjection:
+    """Verify MarketAnalyst actually includes skill content in its system prompt."""
+
+    def test_system_prompt_contains_skill_marker(self):
+        """Integration: skill text appears in the SystemMessage sent to LLM."""
+        from src.agents.market_analyst import MARKET_ANALYST_SYSTEM_PROMPT, _today_str
+        from src.skills.loader import SkillLoader
+
+        # Simulate what the agent does — if skills are NOT injected,
+        # this test fails because marker won't be in the prompt.
+        # After injection, the agent's system prompt includes the marker.
+        loader = SkillLoader()
+        skill_text = loader.load_for_agent("market_analyst")
+        assert "SKILL:MARKET_ANALYST_CONTEXT_FRAMING" in skill_text
+
+        # The actual injection test: verify the agent module exposes
+        # or constructs a prompt that includes skill text.
+        # We import the assembled prompt after modification.
+        from src.agents import market_analyst as ma_module
+        assert hasattr(ma_module, '_market_analyst_skills'), (
+            "market_analyst.py does not have _market_analyst_skills — "
+            "SkillLoader not injected at module level"
+        )
+        assert "SKILL:MARKET_ANALYST_CONTEXT_FRAMING" in ma_module._market_analyst_skills
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_stage1.py::TestMarketAnalystSkillInjection -v`
+Expected: FAIL with `AttributeError: module 'src.agents.market_analyst' has no attribute '_market_analyst_skills'`
+
+**Step 3: Modify market_analyst.py**
+
+At `src/agents/market_analyst.py`, add at module level (after imports):
+
+```python
+from src.skills.loader import SkillLoader
+
+_skill_loader = SkillLoader()
+_market_analyst_skills = _skill_loader.load_for_agent("market_analyst")
+```
+
+In the `analyze()` method (~line 112), modify the SystemMessage:
+
+```python
+# Before:
+SystemMessage(content=MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())),
+
+# After:
+SystemMessage(content=MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str()) + "\n\n" + _market_analyst_skills),
+```
+
+**Step 4: Run tests**
+
+Run: `uv run pytest tests/test_stage1.py::TestMarketAnalystSkillInjection -v`
+Expected: PASS
+
+Run: `uv run pytest tests/test_stage1.py -v`
+Expected: All PASS (no regression)
+
+**Step 5: Commit**
+
+```bash
+git add src/agents/market_analyst.py tests/test_stage1.py
 git commit -m "feat(stage1): inject SkillLoader into MarketAnalyst system prompt"
 ```
 
 ---
 
-### Task 4: Inject Skills into PreFilter (AlignmentChecker)
+### Task 4: Fix Researcher `_state_proxy` + Pass Island + Integration Test
 
 **Files:**
-- Modify: `src/agents/prefilter.py` (around line 174, AlignmentChecker)
+- Modify: `src/agents/researcher.py` (lines 196-206)
+- Modify: `tests/test_stage2.py` (add integration test)
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing integration test**
+
+Add to `tests/test_stage2.py`:
+
+```python
+class TestResearcherSkillInjection:
+    """Verify Researcher passes market_context and island to SkillLoader."""
+
+    def test_state_proxy_includes_market_context(self):
+        """HIGH fix: _state_proxy must include market_context for regime detection."""
+        from unittest.mock import AsyncMock, patch, MagicMock
+        from src.agents.researcher import AlphaResearcher
+        from src.schemas.market_context import MarketContextMemo
+
+        researcher = AlphaResearcher(island="momentum")
+
+        # Capture what SkillLoader receives
+        captured_args = {}
+        original_load = researcher.skill_loader.load_for_agent
+
+        def spy_load(role, state=None, **kwargs):
+            captured_args["role"] = role
+            captured_args["state"] = state
+            captured_args["kwargs"] = kwargs
+            return original_load(role, state, **kwargs)
+
+        researcher.skill_loader.load_for_agent = spy_load
+
+        # Create a minimal MarketContextMemo
+        context = MarketContextMemo(
+            market_regime="trending_up",
+            suggested_islands=["momentum"],
+            raw_summary="test",
+            key_signals=[],
+        )
+
+        # Patch LLM to avoid real API call
+        with patch.object(researcher.llm, 'ainvoke', new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = MagicMock(content='{"notes": []}')
+            import asyncio
+            try:
+                asyncio.run(researcher.generate_batch(
+                    context=context, iteration=1
+                ))
+            except Exception:
+                pass  # parse errors are fine, we just need the spy call
+
+        assert captured_args.get("role") == "researcher"
+        assert captured_args["state"].get("market_context") is not None, (
+            "_state_proxy missing market_context — market_regime_detection.md will never fire"
+        )
+        assert captured_args["kwargs"].get("island") == "momentum", (
+            "island not passed to load_for_agent"
+        )
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_stage2.py::TestResearcherSkillInjection -v`
+Expected: FAIL — `_state_proxy` doesn't have `market_context`, and `load_for_researcher` is called instead of `load_for_agent`
+
+**Step 3: Fix researcher.py (lines 196-206)**
+
+```python
+# Before (line 196-206):
+_state_proxy = {
+    "current_iteration": iteration,
+    "error_message": (
+        last_verdict.failure_explanation
+        if last_verdict and not last_verdict.overall_passed
+        else None
+    ),
+}
+skill_context = self.skill_loader.load_for_researcher(
+    _state_proxy, subspace=subspace_hint
+)
+
+# After:
+_state_proxy = {
+    "current_iteration": iteration,
+    "error_message": (
+        last_verdict.failure_explanation
+        if last_verdict and not last_verdict.overall_passed
+        else None
+    ),
+    "market_context": context,  # HIGH fix: enable market_regime_detection.md
+}
+skill_context = self.skill_loader.load_for_agent(
+    "researcher", _state_proxy,
+    subspace=subspace_hint, island=self.island,
+)
+```
+
+**Step 4: Run tests**
+
+Run: `uv run pytest tests/test_stage2.py::TestResearcherSkillInjection tests/test_stage4.py::TestSkillLoader -v`
+Expected: All PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/agents/researcher.py tests/test_stage2.py
+git commit -m "fix(stage2): pass market_context and island to SkillLoader, enabling regime detection and island skills"
+```
+
+---
+
+### Task 5: Inject Skills into PreFilter (AlignmentChecker) + Integration Test
+
+**Files:**
+- Modify: `src/agents/prefilter.py` (line 174, 199)
+- Modify: `tests/test_prefilter.py` (add integration test)
+
+**Step 1: Write the failing integration test**
+
+Add to `tests/test_prefilter.py`:
 
 ```python
 class TestPreFilterSkillInjection:
-    def test_prefilter_skill_loaded(self, loader):
-        result = loader.load_for_agent("prefilter")
-        assert len(result) > 0
+    """Verify PreFilter AlignmentChecker includes skill content in prompt."""
+
+    def test_alignment_prompt_contains_skill_marker(self):
+        """Integration: skill text is prepended to ALIGNMENT_PROMPT."""
+        from src.agents import prefilter as pf_module
+        # After injection, module should have the combined prompt
+        assert hasattr(pf_module, '_prefilter_skills'), (
+            "prefilter.py does not have _prefilter_skills — "
+            "SkillLoader not injected"
+        )
+        assert "SKILL:PREFILTER_GUIDANCE" in pf_module._prefilter_skills
 ```
 
-**Step 2: Modify prefilter.py**
+**Step 2: Run test to verify it fails**
 
-In `AlignmentChecker.__init__` or at module level, load the prefilter skill and prepend to `ALIGNMENT_PROMPT`:
+Run: `uv run pytest tests/test_prefilter.py::TestPreFilterSkillInjection -v`
+Expected: FAIL with `AttributeError: module has no attribute '_prefilter_skills'`
+
+**Step 3: Modify prefilter.py**
+
+At module level (before `ALIGNMENT_PROMPT`), add:
 
 ```python
 from src.skills.loader import SkillLoader
 
 _skill_loader = SkillLoader()
 _prefilter_skills = _skill_loader.load_for_agent("prefilter")
-
-# Modify ALIGNMENT_PROMPT to include skill context:
-ALIGNMENT_PROMPT_FULL = _prefilter_skills + "\n\n" + ALIGNMENT_PROMPT
 ```
 
-Then use `ALIGNMENT_PROMPT_FULL` in the `AlignmentChecker.check()` method where `ALIGNMENT_PROMPT` is currently used.
+In `AlignmentChecker.check()` method, modify the prompt construction to prepend skills:
 
-**Step 3: Run tests**
+```python
+# Find where ALIGNMENT_PROMPT is used and prepend _prefilter_skills:
+prompt = _prefilter_skills + "\n\n" + ALIGNMENT_PROMPT.format(
+    hypothesis=note.hypothesis,
+    formula=note.formula,
+)
+```
 
-Run: `uv run pytest tests/test_stage4.py -v -m "smoke or unit"`
+**Step 4: Run tests**
+
+Run: `uv run pytest tests/test_prefilter.py -v`
 Expected: All PASS
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
-git add src/agents/prefilter.py tests/test_stage4.py
+git add src/agents/prefilter.py tests/test_prefilter.py
 git commit -m "feat(stage3): inject SkillLoader into PreFilter AlignmentChecker"
 ```
 
 ---
 
-### Task 5: Inject Skills into ExplorationAgent
+### Task 6: Inject Skills into ExplorationAgent + Integration Test
 
 **Files:**
 - Modify: `src/execution/exploration_agent.py` (line 9, 44)
+- Modify: `tests/test_stage4.py` (add integration test)
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing integration test**
+
+Add to `tests/test_stage4.py`:
 
 ```python
 class TestExplorationAgentSkillInjection:
-    def test_exploration_skill_loaded(self, loader):
-        result = loader.load_for_agent("exploration")
-        assert len(result) > 0
+    """Verify ExplorationAgent includes skill content in system prompt."""
+
+    def test_exploration_module_has_skills(self):
+        from src.execution import exploration_agent as ea_module
+        assert hasattr(ea_module, '_exploration_skills'), (
+            "exploration_agent.py does not have _exploration_skills — "
+            "SkillLoader not injected"
+        )
+        assert "SKILL:EXPLORATION_CODING" in ea_module._exploration_skills
 ```
 
-**Step 2: Modify exploration_agent.py**
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_stage4.py::TestExplorationAgentSkillInjection -v`
+Expected: FAIL with `AttributeError`
+
+**Step 3: Modify exploration_agent.py**
+
+At module level (after imports), add:
 
 ```python
 from src.skills.loader import SkillLoader
 
 _skill_loader = SkillLoader()
 _exploration_skills = _skill_loader.load_for_agent("exploration")
+```
 
-# In ExplorationAgent.explore(), modify message construction:
+In `ExplorationAgent.explore()` method, modify message construction:
+
+```python
+# Before:
+messages = [
+    {"role": "system", "content": EXPLORATION_SYSTEM_PROMPT},
+    {"role": "user", "content": prompt}
+]
+
+# After:
 messages = [
     {"role": "system", "content": EXPLORATION_SYSTEM_PROMPT + "\n\n" + _exploration_skills},
     {"role": "user", "content": prompt}
 ]
 ```
 
-**Step 3: Run tests**
+**Step 4: Run tests**
 
-Run: `uv run pytest tests/test_stage4.py -v -m "smoke or unit"`
+Run: `uv run pytest tests/test_stage4.py -v`
 Expected: All PASS
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/execution/exploration_agent.py tests/test_stage4.py
@@ -443,101 +602,7 @@ git commit -m "feat(stage4): inject SkillLoader into ExplorationAgent system pro
 
 ---
 
-### Task 6: Pass Island Parameter to SkillLoader in Researcher
-
-**Files:**
-- Modify: `src/agents/researcher.py` (line 204)
-
-**Step 1: Write the failing test**
-
-```python
-class TestResearcherIslandSkillInjection:
-    def test_researcher_with_island_loads_island_skill(self, loader):
-        result = loader.load_for_agent(
-            "researcher", _state(iteration=0), island="momentum"
-        )
-        # After momentum.md exists, this should contain A-share momentum content
-        assert len(result) > 0
-
-    def test_researcher_without_island_no_island_skill(self, loader):
-        result = loader.load_for_agent("researcher", _state(iteration=0))
-        # Should not contain island-specific content
-        assert "T+1 时滞" not in result  # momentum-specific
-```
-
-**Step 2: Modify researcher.py**
-
-At line 204, change the skill loader call to pass the island:
-
-```python
-# Before (line 204):
-skill_context = self.skill_loader.load_for_researcher(
-    _state_proxy, subspace=subspace_hint
-)
-
-# After:
-skill_context = self.skill_loader.load_for_agent(
-    "researcher", _state_proxy, subspace=subspace_hint, island=self.island
-)
-```
-
-**Step 3: Fix market_regime_detection injection**
-
-This is now handled by the `_apply_conditional_rules` in Task 1 — when `state.get("market_context")` is truthy (which it is when MarketContextMemo is passed), `market_regime_detection.md` gets injected automatically.
-
-**Step 4: Run tests**
-
-Run: `uv run pytest tests/test_stage4.py -v -m "smoke or unit"`
-Expected: All PASS
-
-**Step 5: Commit**
-
-```bash
-git add src/agents/researcher.py tests/test_stage4.py
-git commit -m "feat(stage2): pass island param to SkillLoader, enable island-specific and regime skills"
-```
-
----
-
-### Task 7: Smoke Test — All Roles Return Non-Empty
-
-**Files:**
-- Modify: `tests/test_stage4.py`
-
-**Step 1: Write parameterized smoke test**
-
-```python
-import pytest
-
-class TestSkillsSmoke:
-    @pytest.mark.parametrize("role", ["researcher", "market_analyst", "prefilter", "exploration"])
-    def test_all_roles_return_nonempty(self, loader, role):
-        result = loader.load_for_agent(role)
-        assert len(result) > 0, f"load_for_agent('{role}') returned empty"
-
-    @pytest.mark.parametrize("island", ["momentum", "valuation", "volatility", "northbound"])
-    def test_island_files_exist_and_load(self, loader, island):
-        result = loader.load_for_agent("researcher", _state(iteration=0), island=island)
-        assert len(result) > len(
-            loader.load_for_agent("researcher", _state(iteration=0))
-        ), f"Island '{island}' skill did not add content"
-```
-
-**Step 2: Run full test suite**
-
-Run: `uv run pytest -q tests -m "smoke or unit"`
-Expected: All PASS
-
-**Step 3: Commit**
-
-```bash
-git add tests/test_stage4.py
-git commit -m "test(skills): add smoke tests for all agent roles and island skills"
-```
-
----
-
-### Task 8: Final Integration Verification
+### Task 7: Final Integration Verification
 
 **Step 1: Run full test suite**
 
@@ -546,24 +611,61 @@ uv run pytest -q tests -m "smoke or unit"
 ```
 Expected: All pass, no regressions.
 
-**Step 2: Verify skill loading in debug log**
+**Step 2: Verify skill loading (all roles + all islands)**
 
 ```bash
-PIXIU_LOG_LEVEL=DEBUG uv run python -c "
-from src.skills.loader import SkillLoader
+uv run python -c "
+from src.skills.loader import SkillLoader, ISLAND_FILE_MAP
 loader = SkillLoader()
+
+# All 4 roles
 for role in ['researcher', 'market_analyst', 'prefilter', 'exploration']:
     result = loader.load_for_agent(role)
-    print(f'{role}: {len(result)} chars loaded')
-# Test island injection
-result = loader.load_for_agent('researcher', {'current_iteration': 0}, island='momentum')
-print(f'researcher+momentum: {len(result)} chars loaded')
+    print(f'{role}: {len(result)} chars')
+
+# All 6 islands
+for island in ISLAND_FILE_MAP:
+    result = loader.load_for_agent('researcher', {'current_iteration': 0}, island=island)
+    print(f'researcher+{island}: {len(result)} chars')
+
+# market_context trigger
+result = loader.load_for_agent('researcher', {'current_iteration': 0, 'market_context': {'regime': 'up'}})
+has_regime = 'market_regime_detection' in str(loader._load('researcher/market_regime_detection.md') or '')
+print(f'regime injection works: {has_regime and \"regime\" in result.lower()}')
 "
 ```
 
-**Step 3: Commit all and tag**
+**Step 3: Verify module-level injection**
+
+```bash
+uv run python -c "
+from src.agents import market_analyst, prefilter
+from src.execution import exploration_agent
+
+assert hasattr(market_analyst, '_market_analyst_skills')
+assert hasattr(prefilter, '_prefilter_skills')
+assert hasattr(exploration_agent, '_exploration_skills')
+print('All agent modules have skill injection: OK')
+"
+```
+
+**Step 4: Commit all and tag**
 
 ```bash
 git add -A
 git commit -m "feat(phase4b): complete multi-agent skills expansion — all LLM-driven agents now have skill injection"
 ```
+
+---
+
+## Codex Dispatch Notes
+
+This plan is suitable for codex dispatch as **2-3 sequential tasks**:
+
+| Batch | Tasks | Estimated Time |
+|-------|-------|---------------|
+| Batch 1 | Task 1 + 2 (files + tests) | 15-20 min |
+| Batch 2 | Task 3 + 4 + 5 + 6 (agent injection) | 15-20 min |
+| Batch 3 | Task 7 (verification) | 5 min |
+
+**Coordinator must review** between batches: Task 4 (researcher `_state_proxy` fix) is the highest-risk change — verify the spy test actually captures the right arguments.

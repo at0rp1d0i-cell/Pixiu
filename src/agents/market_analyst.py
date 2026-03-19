@@ -19,8 +19,11 @@ from src.llm.openai_compat import build_researcher_llm
 from src.schemas.market_context import MarketContextMemo, MarketRegime
 from src.market.regime_detector import RegimeDetector
 from src.schemas.stage_io import MarketContextOutput
+from src.skills.loader import SkillLoader
 
 logger = logging.getLogger(__name__)
+
+_SKILL_LOADER = SkillLoader()
 
 MCP_SERVER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "akshare_server.py")
@@ -86,8 +89,9 @@ class MarketAnalyst:
     使用 MCP ReAct 循环调用 AKShare 工具，最多 5 轮，生成 MarketContextMemo。
     """
 
-    def __init__(self, mcp_tools: list):
+    def __init__(self, mcp_tools: list, skill_loader: SkillLoader | None = None):
         self.tools = {t.name: t for t in mcp_tools}
+        self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(temperature=0.1).bind_tools(mcp_tools)
 
     @staticmethod
@@ -108,8 +112,15 @@ class MarketAnalyst:
 
     async def analyze(self) -> MarketContextMemo:
         """执行 ReAct 循环生成今日 MarketContextMemo。"""
+        system_content = MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())
+        skill_context = self.skill_loader.load_for_agent("market_analyst")
+        if skill_context:
+            system_content = (
+                system_content + "\n\n## 市场分析规范\n\n" + skill_context
+            )
+
         messages = [
-            SystemMessage(content=MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())),
+            SystemMessage(content=system_content),
             HumanMessage(content="请生成今日市场上下文备忘录。"),
         ]
 

@@ -1,10 +1,9 @@
 """
-Stage 4 merged tests: execution + exploration_registry + skill_loader.
+Stage 4 merged tests: execution + exploration_registry.
 
 Sources:
   - tests/test_execution.py
   - tests/test_exploration_registry.py
-  - tests/test_skill_loader.py
 """
 import asyncio
 import json
@@ -14,7 +13,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.execution.coder import Coder
 from src.execution.docker_runner import DockerRunner, ExecutionResult
@@ -28,7 +27,6 @@ from src.schemas.exploration import (
     SubspaceRegistry,
 )
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
-from src.skills.loader import SkillLoader
 
 
 # ─────────────────────────────────────────────────────────
@@ -161,6 +159,65 @@ def test_exploration_agent_script_extraction():
 
     content_raw = "import pandas as pd\nprint('hello')"
     assert agent._extract_script(content_raw).strip() == content_raw
+
+
+def test_exploration_agent_injects_a_share_coding_skill():
+    """ExplorationAgent 的 system prompt 应包含 A 股代码约束 skill。"""
+    from src.execution.exploration_agent import ExplorationAgent
+    from src.schemas.research_note import ExplorationQuestion
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = """```python
+import json
+print("EXPLORATION_RESULT_JSON:" + json.dumps({
+    "findings": "ok",
+    "key_statistics": {"ic": 0.03},
+    "refined_formula_suggestion": None
+}))
+```"""
+        return response
+
+    note = FactorResearchNote(
+        note_id="momentum_note",
+        island="momentum",
+        iteration=1,
+        hypothesis="测试",
+        economic_intuition="测试",
+        proposed_formula="Mean($close, 5) / Mean($close, 20) - 1",
+        exploration_questions=[],
+        risk_factors=[],
+        market_context_date="2026-03-19",
+    )
+    question = ExplorationQuestion(
+        question="检验量价相关性",
+        suggested_analysis="correlation",
+        required_fields=["$close", "$volume"],
+    )
+
+    with patch('src.execution.exploration_agent.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key', 'RESEARCHER_API_KEY': 'test-key'}):
+            agent = ExplorationAgent()
+            agent.runner.run_python = AsyncMock(
+                return_value=ExecutionResult(
+                    success=True,
+                    stdout='EXPLORATION_RESULT_JSON:{"findings":"ok","key_statistics":{"ic":0.03},"refined_formula_suggestion":null}',
+                    stderr="",
+                    returncode=0,
+                    duration_seconds=1.0,
+                )
+            )
+            asyncio.run(agent.explore(note, question))
+
+    assert captured_messages
+    system_message = captured_messages[0][0]
+    assert "<!-- SKILL:EXPLORATION_CODING -->" in system_message["content"]
 
 
 def test_docker_runner_timeout():
@@ -353,57 +410,6 @@ def test_regime_is_infrastructure_not_subspace():
         regime_switch_rule="VIX > 30 进入 crisis",
     )
     assert h.regime_switch_rule == "VIX > 30 进入 crisis"
-
-
-# ─────────────────────────────────────────────────────────
-# From test_skill_loader.py
-# ─────────────────────────────────────────────────────────
-
-@pytest.fixture()
-def loader():
-    return SkillLoader()
-
-
-def _state(iteration=0, error=""):
-    return {"current_iteration": iteration, "error_message": error,
-            "max_iterations": 3, "island_name": "momentum"}
-
-
-class TestSkillLoader:
-    def test_type_a_always_injected(self, loader):
-        result = loader.load_for_researcher(_state(iteration=0))
-        assert "T+1" in result or "前视偏差" in result
-        assert "Ref(expr, N)" in result or "合法算子" in result
-
-    def test_island_evolution_not_injected_first_round(self, loader):
-        result = loader.load_for_researcher(_state(iteration=0))
-        assert "强制工作流程" not in result
-
-    def test_island_evolution_injected_after_first_round(self, loader):
-        result = loader.load_for_researcher(_state(iteration=1))
-        assert "强制工作流程" in result
-
-    def test_feedback_not_injected_without_error(self, loader):
-        result = loader.load_for_researcher(_state(error=""))
-        assert "上一次失败的错误消息解读" not in result
-
-    def test_feedback_injected_with_error(self, loader):
-        result = loader.load_for_researcher(_state(error="Sharpe 2.1 未超越基线"))
-        assert "上一次失败的错误消息解读" in result
-
-    def test_both_context_skills_injected(self, loader):
-        result = loader.load_for_researcher(_state(iteration=2, error="IC低"))
-        assert "强制工作流程" in result
-        assert "上一次失败的错误消息解读" in result
-
-    def test_coder_skill_loads(self, loader):
-        result = loader.load_for_coder()
-        out = result or ""
-        assert len(out) >= 0
-
-    def test_missing_skill_returns_none(self, loader):
-        result = loader._load("nonexistent/file.md", required=False)
-        assert result is None
 
 
 class TestValidatorConstraints:
