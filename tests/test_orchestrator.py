@@ -19,7 +19,8 @@ from src.core.orchestrator import (
     route_after_portfolio,
 )
 from src.schemas.backtest import BacktestMetrics, BacktestReport
-from src.schemas.judgment import CriticVerdict
+from src.schemas.failure_constraint import FailureMode
+from src.schemas.judgment import CriticVerdict, ThresholdCheck
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
 
@@ -195,6 +196,7 @@ class TestLoopControlNode:
         state = state.model_copy(update={
             "research_notes": [note],
             "approved_notes": [note],
+            "prefilter_diagnostics": {"input_count": 1, "approved_count": 1},
             "backtest_reports": [_make_report(2.0)],
             "critic_verdicts": [_make_verdict(True)],
         })
@@ -204,6 +206,7 @@ class TestLoopControlNode:
 
         assert result["research_notes"] == []
         assert result["approved_notes"] == []
+        assert result["prefilter_diagnostics"] == {}
         assert result["backtest_reports"] == []
         assert result["critic_verdicts"] == []
         assert result["filtered_count"] == 0
@@ -260,7 +263,45 @@ class TestLoopControlSnapshotWritten:
         _exp_mod._logger_instance = test_logger
 
         try:
-            state = _make_state(current_round=5)
+            failed_report = _make_report(sharpe=0.5, passed=False).model_copy(update={
+                "factor_id": "failing_factor",
+                "note_id": "note_fail",
+                "status": "success",
+            })
+            failed_verdict = CriticVerdict(
+                report_id=failed_report.report_id,
+                factor_id=failed_report.factor_id,
+                note_id=failed_report.note_id,
+                overall_passed=False,
+                decision="archive",
+                score=0.2,
+                checks=[
+                    ThresholdCheck(metric="sharpe", value=0.5, threshold=2.67, passed=False),
+                    ThresholdCheck(metric="ic_mean", value=0.01, threshold=0.02, passed=False),
+                ],
+                failed_checks=["sharpe", "ic_mean"],
+                failure_mode=FailureMode.LOW_SHARPE,
+                failure_explanation="Sharpe 过低",
+                suggested_fix="延长窗口",
+                register_to_pool=True,
+                pool_tags=[],
+                reason_codes=["LOW_SHARPE"],
+            )
+            state = _make_state(
+                current_round=5,
+                backtest_reports=[failed_report],
+                critic_verdicts=[failed_verdict],
+            ).model_copy(update={
+                "prefilter_diagnostics": {
+                    "input_count": 12,
+                    "approved_count": 3,
+                    "rejection_counts_by_filter": {"validator": 4, "novelty": 2, "regime_filter": 3},
+                    "sample_rejections": [
+                        {"note_id": "note_1", "filter": "validator", "reason": "future ref"},
+                        {"note_id": "note_2", "filter": "novelty", "reason": "duplicate"},
+                    ],
+                }
+            })
             with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
                 mock_get_sched.return_value = MagicMock()
                 with patch("src.factor_pool.pool.get_factor_pool") as mock_pool:
@@ -279,8 +320,74 @@ class TestLoopControlSnapshotWritten:
             assert "timestamp" in data
             assert "subspace_generated" in data
             assert "verdicts" in data
+            assert data["prefilter"]["input_count"] == 12
+            assert data["prefilter"]["rejection_counts_by_filter"]["validator"] == 4
+            assert data["execution"]["backtest_reports_count"] == 1
+            assert data["execution"]["execution_error_count"] == 0
+            assert data["execution"]["executed_factor_ids_sample"] == ["failing_factor"]
+            assert data["judgment"]["verdict_counts_by_decision"]["archive"] == 1
+            assert data["judgment"]["failure_mode_counts"]["low_sharpe"] == 1
+            assert data["judgment"]["failed_check_counts"]["sharpe"] == 1
+            assert data["judgment"]["sample_failures"][0]["factor_id"] == "failing_factor"
         finally:
             # 恢复单例，避免污染其他测试
+            _exp_mod._logger_instance = None
+
+    def test_snapshot_excludes_execution_error_from_failed_check_histogram(self, tmp_path):
+        """execution_error 不应同时污染指标型 failed_check 统计。"""
+        import src.core.experiment_logger as _exp_mod
+        from src.core.experiment_logger import ExperimentLogger
+
+        run_id = "test_run_exec_error_snapshot"
+        test_logger = ExperimentLogger(run_id=run_id, runs_dir=tmp_path)
+        _exp_mod._logger_instance = test_logger
+
+        try:
+            failed_report = _make_report(sharpe=0.0, passed=False).model_copy(update={
+                "factor_id": "exec_error_factor",
+                "note_id": "note_exec_error",
+                "status": "failed",
+                "error_message": "SyntaxError in backtest script",
+            })
+            failed_verdict = CriticVerdict(
+                report_id=failed_report.report_id,
+                factor_id=failed_report.factor_id,
+                note_id=failed_report.note_id,
+                overall_passed=False,
+                decision="retry",
+                score=0.0,
+                checks=[
+                    ThresholdCheck(metric="sharpe", value=0.0, threshold=2.67, passed=False),
+                    ThresholdCheck(metric="ic_mean", value=0.0, threshold=0.02, passed=False),
+                ],
+                failed_checks=["sharpe", "ic_mean"],
+                failure_mode=FailureMode.EXECUTION_ERROR,
+                failure_explanation="回测执行失败",
+                suggested_fix="检查脚本",
+                register_to_pool=True,
+                pool_tags=[],
+                reason_codes=["EXECUTION_FAILED"],
+            )
+            state = _make_state(
+                current_round=6,
+                backtest_reports=[failed_report],
+                critic_verdicts=[failed_verdict],
+            )
+
+            with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+                mock_get_sched.return_value = MagicMock()
+                with patch("src.factor_pool.pool.get_factor_pool") as mock_pool:
+                    mock_pool.return_value = MagicMock(
+                        get_passed_factors=MagicMock(return_value=[])
+                    )
+                    loop_control_node(state)
+
+            snapshot_path = tmp_path / run_id / "round_006.json"
+            import json as _json
+            data = _json.loads(snapshot_path.read_text(encoding="utf-8"))
+            assert data["judgment"]["failure_mode_counts"]["execution_error"] == 1
+            assert data["judgment"]["failed_check_counts"] == {}
+        finally:
             _exp_mod._logger_instance = None
 
 

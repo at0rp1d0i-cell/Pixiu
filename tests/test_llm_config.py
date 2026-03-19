@@ -6,6 +6,17 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def test_get_llm_profile_settings_returns_recommended_stage_defaults():
+    from src.llm.settings import get_llm_profile_settings
+
+    settings = get_llm_profile_settings("researcher")
+
+    assert settings.temperature == 0.65
+    assert settings.max_tokens == 2200
+    assert settings.top_p == 0.95
+    assert settings.max_retries == 2
+
+
 def test_get_researcher_llm_kwargs_falls_back_to_openai_env():
     from src.llm.openai_compat import get_researcher_llm_kwargs
 
@@ -26,6 +37,28 @@ def test_get_researcher_llm_kwargs_falls_back_to_openai_env():
     assert kwargs['api_key'] == 'fallback-key'
     assert kwargs['temperature'] == 0.2
     assert kwargs['max_tokens'] == 123
+
+
+def test_get_researcher_llm_kwargs_applies_profile_defaults():
+    from src.llm.openai_compat import get_researcher_llm_kwargs
+
+    with patch('src.llm.openai_compat.load_dotenv_if_available'):
+        with patch.dict(
+            'os.environ',
+            {
+                'RESEARCHER_MODEL': 'deepseek-chat',
+                'RESEARCHER_BASE_URL': 'https://api.deepseek.com',
+                'RESEARCHER_API_KEY': 'test-key',
+            },
+            clear=True,
+        ):
+            kwargs = get_researcher_llm_kwargs(profile='alignment_checker')
+
+    assert kwargs['temperature'] == 0.0
+    assert kwargs['max_tokens'] == 120
+    assert kwargs['top_p'] == 1.0
+    assert kwargs['request_timeout'] == 30
+    assert kwargs['max_retries'] == 1
 
 
 def test_get_researcher_llm_kwargs_loads_dotenv_first():

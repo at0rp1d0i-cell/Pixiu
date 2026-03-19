@@ -96,6 +96,7 @@ class PrefilterOutput(TypedDict):
 
     approved_notes contains the subset that passed all hard gates.
     filtered_count records how many were rejected for diagnostics.
+    prefilter_diagnostics stores compact rejection counters and samples.
 
     prefilter_node（Stage 3）的输出类型。
     approved_notes 包含通过所有硬 gate 的子集；filtered_count 记录淘汰数量。
@@ -103,6 +104,7 @@ class PrefilterOutput(TypedDict):
 
     approved_notes: list[FactorResearchNote]
     filtered_count: int
+    prefilter_diagnostics: dict
 
 
 # ── Stage 4 ────────────────────────────────────────────────────────────────────
@@ -212,6 +214,7 @@ class LoopControlOutput(TypedDict):
     approved_notes: list[FactorResearchNote]
     subspace_generated: dict[str, int]
     filtered_count: int
+    prefilter_diagnostics: dict
     exploration_results: list[ExplorationResult]
     backtest_reports: list[BacktestReport]
     critic_verdicts: list[CriticVerdict]

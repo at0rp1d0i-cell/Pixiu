@@ -31,6 +31,7 @@ from src.skills.loader import SkillLoader
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
+_MAX_REJECTION_SAMPLES = 5
 
 
 # ─────────────────────────────────────────────────────────
@@ -200,10 +201,7 @@ class AlignmentChecker:
     """
 
     def __init__(self, skill_loader: Optional[SkillLoader] = None):
-        self.llm = build_researcher_llm(
-            temperature=0,
-            max_tokens=200,  # 输出很短
-        )
+        self.llm = build_researcher_llm(profile="alignment_checker")
         self.skill_loader = skill_loader or _SKILL_LOADER
 
     async def check(self, note: FactorResearchNote) -> tuple[bool, str]:
@@ -372,6 +370,35 @@ class PreFilter:
         self.alignment = AlignmentChecker()
         self.constraint_checker = ConstraintChecker(pool=factor_pool)
         self.regime_filter = RegimeFilter()
+        self.last_diagnostics: dict = {}
+
+    def _reset_diagnostics(self, input_count: int) -> None:
+        self.last_diagnostics = {
+            "input_count": input_count,
+            "approved_count": 0,
+            "rejection_counts_by_filter": {},
+            "sample_rejections": [],
+        }
+
+    def _record_rejection(self, note: FactorResearchNote, filter_name: str, reason: str) -> None:
+        counts = self.last_diagnostics.setdefault("rejection_counts_by_filter", {})
+        counts[filter_name] = counts.get(filter_name, 0) + 1
+
+        samples = self.last_diagnostics.setdefault("sample_rejections", [])
+        if len(samples) < _MAX_REJECTION_SAMPLES:
+            samples.append({
+                "note_id": note.note_id,
+                "filter": filter_name,
+                "reason": reason,
+            })
+
+    def _record_top_k_truncation(self, notes: list[FactorResearchNote]) -> None:
+        for note in notes:
+            self._record_rejection(
+                note,
+                "top_k_truncation",
+                f"ranked below stage3_top_k={THRESHOLDS.stage3_top_k}",
+            )
 
     async def filter_batch(
         self,
@@ -387,6 +414,7 @@ class PreFilter:
             current_regime: 当前市场 regime 的字符串值（如 "bull_trend"）。
                             为 None 时跳过 Filter E（Regime 过滤）。
         """
+        self._reset_diagnostics(len(notes))
         candidates = []
 
         for note in notes:
@@ -394,30 +422,35 @@ class PreFilter:
             passed, reason = self.validator.validate(note)
             if not passed:
                 logger.info("[Filter A] 拒绝 %s: %s", note.note_id, reason)
+                self._record_rejection(note, "validator", reason)
                 continue
 
             # Filter B（同步，无 LLM）
             passed, reason = self.novelty.check(note)
             if not passed:
                 logger.info("[Filter B] 拒绝 %s: %s", note.note_id, reason)
+                self._record_rejection(note, "novelty", reason)
                 continue
 
             # Filter C（异步，LLM 快速调用，失败放行）
             passed, reason = await self.alignment.check(note)
             if not passed:
                 logger.info("[Filter C] 拒绝 %s: %s", note.note_id, reason)
+                self._record_rejection(note, "alignment", reason)
                 continue
 
             # Filter D（同步，结构化失败约束检查，失败时降级放行）
             passed, reason = self.constraint_checker.check(note)
             if not passed:
                 logger.info("[Filter D] 拒绝 %s: %s", note.note_id, reason)
+                self._record_rejection(note, "constraint_checker", reason)
                 continue
 
             # Filter E（同步，regime 适用性过滤）
             passed, reason = self.regime_filter.check(note, current_regime)
             if not passed:
                 logger.info("[Filter E] 拒绝 %s: %s", note.note_id, reason)
+                self._record_rejection(note, "regime_filter", reason)
                 continue
 
             candidates.append(note)
@@ -425,7 +458,11 @@ class PreFilter:
         # 通过数量 > Top K 时，按探索需求排序（有 exploration_questions 的排后，先回测简单的）
         candidates.sort(key=lambda n: len(n.exploration_questions))
         approved = candidates[:THRESHOLDS.stage3_top_k]
+        overflow = candidates[THRESHOLDS.stage3_top_k:]
+        if overflow:
+            self._record_top_k_truncation(overflow)
         filtered_count = len(notes) - len(approved)
+        self.last_diagnostics["approved_count"] = len(approved)
 
         logger.info(
             "[Stage 3] %d 个候选 → %d 个通过（淘汰 %d 个）",
@@ -462,4 +499,8 @@ def prefilter_node(state: dict) -> PrefilterOutput:
         "[Prefilter Node] %d → %d approved, %d filtered (regime=%s)",
         len(notes), len(approved), filtered_count, current_regime,
     )
-    return {"approved_notes": approved, "filtered_count": filtered_count}
+    return {
+        "approved_notes": approved,
+        "filtered_count": filtered_count,
+        "prefilter_diagnostics": prefilter.last_diagnostics,
+    }

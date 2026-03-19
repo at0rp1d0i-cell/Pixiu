@@ -87,7 +87,7 @@ def test_market_analyst_falls_back_to_openai_env():
         mock_builder.return_value = mock_chat
         MarketAnalyst(mcp_tools=[])
 
-    mock_builder.assert_called_once_with(temperature=0.1)
+    mock_builder.assert_called_once_with(profile="market_analyst")
 
 
 def test_market_analyst_loads_dotenv_before_llm_init():

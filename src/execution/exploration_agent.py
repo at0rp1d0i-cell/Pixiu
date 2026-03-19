@@ -31,7 +31,7 @@ print("EXPLORATION_RESULT_JSON:" + json.dumps({"findings": "...", "key_statistic
 class ExplorationAgent:
     def __init__(self, skill_loader: SkillLoader | None = None):
         self.skill_loader = skill_loader or _SKILL_LOADER
-        self.llm = build_researcher_llm(temperature=0.3)  # 低温度，代码生成要精确
+        self.llm = build_researcher_llm(profile="exploration_agent")
         self.runner = DockerRunner()
 
     async def explore(

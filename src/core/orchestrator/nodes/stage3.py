@@ -15,8 +15,13 @@ def prefilter_node(state: AgentState) -> PrefilterOutput:
     result = _prefilter(dict(state))
     approved = result.get("approved_notes", [])
     filtered = len(state.research_notes) - len(approved)
+    diagnostics = result.get("prefilter_diagnostics", {})
     logger.info(
         "[Stage 3] 放行 %d 个，淘汰 %d 个（基准：Synthesis 后 %d 个）",
         len(approved), filtered, len(state.research_notes),
     )
-    return {"approved_notes": approved, "filtered_count": filtered}
+    return {
+        "approved_notes": approved,
+        "filtered_count": filtered,
+        "prefilter_diagnostics": diagnostics,
+    }

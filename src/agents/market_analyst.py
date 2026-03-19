@@ -92,7 +92,7 @@ class MarketAnalyst:
     def __init__(self, mcp_tools: list, skill_loader: SkillLoader | None = None):
         self.tools = {t.name: t for t in mcp_tools}
         self.skill_loader = skill_loader or _SKILL_LOADER
-        self.llm = build_researcher_llm(temperature=0.1).bind_tools(mcp_tools)
+        self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
 
     @staticmethod
     def _extract_tool_text(result) -> str:
@@ -153,7 +153,7 @@ class MarketAnalyst:
             messages.append(HumanMessage(
                 content="工具调用轮次已用完。请根据已获取的数据，直接输出 MarketContextMemo JSON。"
             ))
-            llm_no_tools = build_researcher_llm(temperature=0.1)
+            llm_no_tools = build_researcher_llm(profile="market_analyst")
             response = await llm_no_tools.ainvoke(messages)
 
         return self._parse_memo(response.content)

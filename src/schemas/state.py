@@ -33,6 +33,7 @@ class AgentState(PixiuBase):
     # Stage 3 输出（过滤后）
     approved_notes: List[FactorResearchNote] = Field(default_factory=list)
     filtered_count: int = 0  # 被过滤掉的数量
+    prefilter_diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
     # Stage 4 输出
     exploration_results: List[ExplorationResult] = Field(default_factory=list)

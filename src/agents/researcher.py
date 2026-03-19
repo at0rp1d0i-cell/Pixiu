@@ -127,7 +127,7 @@ class AlphaResearcher:
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.registry = registry or SubspaceRegistry.get_default_registry()
         self.factor_pool = factor_pool
-        self.llm = build_researcher_llm(temperature=0.8)
+        self.llm = build_researcher_llm(profile="researcher")
 
     async def generate_batch(
         self,

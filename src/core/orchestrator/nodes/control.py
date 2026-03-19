@@ -117,6 +117,7 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
         "approved_notes": [],
         "subspace_generated": {},
         "filtered_count": 0,
+        "prefilter_diagnostics": {},
         "exploration_results": [],
         "backtest_reports": [],
         "critic_verdicts": [],

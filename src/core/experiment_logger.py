@@ -7,6 +7,7 @@ ExperimentLogger — 每轮实验快照写入器。
 import json
 import logging
 import os
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -102,6 +103,64 @@ class ExperimentLogger:
         if state.last_error is not None:
             errors.append(state.last_error)
 
+        prefilter_diag = getattr(state, "prefilter_diagnostics", {}) or {}
+        prefilter_summary = {
+            "input_count": prefilter_diag.get("input_count", len(state.research_notes)),
+            "approved_count": prefilter_diag.get("approved_count", len(state.approved_notes)),
+            "rejection_counts_by_filter": dict(prefilter_diag.get("rejection_counts_by_filter", {})),
+            "sample_rejections": list(prefilter_diag.get("sample_rejections", [])),
+        }
+
+        execution_error_count = sum(
+            1 for report in state.backtest_reports
+            if report.error_message or report.status != "success"
+        )
+        execution_summary = {
+            "backtest_reports_count": len(state.backtest_reports),
+            "execution_error_count": execution_error_count,
+            "executed_factor_ids_sample": [
+                report.factor_id for report in state.backtest_reports[:5]
+            ],
+        }
+
+        verdict_counts_by_decision = Counter(
+            verdict.decision or "unknown" for verdict in state.critic_verdicts
+        )
+        failure_mode_counts = Counter(
+            (verdict.failure_mode.value if verdict.failure_mode else "unknown")
+            for verdict in state.critic_verdicts
+            if not verdict.overall_passed
+        )
+        failed_check_counts = Counter(
+            failed_check
+            for verdict in state.critic_verdicts
+            if not (
+                verdict.failure_mode is not None
+                and verdict.failure_mode.value == "execution_error"
+            )
+            for failed_check in verdict.failed_checks
+        )
+        sample_failures = [
+            {
+                "factor_id": verdict.factor_id,
+                "note_id": verdict.note_id,
+                "decision": verdict.decision,
+                "failure_mode": verdict.failure_mode.value if verdict.failure_mode else None,
+                "failed_checks": list(verdict.failed_checks),
+                "failure_explanation": verdict.failure_explanation,
+                "suggested_fix": verdict.suggested_fix,
+                "score": verdict.score,
+            }
+            for verdict in state.critic_verdicts
+            if not verdict.overall_passed
+        ][:5]
+        judgment_summary = {
+            "verdict_counts_by_decision": dict(verdict_counts_by_decision),
+            "failure_mode_counts": dict(failure_mode_counts),
+            "failed_check_counts": dict(failed_check_counts),
+            "sample_failures": sample_failures,
+        }
+
         payload = {
             "round": round_n,
             "timestamp": datetime.now().isoformat(),
@@ -109,11 +168,14 @@ class ExperimentLogger:
             "hypotheses_count": len(state.hypotheses),
             "notes_count": len(state.research_notes),
             "approved_notes_count": len(state.approved_notes),
-            "prefilter_passed_count": len(state.filtered_notes) if hasattr(state, "filtered_notes") else len(state.approved_notes),
+            "prefilter_passed_count": prefilter_summary["approved_count"],
             "filtered_count": state.filtered_count,
+            "prefilter": prefilter_summary,
             "verdicts": verdicts_summary,
             "verdicts_passed": verdicts_passed,
             "verdicts_total": len(state.critic_verdicts),
+            "execution": execution_summary,
+            "judgment": judgment_summary,
             "sharpe_values": sharpe_values,
             "factor_pool_size": factor_pool_size,
             "scheduler_weights": scheduler_weights,

@@ -250,3 +250,77 @@ def test_prefilter_empty_result():
 
     assert approved == []
     assert filtered == 3
+
+
+def test_prefilter_tracks_rejection_diagnostics():
+    """PreFilter 应聚合每个过滤器的拒绝计数和样本。"""
+    prefilter = PreFilter(factor_pool=MagicMock())
+    notes = [
+        _make_note(note_id="reject_validator"),
+        _make_note(note_id="reject_alignment"),
+        _make_note(note_id="reject_constraint"),
+        _make_note(note_id="pass_candidate"),
+    ]
+
+    with patch.object(prefilter.validator, "validate") as mock_validate, \
+         patch.object(prefilter.novelty, "check") as mock_novelty, \
+         patch.object(prefilter.alignment, "check", new_callable=AsyncMock) as mock_alignment, \
+         patch.object(prefilter.constraint_checker, "check") as mock_constraint, \
+         patch.object(prefilter.regime_filter, "check") as mock_regime:
+        mock_validate.side_effect = lambda note: (
+            (False, "future ref") if note.note_id == "reject_validator" else (True, "ok")
+        )
+        mock_novelty.side_effect = lambda note: (True, "ok")
+        mock_alignment.side_effect = lambda note: (
+            (False, "semantic mismatch") if note.note_id == "reject_alignment" else (True, "ok")
+        )
+        mock_constraint.side_effect = lambda note: (
+            (False, "matched historical failure") if note.note_id == "reject_constraint" else (True, "ok")
+        )
+        mock_regime.side_effect = lambda note, current_regime: (True, "ok")
+
+        approved, filtered = asyncio.run(
+            prefilter.filter_batch(notes, current_regime="bull_trend")
+        )
+
+    assert filtered == 3
+    assert [note.note_id for note in approved] == ["pass_candidate"]
+    assert prefilter.last_diagnostics["input_count"] == 4
+    assert prefilter.last_diagnostics["approved_count"] == 1
+    assert prefilter.last_diagnostics["rejection_counts_by_filter"] == {
+        "validator": 1,
+        "alignment": 1,
+        "constraint_checker": 1,
+    }
+    assert len(prefilter.last_diagnostics["sample_rejections"]) == 3
+    assert prefilter.last_diagnostics["sample_rejections"][0]["note_id"] == "reject_validator"
+
+
+def test_prefilter_tracks_top_k_truncation_in_diagnostics(monkeypatch):
+    """超过 Top-K 的候选应计入单独的截断拒绝统计。"""
+    from src.schemas.thresholds import THRESHOLDS
+
+    monkeypatch.setattr(THRESHOLDS, "stage3_top_k", 2)
+    prefilter = PreFilter(factor_pool=MagicMock())
+    notes = [
+        _make_note(note_id=f"candidate_{i}")
+        for i in range(4)
+    ]
+
+    with patch.object(prefilter.validator, "validate", return_value=(True, "ok")), \
+         patch.object(prefilter.novelty, "check", return_value=(True, "ok")), \
+         patch.object(prefilter.alignment, "check", new_callable=AsyncMock, return_value=(True, "ok")), \
+         patch.object(prefilter.constraint_checker, "check", return_value=(True, "ok")), \
+         patch.object(prefilter.regime_filter, "check", return_value=(True, "ok")):
+        approved, filtered = asyncio.run(
+            prefilter.filter_batch(notes, current_regime="bull_trend")
+        )
+
+    assert filtered == 2
+    assert [note.note_id for note in approved] == ["candidate_0", "candidate_1"]
+    assert prefilter.last_diagnostics["approved_count"] == 2
+    assert prefilter.last_diagnostics["rejection_counts_by_filter"]["top_k_truncation"] == 2
+    assert [s["note_id"] for s in prefilter.last_diagnostics["sample_rejections"]] == [
+        "candidate_2",
+        "candidate_3",
+    ]

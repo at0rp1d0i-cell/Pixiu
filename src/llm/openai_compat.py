@@ -6,6 +6,8 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
+from .settings import get_llm_profile_settings
+
 
 def load_dotenv_if_available() -> None:
     try:
@@ -18,8 +20,9 @@ def load_dotenv_if_available() -> None:
 
 def get_researcher_llm_kwargs(
     *,
-    temperature: float,
+    temperature: float | None = None,
     max_tokens: int | None = None,
+    profile: str | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
     """Build a consistent OpenAI-compatible config for researcher-facing LLM calls."""
@@ -29,8 +32,18 @@ def get_researcher_llm_kwargs(
         "model": os.getenv("RESEARCHER_MODEL", os.getenv("OPENAI_MODEL", "deepseek-chat")),
         "base_url": os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE")),
         "api_key": os.getenv("RESEARCHER_API_KEY", os.getenv("OPENAI_API_KEY")),
-        "temperature": temperature,
     }
+
+    profile_kwargs: dict[str, Any] = {}
+    if profile is not None:
+        profile_kwargs = get_llm_profile_settings(profile).to_kwargs()
+        kwargs.update(profile_kwargs)
+
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    elif "temperature" not in kwargs:
+        raise TypeError("temperature is required when no llm profile is provided")
+
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
@@ -42,8 +55,9 @@ def get_researcher_llm_kwargs(
 
 def build_researcher_llm(
     *,
-    temperature: float,
+    temperature: float | None = None,
     max_tokens: int | None = None,
+    profile: str | None = None,
     **overrides: Any,
 ) -> ChatOpenAI:
     """Create a ChatOpenAI client using the shared OpenAI-compatible config."""
@@ -51,6 +65,7 @@ def build_researcher_llm(
         **get_researcher_llm_kwargs(
             temperature=temperature,
             max_tokens=max_tokens,
+            profile=profile,
             **overrides,
         )
     )
