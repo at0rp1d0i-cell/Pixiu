@@ -210,7 +210,7 @@ class FactorPool:
     def get_similar_failures(self, formula: str, top_k: int = 3) -> list[dict]:
         """查找与给定公式最相似的历史失败因子及其失败原因。
 
-        失败定义：parse_success=True 但 Sharpe <= 2.67（已回测但未达标）。
+        失败定义：execution_succeeded=True 但 Sharpe <= 2.67（已执行回测但未达质量门槛）。
 
         Args:
             formula: 当前因子的 Qlib 公式（用于向量相似检索）
@@ -219,7 +219,7 @@ class FactorPool:
         Returns:
             list of dict，包含失败因子的元数据和失败上下文
         """
-        # 只查失败的（已回测 + 未达标）
+        # 只查失败的（已执行回测 + 未达标）
         results = self._collection.query(
             query_texts=[formula],
             n_results=min(top_k * 3, max(self._collection.count(), 1)),  # 多取一些再过滤
@@ -339,6 +339,11 @@ class FactorPool:
         factor_spec = report.factor_spec
         turnover = report.metrics.turnover_rate
         coverage = report.metrics.coverage
+        execution_succeeded = (
+            report.execution_succeeded
+            if report.execution_succeeded is not None
+            else report.status == "success" and report.error_message is None
+        )
         subspace_origin = (
             note.exploration_subspace.value if note and note.exploration_subspace else None
         )
@@ -352,6 +357,7 @@ class FactorPool:
             verdict_id=verdict.verdict_id,
             decision=verdict.decision or "",
             score=verdict.score,
+            execution_succeeded=execution_succeeded,
             sharpe=report.metrics.sharpe,
             ic_mean=report.metrics.ic_mean,
             icir=report.metrics.icir,
@@ -388,15 +394,16 @@ class FactorPool:
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "tags": json.dumps(record.tags),
                 "subspace_origin": record.subspace_origin or "",
+                "execution_succeeded": execution_succeeded,
                 # 向后兼容旧字段
                 "beats_baseline": verdict.overall_passed,
-                "parse_success": report.passed,
+                "parse_success": execution_succeeded,
                 "ic": report.metrics.ic_mean,
             }],
         )
         logger.info(
-            "[FactorPool] register_factor: %s → passed=%s, Sharpe=%.2f",
-            report.factor_id, verdict.overall_passed, report.metrics.sharpe,
+            "[FactorPool] register_factor: %s → passed=%s, exec_succeeded=%s, Sharpe=%.2f",
+            report.factor_id, verdict.overall_passed, execution_succeeded, report.metrics.sharpe,
         )
 
     def get_passed_factors(

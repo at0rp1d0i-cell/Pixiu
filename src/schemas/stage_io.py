@@ -91,6 +91,24 @@ class NoteRefinementOutput(TypedDict, total=False):
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────────
 
+
+class PrefilterRejectionSample(TypedDict):
+    """Single Stage 3 rejection sample for diagnostics."""
+
+    note_id: str
+    filter: str
+    reason: str
+
+
+class PrefilterDiagnostics(TypedDict):
+    """Compact Stage 3 diagnostics payload."""
+
+    input_count: int
+    approved_count: int
+    rejection_counts_by_filter: dict[str, int]
+    sample_rejections: list[PrefilterRejectionSample]
+
+
 class PrefilterOutput(TypedDict):
     """Output of prefilter_node (Stage 3).
 
@@ -104,7 +122,7 @@ class PrefilterOutput(TypedDict):
 
     approved_notes: list[FactorResearchNote]
     filtered_count: int
-    prefilter_diagnostics: dict
+    prefilter_diagnostics: PrefilterDiagnostics
 
 
 # ── Stage 4 ────────────────────────────────────────────────────────────────────
@@ -187,14 +205,13 @@ class ReportOutput(TypedDict, total=False):
 # ── Control nodes ──────────────────────────────────────────────────────────────
 
 class HumanGateOutput(TypedDict, total=False):
-    """Output of human_gate_node — always an empty pass-through dict.
+    """Output of human_gate_node.
 
-    LangGraph interrupts before this node; the actual decision is injected
-    externally via graph.update_state().
-
-    human_gate_node 的输出类型——始终为空字典（pass-through）。
-    LangGraph 在此节点前中断；实际决策通过 graph.update_state() 从外部注入。
+    human_gate_node 从 control plane 读取最新的人类决策，并将其写回 state。
     """
+
+    human_decision: Optional[str]
+    awaiting_human_approval: bool
 
 
 class LoopControlOutput(TypedDict):
@@ -214,7 +231,7 @@ class LoopControlOutput(TypedDict):
     approved_notes: list[FactorResearchNote]
     subspace_generated: dict[str, int]
     filtered_count: int
-    prefilter_diagnostics: dict
+    prefilter_diagnostics: PrefilterDiagnostics
     exploration_results: list[ExplorationResult]
     backtest_reports: list[BacktestReport]
     critic_verdicts: list[CriticVerdict]

@@ -151,6 +151,7 @@ def build_graph():
         NODE_REPORT:       NODE_REPORT,
         NODE_LOOP_CONTROL: NODE_LOOP_CONTROL,
     })
+    graph.add_edge(NODE_REPORT, NODE_HUMAN_GATE)
     graph.add_conditional_edges(NODE_HUMAN_GATE, route_after_human, {
         NODE_LOOP_CONTROL:   NODE_LOOP_CONTROL,
         NODE_HYPOTHESIS_GEN: NODE_HYPOTHESIS_GEN,
@@ -161,10 +162,7 @@ def build_graph():
         END:                 END,
     })
 
-    return graph.compile(
-        checkpointer=MemorySaver(),
-        interrupt_before=[NODE_HUMAN_GATE],
-    )
+    return graph.compile(checkpointer=MemorySaver())
 
 
 def get_graph():

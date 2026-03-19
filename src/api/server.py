@@ -11,8 +11,6 @@ Pixiu v2 FastAPI 后端 API Server
 启动方式：
   uvicorn src.api.server:api --host 0.0.0.0 --port 8080 --reload
 """
-import os
-import sys
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -142,7 +140,7 @@ class ApproveRequest(BaseModel):
 
 @api.post("/api/approve")
 def post_approve(body: ApproveRequest):
-    """向 LangGraph 注入 human_decision（审批/重定向/停止）。"""
+    """向 control plane 写入 human_decision（审批/重定向/停止）。"""
     valid_actions = {"approve", "stop"}
     action = body.action
     is_valid = action in valid_actions or action.startswith("redirect:")
@@ -152,23 +150,16 @@ def post_approve(body: ApproveRequest):
     try:
         store = _get_state_store()
         run = store.get_latest_run()
-        if run is not None:
-            from src.schemas.control_plane import HumanDecisionRecord
+        if run is None:
+            raise HTTPException(status_code=404, detail="找不到正在运行的实验")
 
-            store.append_human_decision(
-                HumanDecisionRecord(run_id=run.run_id, action=action)
-            )
+        snapshot = store.get_snapshot(run.run_id)
+        if snapshot is None or not snapshot.awaiting_human_approval:
+            raise HTTPException(status_code=409, detail="当前没有等待审批的实验")
 
-        from src.core.orchestrator import get_graph, get_latest_config
-        graph = get_graph()
-        config = get_latest_config()
-        if not config:
-            raise HTTPException(status_code=404, detail="找不到正在运行的实验（LangGraph config 未初始化）")
-        graph.update_state(
-            config,
-            {"human_decision": action, "awaiting_human_approval": False},
-            as_node="human_gate",
-        )
+        from src.schemas.control_plane import HumanDecisionRecord
+
+        store.append_human_decision(HumanDecisionRecord(run_id=run.run_id, action=action))
         return {"ok": True, "action": action}
     except HTTPException:
         raise

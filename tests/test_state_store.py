@@ -10,9 +10,8 @@ import pytest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-pytestmark = pytest.mark.unit
-
 from src.api import server
+from src.cli import main as cli_main
 from src.control_plane.state_store import StateStore
 from src.core import orchestrator
 from src.core.orchestrator import coder_node, judgment_node, portfolio_node, report_node
@@ -20,6 +19,8 @@ from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.control_plane import ArtifactRecord, HumanDecisionRecord, RunSnapshot
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
+
+pytestmark = pytest.mark.unit
 
 
 def test_create_update_and_get_latest_run(tmp_path):
@@ -157,6 +158,25 @@ def test_append_human_decision_no_crash(tmp_path):
     assert store.get_latest_run() is not None
 
 
+def test_pop_latest_human_decision_returns_latest_and_clears_queue(tmp_path):
+    db_path = tmp_path / "state_store.sqlite"
+    store = StateStore(db_path)
+    run = store.create_run(mode="single")
+
+    store.append_human_decision(
+        HumanDecisionRecord(run_id=run.run_id, action="approve")
+    )
+    store.append_human_decision(
+        HumanDecisionRecord(run_id=run.run_id, action="stop")
+    )
+
+    latest = store.pop_latest_human_decision(run.run_id)
+
+    assert latest is not None
+    assert latest.action == "stop"
+    assert store.pop_latest_human_decision(run.run_id) is None
+
+
 # ─────────────────────────────────────────────────────────
 # From test_api_state_store.py
 # ─────────────────────────────────────────────────────────
@@ -216,6 +236,69 @@ def test_api_reports_reads_control_plane_artifacts(tmp_path, monkeypatch):
     assert payload[0]["id"] == "report-001"
     assert payload[0]["run_id"] == run.run_id
     assert payload[0]["path"] == str(report_path)
+
+
+def test_api_approve_requires_waiting_snapshot(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    store.create_run(mode="single")
+    monkeypatch.setattr(server, "_get_state_store", lambda: store)
+
+    with pytest.raises(server.HTTPException) as exc:
+        server.post_approve(server.ApproveRequest(action="approve"))
+
+    assert exc.value.status_code == 409
+
+
+def test_api_approve_queues_decision_when_waiting(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="single")
+    store.write_snapshot(
+        RunSnapshot(
+            run_id=run.run_id,
+            approved_notes_count=1,
+            backtest_reports_count=1,
+            verdicts_count=1,
+            awaiting_human_approval=True,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    monkeypatch.setattr(server, "_get_state_store", lambda: store)
+
+    payload = server.post_approve(server.ApproveRequest(action="approve"))
+
+    assert payload == {"ok": True, "action": "approve"}
+    latest = store.pop_latest_human_decision(run.run_id)
+    assert latest is not None
+    assert latest.action == "approve"
+
+
+def test_cli_inject_human_decision_requires_waiting_snapshot(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    store.create_run(mode="single")
+    monkeypatch.setattr(cli_main, "_get_state_store", lambda: store)
+
+    assert cli_main._inject_human_decision("approve") is False
+
+
+def test_cli_inject_human_decision_queues_action(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="single")
+    store.write_snapshot(
+        RunSnapshot(
+            run_id=run.run_id,
+            approved_notes_count=1,
+            backtest_reports_count=1,
+            verdicts_count=1,
+            awaiting_human_approval=True,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    monkeypatch.setattr(cli_main, "_get_state_store", lambda: store)
+
+    assert cli_main._inject_human_decision("redirect:momentum") is True
+    latest = store.pop_latest_human_decision(run.run_id)
+    assert latest is not None
+    assert latest.action == "redirect:momentum"
 
 
 # ─────────────────────────────────────────────────────────

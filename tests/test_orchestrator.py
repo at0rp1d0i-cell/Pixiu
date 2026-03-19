@@ -12,10 +12,14 @@ from src.core.orchestrator import (
     NODE_LOOP_CONTROL,
     NODE_REPORT,
     REPORT_EVERY_N_ROUNDS,
+    build_graph,
     coder_node,
+    human_gate_node,
     loop_control_node,
     route_after_portfolio,
 )
+import src.core.orchestrator as orchestrator
+from src.control_plane.state_store import StateStore
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.failure_constraint import FailureMode
 from src.schemas.judgment import CriticVerdict, ThresholdCheck
@@ -169,6 +173,12 @@ class TestRouteAfterPortfolio:
         assert result == NODE_LOOP_CONTROL
 
 
+def test_graph_routes_report_to_human_gate():
+    graph = build_graph()
+    edges = {(edge.source, edge.target) for edge in graph.get_graph().edges}
+    assert ("report", "human_gate") in edges
+
+
 class TestLoopControlNode:
     def test_increments_round(self):
         """current_round 应递增。"""
@@ -241,6 +251,23 @@ class TestLoopControlNode:
             loop_control_node(state)
 
         mock_sched.on_epoch_done.assert_called_once()
+
+
+def test_human_gate_consumes_control_plane_decision(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="evolve")
+    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
+    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
+
+    from src.schemas.control_plane import HumanDecisionRecord
+
+    store.append_human_decision(HumanDecisionRecord(run_id=run.run_id, action="approve"))
+
+    result = human_gate_node(AgentState(current_round=3, awaiting_human_approval=True))
+
+    assert result["human_decision"] == "approve"
+    assert result["awaiting_human_approval"] is False
+    assert store.pop_latest_human_decision(run.run_id) is None
 
 
 # ─────────────────────────────────────────────────────────

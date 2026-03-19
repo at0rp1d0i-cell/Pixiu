@@ -8,14 +8,11 @@ Sources:
 """
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import datetime, UTC
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
-pytestmark = pytest.mark.unit
 
 from src.schemas.failure_constraint import FailureConstraint, FailureMode
 from src.schemas.judgment import CriticVerdict, ThresholdCheck
@@ -24,13 +21,14 @@ from src.schemas.exploration import CompositionConstraints, SubspaceRegistry
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
 from src.scheduling.subspace_context import build_factor_algebra_context, build_subspace_context
 from src.hypothesis.mutation import (
-    FormulaNode,
     QlibFormulaParser,
     SymbolicMutator,
     MutationResult,
     try_all_mutations,
     build_mutation_record_dict,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────
@@ -266,11 +264,11 @@ class TestConstraintExtractor:
         extractor = ConstraintExtractor()
         assert extractor._extract_pattern("") == ""
 
-    def test_severity_hard_for_execution_error(self):
+    def test_severity_warning_for_execution_error(self):
         verdict = _make_failed_verdict(failure_mode="execution_error")
         note = _make_note()
         result = self.extractor.extract(verdict, note)
-        assert result.severity == "hard"
+        assert result.severity == "warning"
 
     def test_severity_hard_for_high_turnover(self):
         verdict = _make_failed_verdict(failure_mode="high_turnover")
@@ -517,6 +515,32 @@ class TestConstraintChecker:
         )
         passed, reason = self.checker.check(note_with_final)
         assert passed is False
+
+    def test_horizon_bucket_boundaries_are_disjoint(self):
+        assert self.checker._matches_pattern(
+            "Rank(Mean($volume, 10))",
+            "Rank(Mean($volume, N_SHORT))",
+        )
+        assert self.checker._matches_pattern(
+            "Rank(Mean($volume, 11))",
+            "Rank(Mean($volume, N_MID))",
+        )
+        assert self.checker._matches_pattern(
+            "Rank(Mean($volume, 59))",
+            "Rank(Mean($volume, N_MID))",
+        )
+        assert self.checker._matches_pattern(
+            "Rank(Mean($volume, 60))",
+            "Rank(Mean($volume, N_LONG))",
+        )
+        assert self.checker._matches_pattern(
+            "Rank(Mean($volume, 61))",
+            "Rank(Mean($volume, N_LONG))",
+        )
+        assert not self.checker._matches_pattern(
+            "Rank(Mean($volume, 60))",
+            "Rank(Mean($volume, N_MID))",
+        )
 
 
 # ─────────────────────────────────────────────

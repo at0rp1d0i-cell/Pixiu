@@ -24,13 +24,14 @@ class ReportWriter:
             notes="No allocation available.",
         )
 
+        passed_verdicts = [verdict for verdict in state.critic_verdicts if verdict.overall_passed]
+        failed_verdicts = [verdict for verdict in state.critic_verdicts if not verdict.overall_passed]
+        passed_factor_ids = {verdict.factor_id for verdict in passed_verdicts}
         best_report = max(
-            state.backtest_reports,
+            (report for report in state.backtest_reports if report.factor_id in passed_factor_ids),
             key=lambda report: report.metrics.sharpe,
             default=None,
         )
-        passed_verdicts = [verdict for verdict in state.critic_verdicts if verdict.overall_passed]
-        failed_verdicts = [verdict for verdict in state.critic_verdicts if not verdict.overall_passed]
 
         highlights = []
         if best_report is not None:

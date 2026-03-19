@@ -25,13 +25,103 @@ from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
 from src.llm.openai_compat import build_researcher_llm
-from src.schemas.stage_io import PrefilterOutput
+from src.schemas.stage_io import PrefilterDiagnostics, PrefilterOutput
 from src.skills.loader import SkillLoader
 
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
 _MAX_REJECTION_SAMPLES = 5
+
+_STRICT_ARITY_BY_NAME: dict[str, int] = {
+    "Ref": 2,
+    "Mean": 2,
+    "Std": 2,
+    "Var": 2,
+    "Max": 2,
+    "Min": 2,
+    "Sum": 2,
+    "Delta": 2,
+    "Slope": 2,
+    "Rsquare": 2,
+    "Resi": 2,
+    "Power": 2,
+    "Corr": 3,
+    "Cov": 3,
+    "If": 3,
+    "Gt": 2,
+    "Lt": 2,
+    "Ge": 2,
+    "Le": 2,
+    "Eq": 2,
+    "Ne": 2,
+    "And": 2,
+    "Or": 2,
+    "Not": 1,
+    "Add": 2,
+    "Sub": 2,
+    "Mul": 2,
+    "Div": 2,
+    "IdxMax": 2,
+    "IdxMin": 2,
+    "Comb": 2,
+    "Count": 2,
+    "Mad": 2,
+    "WMA": 2,
+    "EMA": 2,
+    "Ts_Mean": 2,
+    "Ts_Std": 2,
+    "Ts_Max": 2,
+    "Ts_Min": 2,
+    "Ts_Sum": 2,
+    "Ts_Rank": 2,
+    "Ts_Corr": 3,
+    "Ts_Cov": 3,
+    "Ts_WMA": 2,
+    "Ts_Slope": 2,
+    "SignedPower": 2,
+    "Greater": 2,
+    "Less": 2,
+    "Rank": 1,
+    "Abs": 1,
+    "Sign": 1,
+    "Log": 1,
+    "Sqrt": 1,
+}
+
+_TWO_EXPRESSIONS_THEN_WINDOW = {"Corr", "Cov", "Ts_Corr", "Ts_Cov"}
+_WINDOW_OPERATORS = {
+    "Ref",
+    "Mean",
+    "Std",
+    "Var",
+    "Max",
+    "Min",
+    "Sum",
+    "Delta",
+    "Slope",
+    "Rsquare",
+    "Resi",
+    "Power",
+    "WMA",
+    "EMA",
+    "Ts_Mean",
+    "Ts_Std",
+    "Ts_Max",
+    "Ts_Min",
+    "Ts_Sum",
+    "Ts_Rank",
+    "Ts_WMA",
+    "Ts_Slope",
+    "SignedPower",
+    "Count",
+    "Mad",
+    "IdxMax",
+    "IdxMin",
+    "Greater",
+    "Less",
+}
+_BOOLEAN_LITERALS = {"True", "False"}
 
 
 # ─────────────────────────────────────────────────────────
@@ -84,19 +174,188 @@ class Validator:
             return False, f"使用了未注册字段：{invalid_fields}"
 
         # 规则 5：算子白名单
-        used_operators = set(re.findall(r'\b([A-Za-z][A-Za-z0-9]*)\s*\(', formula))
+        used_operators = set(re.findall(r'\b([A-Za-z][A-Za-z0-9_]*)\s*\(', formula))
         invalid_ops = used_operators - self.approved_operators
         if invalid_ops:
             return False, f"使用了未批准的算子：{invalid_ops}"
 
-        # 规则 6：Log() 安全性（Log 参数需有 +1 或类似保护）
-        log_match = re.search(r'\bLog\s*\(([^)]+)\)', formula)
-        if log_match:
-            inner = log_match.group(1)
-            if '+' not in inner and 'Abs' not in inner:
-                return False, f"Log() 参数未添加 +1 或 Abs 保护，可能导致 Log(0) 错误：{inner}"
+        # 规则 6：裸标识符检查（必须是算子名，或被 $ 前缀包裹的字段）
+        bare_identifiers = {
+            ident
+            for ident in re.findall(r'(?<!\$)\b[A-Za-z][A-Za-z0-9_]*\b', formula)
+            if ident not in used_operators and ident not in _BOOLEAN_LITERALS
+        }
+        if bare_identifiers:
+            return False, f"使用了未知标识符：{bare_identifiers}"
+
+        # 规则 7：算子参数个数与基础类型校验
+        ok, reason = self._validate_expression(formula)
+        if not ok:
+            return False, reason
 
         return True, "通过语法硬约束"
+
+    def _validate_expression(self, expr: str) -> tuple[bool, str]:
+        """递归验证表达式中的函数调用和分组括号。"""
+        i = 0
+        while i < len(expr):
+            ch = expr[i]
+
+            if ch.isspace() or ch in "+-*/%^<>=!&,|:.":
+                i += 1
+                continue
+
+            if ch == "$":
+                field = re.match(r"\$\w+", expr[i:])
+                if not field:
+                    return False, f"字段名格式不合法：{expr[i: i + 8]}"
+                i += len(field.group())
+                continue
+
+            if ch.isdigit():
+                number = re.match(r"\d+(?:\.\d+)?", expr[i:])
+                if not number:
+                    return False, f"数字字面量格式不合法：{expr[i: i + 8]}"
+                i += len(number.group())
+                continue
+
+            if ch == "(":
+                close_idx = self._find_matching_paren(expr, i)
+                if close_idx == -1:
+                    return False, "括号不匹配（嵌套分组未闭合）"
+                inner = expr[i + 1 : close_idx].strip()
+                if inner:
+                    ok, reason = self._validate_expression(inner)
+                    if not ok:
+                        return False, reason
+                i = close_idx + 1
+                continue
+
+            if ch == ")":
+                return False, "括号不匹配（出现多余的右括号）"
+
+            if ch.isalpha() or ch == "_":
+                ident = re.match(r"[A-Za-z][A-Za-z0-9_]*", expr[i:])
+                if not ident:
+                    return False, f"标识符格式不合法：{expr[i: i + 8]}"
+                name = ident.group()
+                j = i + len(name)
+                while j < len(expr) and expr[j].isspace():
+                    j += 1
+                if j < len(expr) and expr[j] == "(":
+                    close_idx = self._find_matching_paren(expr, j)
+                    if close_idx == -1:
+                        return False, f"{name}() 括号不匹配"
+                    args_text = expr[j + 1 : close_idx]
+                    args = self._split_args(args_text)
+                    if args is None:
+                        return False, f"{name}() 参数列表格式不合法"
+                    ok, reason = self._validate_function_call(name, args)
+                    if not ok:
+                        return False, reason
+                    for arg in args:
+                        ok, reason = self._validate_expression(arg)
+                        if not ok:
+                            return False, reason
+                    i = close_idx + 1
+                    continue
+                if name not in _BOOLEAN_LITERALS:
+                    return False, f"使用了未知标识符：{name}"
+                i = j
+                continue
+
+            return False, f"公式包含不支持的字符：{ch}"
+
+        return True, "ok"
+
+    def _validate_function_call(self, name: str, args: list[str]) -> tuple[bool, str]:
+        expected_arity = _STRICT_ARITY_BY_NAME.get(name)
+        if expected_arity is not None and len(args) != expected_arity:
+            return False, f"{name}() 参数数量不正确，期望 {expected_arity} 个，当前 {len(args)} 个"
+
+        if name == "Ref":
+            if len(args) != 2:
+                return False, "Ref() 需要 2 个参数：Ref($field, N)"
+            if not self._is_positive_int_literal(args[1]):
+                return False, f"Ref() 偏移量必须为正整数，当前值={args[1].strip()}"
+
+        if name in {"Corr", "Cov", "Ts_Corr", "Ts_Cov"}:
+            if len(args) != 3:
+                return False, f"{name}() 需要 3 个参数：{name}($x, $y, N)"
+            if not self._is_series_like_expression(args[0]) or not self._is_series_like_expression(args[1]):
+                return False, f"{name}() 前两个参数必须是表达式或字段，不能是纯数字：{args[0].strip()}, {args[1].strip()}"
+            if not self._is_positive_int_literal(args[2]):
+                return False, f"{name}() 第三个参数必须是正整数窗口，当前值={args[2].strip()}"
+
+        if name == "If" and len(args) != 3:
+            return False, "If() 需要 3 个参数：If(cond, t, f)"
+
+        if name == "Log":
+            if len(args) != 1:
+                return False, "Log() 需要 1 个参数"
+            inner = args[0]
+            if "+" not in inner and "Abs" not in inner:
+                return False, f"Log() 参数未添加 +1 或 Abs 保护，可能导致 Log(0) 错误：{inner}"
+
+        return True, "ok"
+
+    @staticmethod
+    def _is_positive_int_literal(value: str) -> bool:
+        value = value.strip()
+        return bool(re.fullmatch(r"[1-9]\d*", value))
+
+    @staticmethod
+    def _is_series_like_expression(value: str) -> bool:
+        value = value.strip()
+        if not value:
+            return False
+        if re.fullmatch(r"\d+(?:\.\d+)?", value):
+            return False
+        return any(ch in value for ch in ("$", "(", ")", "+", "-", "*", "/", "_"))
+
+    @staticmethod
+    def _find_matching_paren(expr: str, open_idx: int) -> int:
+        depth = 0
+        for idx in range(open_idx, len(expr)):
+            if expr[idx] == "(":
+                depth += 1
+            elif expr[idx] == ")":
+                depth -= 1
+                if depth == 0:
+                    return idx
+            if depth < 0:
+                return -1
+        return -1
+
+    @staticmethod
+    def _split_args(args_text: str) -> list[str] | None:
+        args_text = args_text.strip()
+        if not args_text:
+            return []
+
+        args: list[str] = []
+        depth = 0
+        start = 0
+        for idx, ch in enumerate(args_text):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth < 0:
+                    return None
+            elif ch == "," and depth == 0:
+                part = args_text[start:idx].strip()
+                if not part:
+                    return None
+                args.append(part)
+                start = idx + 1
+        if depth != 0:
+            return None
+        tail = args_text[start:].strip()
+        if not tail:
+            return None
+        args.append(tail)
+        return args
 
 
 # ─────────────────────────────────────────────────────────
@@ -260,7 +519,7 @@ class ConstraintChecker:
         1. 将 formula 中的数值规范化为 N_SHORT/N_MID/N_LONG，再与 pattern 精确比较。
         2. 将 pattern 中的占位符替换为对应范围的 regex，做局部匹配。
 
-        N_SHORT = 1-10，N_MID = 11-60，N_LONG = 61+
+        N_SHORT = 1-10，N_MID = 11-59，N_LONG = 60+
         也支持旧版 N 占位符（兼容未迁移的约束记录）。
         """
         if not formula or not pattern:
@@ -270,7 +529,7 @@ class ConstraintChecker:
             n = int(m.group())
             if n <= 10:
                 return "N_SHORT"
-            elif n <= 60:
+            elif n < 60:
                 return "N_MID"
             else:
                 return "N_LONG"
@@ -284,7 +543,7 @@ class ConstraintChecker:
         # 支持三档占位符以及旧版 N（向后兼容）
         _PLACEHOLDER_REGEX = {
             "N_SHORT": r"([1-9]|10)",
-            "N_MID": r"([1-5][0-9]|60)",
+            "N_MID": r"([1-5][0-9])",
             "N_LONG": r"([6-9][0-9]|[1-9][0-9]{2,})",
             "N": r"\d+",  # legacy fallback
         }
@@ -358,7 +617,12 @@ class PreFilter:
         self.alignment = AlignmentChecker()
         self.constraint_checker = ConstraintChecker(pool=factor_pool)
         self.regime_filter = RegimeFilter()
-        self.last_diagnostics: dict = {}
+        self.last_diagnostics: PrefilterDiagnostics = {
+            "input_count": 0,
+            "approved_count": 0,
+            "rejection_counts_by_filter": {},
+            "sample_rejections": [],
+        }
 
     def _reset_diagnostics(self, input_count: int) -> None:
         self.last_diagnostics = {

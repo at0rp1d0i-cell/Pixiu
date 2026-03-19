@@ -16,6 +16,7 @@ class FactorPoolRecord(PixiuBase):
     verdict_id: str
     decision: str
     score: float
+    execution_succeeded: Optional[bool] = None
     sharpe: Optional[float] = None
     ic_mean: Optional[float] = None
     icir: Optional[float] = None

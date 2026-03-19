@@ -7,12 +7,10 @@ Stage 3 → Stage 4 → Stage 5 全流程集成测试
 Tier: integration（需要真实 ChromaDB + SQLite，但 mock DockerRunner 和 LLM）
 """
 import json
-from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-pytestmark = pytest.mark.integration
 
 from src.core.orchestrator import (
     coder_node,
@@ -24,6 +22,8 @@ from src.core.orchestrator import (
 from src.execution.docker_runner import ExecutionResult
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
+
+pytestmark = pytest.mark.integration
 
 
 # ─────────────────────────────────────────────────────────
@@ -80,12 +80,13 @@ class _StubPool:
     def get_passed_factors(self, island=None, limit=20):
         return []
 
-    def register_factor(self, report, verdict, risk_report, hypothesis: str = ""):
+    def register_factor(self, report, verdict, risk_report, hypothesis: str = "", note=None):
         self.calls.append({
             "report": report,
             "verdict": verdict,
             "risk_report": risk_report,
             "hypothesis": hypothesis,
+            "note": note,
         })
 
 
@@ -121,22 +122,29 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
     )
 
     # === Stage 3: prefilter_node ===
-    with patch("src.core.orchestrator.get_factor_pool") as mock_pool_factory:
+    capabilities = SimpleNamespace(
+        available_fields=("$close", "$volume"),
+        approved_operators=("Ref", "Mean"),
+    )
+
+    with patch("src.factor_pool.pool.get_factor_pool") as mock_pool_factory:
         mock_pool = MagicMock()
         mock_pool.get_island_factors.return_value = []
+        mock_pool.query_constraints.return_value = []
         mock_pool_factory.return_value = mock_pool
 
         # AlignmentChecker 的 LLM 调用 mock
         mock_llm = MagicMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-        with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
+        with patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm), \
+             patch("src.agents.prefilter.get_runtime_formula_capabilities", return_value=capabilities):
             stage3_result = prefilter_node(initial_state)
 
     state_after_prefilter = initial_state.model_copy(update=stage3_result)
 
-    # 无效公式应被过滤掉（至少保留 2 个有效 notes）
-    assert len(state_after_prefilter.approved_notes) >= 2, (
-        f"应至少有 2 个 approved notes，实际: {len(state_after_prefilter.approved_notes)}"
+    # 无效公式应被过滤掉，至少保留 1 个有效 note
+    assert len(state_after_prefilter.approved_notes) >= 1, (
+        f"应至少有 1 个 approved note，实际: {len(state_after_prefilter.approved_notes)}"
     )
     assert all(n.note_id != "momentum_003" for n in state_after_prefilter.approved_notes), (
         "无效公式的 note 不应通过 prefilter"
@@ -183,7 +191,6 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
 
     # === Stage 5c: report_node（mock StateStore）===
     db_path = tmp_path / "state_store.sqlite"
-    from src.control_plane.state_store import StateStore
     store = StateStore(db_path)
     run = store.create_run(mode="integration_test")
 

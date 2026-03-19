@@ -19,7 +19,7 @@ def pool(tmp_path):
 def _make_report(name="test_factor", formula="Mean($close, 5) / Ref($close, 5)",
                  island="momentum", sharpe=2.0, ic_mean=0.03, icir=0.4,
                  turnover_rate=20.0) -> BacktestReport:
-    # report.passed = execution succeeded (parse_success); verdict.overall_passed = met quality bar
+    # report.passed = quality outcome; execution_succeeded = parse/backtest success
     return BacktestReport(
         report_id=f"report-{name}",
         note_id=f"note-{name}",
@@ -35,7 +35,8 @@ def _make_report(name="test_factor", formula="Mean($close, 5) / Ref($close, 5)",
             icir=icir,
             turnover_rate=turnover_rate,
         ),
-        passed=True,  # execution succeeded; quality judgment lives in CriticVerdict
+        passed=True,
+        execution_succeeded=True,
         execution_time_seconds=1.0,
         qlib_output_raw="{}",
     )
@@ -244,4 +245,5 @@ class TestReads:
         assert meta["decision"] == "promote"
         assert meta["score"] == 0.92
         assert meta["coverage"] == 1.0
+        assert meta["execution_succeeded"] is True
         assert meta["economic_rationale"] == "资金流和惯性共同驱动。"

@@ -5,6 +5,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from src.core.env import load_dotenv_if_available
 from src.data_pipeline.datasets import DatasetFieldSpec, DatasetSpec
 
@@ -64,6 +66,22 @@ def canonical_universe_dirs(instrument_dirs: list[Path]) -> list[Path]:
     return universe or instrument_dirs
 
 
+def _read_day_bin_values(bin_path: Path) -> np.ndarray:
+    try:
+        with bin_path.open("rb") as handle:
+            header = handle.read(4)
+            if len(header) != 4:
+                return np.array([], dtype=np.float32)
+            return np.fromfile(handle, dtype=np.float32)
+    except OSError:
+        return np.array([], dtype=np.float32)
+
+
+def _bin_has_valid_values(bin_path: Path) -> bool:
+    values = _read_day_bin_values(bin_path)
+    return bool(values.size and np.isfinite(values).any())
+
+
 def count_feature_bins(features_dir: Path) -> tuple[int, Counter[str]]:
     if not features_dir.exists():
         return 0, Counter()
@@ -73,7 +91,8 @@ def count_feature_bins(features_dir: Path) -> tuple[int, Counter[str]]:
     counter: Counter[str] = Counter()
     for instrument_dir in universe_dirs:
         for bin_path in instrument_dir.glob("*.day.bin"):
-            counter[bin_path.name] += 1
+            if _bin_has_valid_values(bin_path):
+                counter[bin_path.name] += 1
     return len(universe_dirs), counter
 
 

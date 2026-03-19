@@ -2,7 +2,7 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-19
 
 > 创建：2026-03-18
 > 阶段：Phase 4A（数据上线）→ Phase 4B（受控实验）→ Phase 4C（MiroFish 接入 Go/No-Go）
@@ -11,7 +11,7 @@ Last Reviewed: 2026-03-18
 
 ## 背景
 
-Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O TypedDicts、405 smoke/unit 测试通过）。当前最大缺口是：
+Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O TypedDicts、当前 smoke/unit 基线 511 passed, 26 deselected）。当前最大缺口是：
 
 - `NARRATIVE_MINING` 子空间缺乏新闻/公告数据支撑
 - regime 特征层缺乏融资余额、市场宽度、涨停池等特征量（这些特征将通过 `FACTOR_ALGEBRA` 和 `NARRATIVE_MINING` 的 prompt context 注入，不作为独立子空间追踪）
@@ -97,7 +97,7 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 - `AgentState.backtest_reports: List[BacktestReport]`
 - `AgentState.critic_verdicts: List[CriticVerdict]`
 
-> **注意**：`AgentState.approved_notes` 是单轮数据。`loop_control_node` 在每轮结束时会清空该字段，因此不能依赖最终 state 做跨轮统计——必须从每轮 JSON 快照（`logs/rounds/`）中捕获各轮快照，而不能读取实验结束后的 state。
+> **注意**：`AgentState.approved_notes` 是单轮数据。`loop_control_node` 在每轮结束时会清空该字段，因此不能依赖最终 state 做跨轮统计——必须从每轮 JSON 快照（`data/experiment_runs/{run_id}/round_*.json`）中捕获各轮快照，而不能读取实验结束后的 state。
 
 ### 3.2 子空间覆盖度指标（每轮记录）
 
@@ -208,7 +208,7 @@ grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]" logs/phase4b_expe
 实验必须做到完全透明、全程可追溯。每轮产出的关键数据必须持久化，不能依赖日志解析。
 
 ### 每轮快照（必须实现）
-`loop_control_node` 重置 state 前，在 `logs/rounds/` 目录写入 JSON 快照：
+`loop_control_node` 重置 state 前，在 `data/experiment_runs/{run_id}/` 目录写入 JSON 快照：
 ```json
 {
   "round": 3,
@@ -238,7 +238,7 @@ grep 命令应使用：`grep -E "\[Stage 3\]|\[Stage 5\]|\[Loop Control\]"`
 ```bash
 # Step 1：确认环境和测试全部通过
 uv run pytest -q tests -m "smoke or unit"
-# 预期：405 passed
+# 预期：511 passed, 26 deselected
 
 # Step 2：确认 Phase 4A 前置项已验收
 # - RSS 源验证脚本通过

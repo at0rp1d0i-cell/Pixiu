@@ -20,9 +20,8 @@ _METRIC_TO_FAILURE_MODE: dict[str, FailureMode] = {
     "coverage": FailureMode.LOW_COVERAGE,
 }
 
-# These failure modes are always severity=hard
+# These failure modes are always severity=hard, except execution_error which is kept warning-only
 _HARD_FAILURE_MODES = {
-    FailureMode.EXECUTION_ERROR,
     FailureMode.HIGH_TURNOVER,
     FailureMode.OVERFITTING,
 }
@@ -100,6 +99,8 @@ class ConstraintExtractor:
 
     def _determine_severity(self, failure_mode: FailureMode, verdict: CriticVerdict) -> str:
         """判断约束严重程度：hard（prefilter 直接拒绝）或 warning（注入 prompt）。"""
+        if failure_mode == FailureMode.EXECUTION_ERROR:
+            return "warning"
         if failure_mode in _HARD_FAILURE_MODES:
             return "hard"
         failed_count = len([c for c in verdict.checks if not c.passed])

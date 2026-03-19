@@ -15,13 +15,13 @@ Last Reviewed: 2026-03-18
 
 ## 1. 职责
 
-在进入昂贵回测（Stage 4）之前，用三个串行过滤器筛选 `FactorResearchNote` 批次，只放行 Top K（默认 K=5）最有潜力的候选。
+在进入昂贵回测（Stage 4）之前，用五个串行过滤器筛选 `FactorResearchNote` 批次，只放行 Top K（默认 K=5）最有潜力的候选。
 
 **无回测，无 LLM（前两个过滤器），成本极低。**
 
 ---
 
-## 2. 三个过滤器
+## 2. 五个过滤器
 
 ### Filter A：Validator（A 股硬约束，已有，扩展）
 
@@ -34,6 +34,7 @@ Last Reviewed: 2026-03-18
 3. Log() 安全性：Log 参数必须保证 > 0（检查是否有 +1 保护）
 4. 括号匹配：所有 ([ 必须有对应 )]
 5. 算子白名单：表达式只能使用 approved_operators 列表中的算子
+6. 算子签名校验：至少校验常用算子的参数个数与基础类型
    approved_operators = [
        "Mean", "Std", "Var", "Max", "Min", "Sum",
        "Ref", "Delta", "Slope", "Rsquare", "Resi",
@@ -46,7 +47,7 @@ Last Reviewed: 2026-03-18
        "IdxMax", "IdxMin", "Comb", "Count", "Mad",
        "WMA", "EMA",
    ]
-6. 公式非空且长度合理（5 < len < 500 字符）
+7. 公式非空且长度合理（5 < len < 500 字符）
 ```
 
 **接口（更新为新 schema）**：
@@ -61,6 +62,16 @@ def validate(note: FactorResearchNote) -> tuple[bool, str]:
     formula = note.final_formula or note.proposed_formula
     # ... 规则检查逻辑 ...
 ```
+
+### Diagnostics
+
+Stage 3 会输出一个结构化 `prefilter_diagnostics`，至少包含：
+- `input_count`
+- `approved_count`
+- `rejection_counts_by_filter`
+- `sample_rejections`
+
+`sample_rejections` 只保留前几个拒绝样本，用于 round snapshot 和快速排障，不承载完整历史。
 
 ---
 
@@ -177,7 +188,7 @@ class AlignmentChecker:
 
 ---
 
-## 3. 三维过滤器的组合执行
+## 3. 五维过滤器的组合执行
 
 ```python
 # src/agents/prefilter.py

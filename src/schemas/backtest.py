@@ -54,7 +54,8 @@ class BacktestReport(PixiuBase):
 
     # 结果
     metrics: BacktestMetrics
-    passed: bool               # 是否通过 Critic 阈值
+    passed: bool               # 质量阈值是否通过（兼容旧调用点；执行是否成功见 execution_succeeded）
+    execution_succeeded: Optional[bool] = None  # 这次回测/解析是否真的成功
     status: Literal["success", "failed", "partial"] = "success"
     failure_stage: Optional[str] = None
     failure_reason: Optional[str] = None

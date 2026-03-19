@@ -246,6 +246,34 @@ class StateStore:
                 ),
             )
 
+    def pop_latest_human_decision(self, run_id: str) -> Optional[HumanDecisionRecord]:
+        """Return and clear the latest queued human decision for a run."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT run_id, action, created_at, version
+                FROM human_decision_records
+                WHERE run_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            conn.execute(
+                "DELETE FROM human_decision_records WHERE run_id = ?",
+                (run_id,),
+            )
+
+        return HumanDecisionRecord(
+            run_id=row["run_id"],
+            action=row["action"],
+            created_at=_dt(row["created_at"]),
+            version=row["version"],
+        )
+
     def get_latest_run(self) -> Optional[RunRecord]:
         with self._conn() as conn:
             row = conn.execute(

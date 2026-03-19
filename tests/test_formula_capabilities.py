@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from src.formula.capabilities import (
@@ -22,16 +24,24 @@ def _touch_bin(features_dir: Path, instrument: str, bin_name: str) -> None:
     (instrument_dir / bin_name).write_bytes(b"")
 
 
+def _write_day_bin(features_dir: Path, instrument: str, bin_name: str, values: list[float]) -> None:
+    instrument_dir = features_dir / instrument
+    instrument_dir.mkdir(parents=True, exist_ok=True)
+    with (instrument_dir / bin_name).open("wb") as handle:
+        handle.write(struct.pack("<I", 0))
+        handle.write(np.asarray(values, dtype=np.float32).astype("<f4").tobytes())
+
+
 def test_runtime_formula_capabilities_expose_fields_by_coverage(tmp_path: Path):
     features_dir = tmp_path / "features"
     for i in range(20):
         instrument = f"sh{i:06d}"
-        _touch_bin(features_dir, instrument, "close.day.bin")
-        _touch_bin(features_dir, instrument, "open.day.bin")
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "open.day.bin", [1.0])
         if i < 19:
-            _touch_bin(features_dir, instrument, "roe.day.bin")
+            _write_day_bin(features_dir, instrument, "roe.day.bin", [1.0])
         if i < 18:
-            _touch_bin(features_dir, instrument, "pb.day.bin")
+            _write_day_bin(features_dir, instrument, "pb.day.bin", [1.0])
 
     capabilities = get_runtime_formula_capabilities(
         provider_uri=tmp_path,
@@ -61,15 +71,15 @@ def test_runtime_formula_capabilities_anchor_coverage_to_price_universe(tmp_path
     features_dir = tmp_path / "features"
     for i in range(20):
         instrument = f"sh{i:06d}"
-        _touch_bin(features_dir, instrument, "close.day.bin")
-        _touch_bin(features_dir, instrument, "open.day.bin")
-        _touch_bin(features_dir, instrument, "roe.day.bin")
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "open.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "roe.day.bin", [1.0])
 
     # Extra directories with only experimental fields should not dilute
     # coverage for the canonical trading universe.
     for i in range(5):
         instrument = f"sz9{i:05d}"
-        _touch_bin(features_dir, instrument, "roe.day.bin")
+        _write_day_bin(features_dir, instrument, "roe.day.bin", [1.0])
 
     capabilities = get_runtime_formula_capabilities(
         provider_uri=tmp_path,
@@ -88,8 +98,8 @@ def test_runtime_formula_capabilities_resolve_qlib_data_dir_from_dotenv(
 ):
     qlib_dir = tmp_path / "custom_qlib"
     features_dir = qlib_dir / "features"
-    _touch_bin(features_dir, "sh000001", "close.day.bin")
-    _touch_bin(features_dir, "sh000001", "open.day.bin")
+    _write_day_bin(features_dir, "sh000001", "close.day.bin", [1.0])
+    _write_day_bin(features_dir, "sh000001", "open.day.bin", [1.0])
 
     monkeypatch.delenv("QLIB_DATA_DIR", raising=False)
 
@@ -116,3 +126,25 @@ def test_formula_operator_specs_use_canonical_non_future_examples(tmp_path: Path
     assert OPERATOR_SPECS_BY_NAME["Rank"].qlib_syntax == "Rank($field)"
     assert "Ref($field, -N)" not in operator_block
     assert "Ref($field, N)" in operator_block
+
+
+def test_runtime_formula_capabilities_ignore_all_nan_bins(tmp_path: Path):
+    features_dir = tmp_path / "features"
+    for i in range(20):
+        instrument = f"sh{i:06d}"
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "pb.day.bin", [np.nan])
+        _write_day_bin(features_dir, instrument, "pe_ttm.day.bin", [np.nan])
+        _write_day_bin(features_dir, instrument, "turnover_rate.day.bin", [np.nan])
+        _write_day_bin(features_dir, instrument, "float_mv.day.bin", [np.nan])
+
+    capabilities = get_runtime_formula_capabilities(
+        provider_uri=tmp_path,
+        min_coverage_ratio=0.95,
+    )
+
+    assert "$close" in capabilities.available_fields
+    assert "$pb" not in capabilities.available_fields
+    assert "$pe_ttm" not in capabilities.available_fields
+    assert "$turnover_rate" not in capabilities.available_fields
+    assert "$float_mv" not in capabilities.available_fields

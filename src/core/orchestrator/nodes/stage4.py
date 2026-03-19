@@ -83,6 +83,7 @@ def coder_node(state: AgentState) -> CoderOutput:
                     island=note.island,
                     formula=formula,
                     passed=False,
+                    execution_succeeded=False,
                     status="failed",
                     failure_stage="run",
                     failure_reason="orchestrator_execution_exception",

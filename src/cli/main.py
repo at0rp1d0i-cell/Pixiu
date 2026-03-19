@@ -12,8 +12,6 @@ Typer + Rich 命令行界面：启动系统、审批因子、查看状态
   pixiu report  ← 查看最新 CIO 报告
 """
 import asyncio
-import os
-import sys
 from pathlib import Path
 
 import typer
@@ -140,8 +138,8 @@ def factors(
 @app.command()
 def approve():
     """批准当前 CIO 报告，系统继续运行。"""
-    _inject_human_decision("approve")
-    console.print("[bold green]✅ 已批准，系统继续运行[/bold green]")
+    if _inject_human_decision("approve"):
+        console.print("[bold green]✅ 已批准，系统继续运行[/bold green]")
 
 
 @app.command()
@@ -149,15 +147,15 @@ def redirect(
     island: str = typer.Argument(..., help="切换到的 Island（如 momentum, volatility 等）"),
 ):
     """将下轮研究重点切换到指定 Island。"""
-    _inject_human_decision(f"redirect:{island}")
-    console.print(f"[bold blue]➡️  已重定向至 [yellow]{island}[/yellow] Island[/bold blue]")
+    if _inject_human_decision(f"redirect:{island}"):
+        console.print(f"[bold blue]➡️  已重定向至 [yellow]{island}[/yellow] Island[/bold blue]")
 
 
 @app.command()
 def stop():
     """停止进化循环（当前轮完成后退出）。"""
-    _inject_human_decision("stop")
-    console.print("[bold red]⏹  系统将在当前轮次完成后停止[/bold red]")
+    if _inject_human_decision("stop"):
+        console.print("[bold red]⏹  系统将在当前轮次完成后停止[/bold red]")
 
 
 @app.command()
@@ -181,31 +179,29 @@ def report():
     console.print(Markdown(report_path.read_text(encoding="utf-8")))
 
 
-def _inject_human_decision(decision: str):
-    """将 human_decision 注入 LangGraph checkpoint。"""
+def _inject_human_decision(decision: str) -> bool:
+    """向 control plane 追加 human_decision，供 human_gate 消费。"""
     try:
         store = _get_state_store()
         run = store.get_latest_run()
-        if run is not None:
-            from src.schemas.control_plane import HumanDecisionRecord
+        if run is None:
+            console.print("[red]⚠️  无正在运行的实验[/red]")
+            return False
 
-            store.append_human_decision(
-                HumanDecisionRecord(run_id=run.run_id, action=decision)
-            )
+        snapshot = store.get_snapshot(run.run_id)
+        if snapshot is None or not snapshot.awaiting_human_approval:
+            console.print("[red]⚠️  当前没有等待审批的实验[/red]")
+            return False
 
-        from src.core.orchestrator import get_graph, get_latest_config
-        graph = get_graph()
-        config = get_latest_config()
-        if not config:
-            console.print("[red]⚠️  无正在运行的实验（找不到 LangGraph config）[/red]")
-            return
-        graph.update_state(
-            config,
-            {"human_decision": decision, "awaiting_human_approval": False},
-            as_node="human_gate",
+        from src.schemas.control_plane import HumanDecisionRecord
+
+        store.append_human_decision(
+            HumanDecisionRecord(run_id=run.run_id, action=decision)
         )
+        return True
     except Exception as e:
         console.print(f"[red]注入失败: {e}[/red]")
+        return False
 
 
 def main():

@@ -6,7 +6,7 @@ using ``from src.core.orchestrator import X`` continue to work unchanged.
 Mutable module-level state (_current_run_id, _scheduler) lives here so that
 test monkeypatching targets the correct namespace.
 """
-import asyncio
+# ruff: noqa: E402
 import logging
 import os
 from datetime import UTC, datetime
@@ -118,7 +118,7 @@ def _write_snapshot(state: AgentState, stage: str, awaiting_human_approval: Opti
             updated_at=datetime.now(UTC),
         )
         get_state_store().write_snapshot(snapshot)
-        _update_run_record(stage)
+        _update_run_record(stage, current_round=state.current_round)
     except Exception as e:
         logger.warning("[ControlPlane] 写 snapshot 失败: %s", e)
 

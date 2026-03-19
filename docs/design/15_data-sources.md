@@ -41,7 +41,7 @@ Pixiu 的数据层要同时满足两件事：
 当前稳定字段：
 
 ```text
-$open, $high, $low, $close, $volume, $factor, $amount
+$open, $high, $low, $close, $volume, $factor, $amount, $vwap, $roe, $pb, $pe_ttm, $turnover_rate, $float_mv
 ```
 
 ### Layer 2: Agent 上下文层
@@ -65,8 +65,7 @@ $open, $high, $low, $close, $volume, $factor, $amount
 
 当前状态：
 
-- 部分 staging 已存在
-- `fina_indicator` / `daily_basic` → Qlib bins 正在收口
+- `fina_indicator` / `daily_basic` 已进入 Qlib bins 和 runtime capability
 - `moneyflow_hsgt` 已进入结构化 staging，优先服务 Stage 1 / northbound 上下文
 - `moneyflow` / `stk_limit` staging 下载链已就位，但尚未进入 runtime capability
 - 运行时字段可用性不再只看设计文档，而要看本地 `qlib_bin/features/**` 的真实覆盖率
@@ -105,8 +104,8 @@ $open, $high, $low, $close, $volume, $factor, $amount
 | momentum | 价量完整 | 当前最稳定 |
 | volatility | 价量完整 | 当前最稳定 |
 | volume | 价量完整 | 当前最稳定 |
-| northbound | 价量代理 | 更丰富特征仍待补 |
-| valuation | 价格均值回归代理 | 基本面入库后会明显增强 |
+| northbound | 价量 + moneyflow_hsgt | 更丰富资金流特征仍可继续扩展 |
+| valuation | 价量 + roe / daily_basic 扩展字段 | 已比纯价格均值回归代理更强 |
 | sentiment / narrative | 上下文有限 | 新闻、公告、叙事数据仍待扩展 |
 
 当前更优先补的是 `moneyflow_hsgt` 这类连续日级资金流，以及 `moneyflow` / `stk_limit` 这类 A 股特有日频结构化信号，而不是依赖已断档的 `hk_hold` 增量。

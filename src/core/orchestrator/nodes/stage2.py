@@ -1,17 +1,11 @@
 """Stage 2: Hypothesis generation, synthesis, and note refinement nodes."""
 import asyncio
 import logging
-import os
-from typing import List
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import HypothesisGenOutput, SynthesisOutput, NoteRefinementOutput
 
 logger = logging.getLogger(__name__)
-
-ACTIVE_ISLANDS: List[str] = os.getenv(
-    "ACTIVE_ISLANDS", "momentum,northbound,valuation,volatility,volume,sentiment"
-).split(",")
 
 
 def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
@@ -23,7 +17,7 @@ def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     logger.info("[Stage 2] 并行生成假设... (Round %d)", state.current_round)
 
     scheduler = get_scheduler()
-    active = getattr(scheduler, "get_active_islands", lambda: ACTIVE_ISLANDS)()
+    active = getattr(scheduler, "get_active_islands", lambda: _orch_s2.ACTIVE_ISLANDS)()
 
     enriched = dict(state)
     enriched["active_islands"] = active

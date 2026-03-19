@@ -12,10 +12,6 @@
   - 当前 Phase 4B 受控实验计划
 - `2026-03-18-mirofish-integration-analysis.md`
   - 当前 MiroFish Go/No-Go 决策参考（更像决策备忘，不是实施计划）
-- `2026-03-19-data-capability-alignment-design.md`
-  - 当前数据能力收口设计
-- `2026-03-19-data-capability-alignment-implementation.md`
-  - 当前数据能力收口实施计划
 - `2026-03-19-refactor-roadmap.md`
   - 三个独立 architecture epic 的总路线图
 - `2026-03-19-data-capability-platform-refactor-design.md`
@@ -28,6 +24,8 @@
   - orchestrator 包边界重构设计
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
+
+已被 `refactor-roadmap` / `data-capability-platform-refactor-*` 吸收的旧 data-capability 对齐稿，已从 active 列表移除，当前仅保留历史上下文用途。
 
 ## 已归档
 

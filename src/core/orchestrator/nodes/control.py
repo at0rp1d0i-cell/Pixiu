@@ -1,5 +1,7 @@
 """Control nodes: human gate and loop control."""
 import logging
+import os
+import time
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import HumanGateOutput, LoopControlOutput
@@ -9,19 +11,70 @@ logger = logging.getLogger(__name__)
 
 
 def human_gate_node(state: AgentState) -> HumanGateOutput:
-    """Human Gate: 此节点本身不执行任何逻辑。
+    """Human Gate: 通过 control plane 轮询人类决策，支持跨进程审批。"""
+    import src.core.orchestrator as _orch
 
-    LangGraph 在 interrupt_before=[NODE_HUMAN_GATE] 配置下，
-    会在进入此节点前暂停，等待外部 .update_state() 注入 human_decision。
+    run_id = _orch._ensure_run_record()
+    if not run_id:
+        logger.warning("[Human Gate] 缺少 run_id，默认批准继续")
+        return {"human_decision": "approve", "awaiting_human_approval": False}
 
-    外部（CLI）调用方式：
-        graph.update_state(
-            config,
-            {"human_decision": "approve", "awaiting_human_approval": False},
-            as_node=NODE_HUMAN_GATE
-        )
-    """
-    return {}  # pass-through，路由在 route_after_human 中处理
+    store = _orch.get_state_store()
+    poll_interval = float(os.getenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "1.0"))
+    timeout_sec = float(os.getenv("PIXIU_HUMAN_GATE_TIMEOUT_SEC", "0"))
+    started_at = time.monotonic()
+
+    logger.info("[Human Gate] 等待 run=%s 的人类决策...", run_id)
+    while True:
+        decision = store.pop_latest_human_decision(run_id)
+        if decision is not None:
+            logger.info("[Human Gate] 收到决策: %s", decision.action)
+            next_state = state.model_copy(
+                update={
+                    "human_decision": decision.action,
+                    "awaiting_human_approval": False,
+                }
+            )
+            if decision.action == "stop":
+                _orch._update_run_record(
+                    _orch.NODE_HUMAN_GATE,
+                    status="stopped",
+                    current_round=state.current_round,
+                )
+            else:
+                _orch._update_run_record(
+                    _orch.NODE_HUMAN_GATE,
+                    status="running",
+                    current_round=state.current_round,
+                )
+            _orch._write_snapshot(
+                next_state,
+                _orch.NODE_HUMAN_GATE,
+                awaiting_human_approval=False,
+            )
+            return {
+                "human_decision": decision.action,
+                "awaiting_human_approval": False,
+            }
+
+        if timeout_sec > 0 and (time.monotonic() - started_at) >= timeout_sec:
+            logger.warning("[Human Gate] 等待超时，默认 stop")
+            next_state = state.model_copy(
+                update={"human_decision": "stop", "awaiting_human_approval": False}
+            )
+            _orch._update_run_record(
+                _orch.NODE_HUMAN_GATE,
+                status="stopped",
+                current_round=state.current_round,
+            )
+            _orch._write_snapshot(
+                next_state,
+                _orch.NODE_HUMAN_GATE,
+                awaiting_human_approval=False,
+            )
+            return {"human_decision": "stop", "awaiting_human_approval": False}
+
+        time.sleep(poll_interval)
 
 
 def loop_control_node(state: AgentState) -> LoopControlOutput:
@@ -110,6 +163,12 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
         )
     except Exception as _snap_exc:
         logger.warning("[Loop Control] 快照写入异常: %s", _snap_exc)
+
+    _orch._update_run_record(
+        _orch.NODE_LOOP_CONTROL,
+        status="running",
+        current_round=next_round,
+    )
 
     return {
         "current_round": next_round,

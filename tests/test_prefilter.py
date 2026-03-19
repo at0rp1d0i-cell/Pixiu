@@ -87,6 +87,42 @@ def test_validator_invalid_operator():
     assert "算子" in reason
 
 
+def test_validator_rejects_missing_mean_window():
+    """Mean() 少参数时应被拒绝"""
+    note = _make_note(proposed_formula="Mean($close)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "Mean" in reason or "参数数量" in reason
+
+
+def test_validator_rejects_corr_with_wrong_arity():
+    """Corr() 少参数时应被拒绝"""
+    note = _make_note(proposed_formula="Corr($close, 5)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "Corr" in reason or "参数数量" in reason
+
+
+def test_validator_rejects_ref_with_non_numeric_offset():
+    """Ref() 第二个参数必须是正整数"""
+    note = _make_note(proposed_formula="Ref($close, foo)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "Ref" in reason or "标识符" in reason
+
+
+def test_validator_rejects_if_with_wrong_arity():
+    """If() 少参数时应被拒绝"""
+    note = _make_note(proposed_formula="If($close)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "If" in reason or "参数数量" in reason
+
+
 def test_validator_log_without_protection():
     """Log() 参数未添加 +1 保护应被拒绝"""
     note = _make_note(proposed_formula="Log($close / Ref($close, 5))")
@@ -94,6 +130,13 @@ def test_validator_log_without_protection():
     passed, reason = v.validate(note)
     assert not passed
     assert "Log" in reason
+
+
+def test_validator_accepts_corr_with_window():
+    note = _make_note(proposed_formula="Corr($close, $volume, 30)")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert passed, reason
 
 
 def test_validator_accepts_runtime_available_experimental_field():

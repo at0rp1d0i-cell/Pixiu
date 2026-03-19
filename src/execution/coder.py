@@ -4,8 +4,6 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from src.execution.docker_runner import DockerRunner
 from src.schemas.backtest import (
     ArtifactRefs,
@@ -16,6 +14,8 @@ from src.schemas.backtest import (
 )
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
+
+logger = logging.getLogger(__name__)
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "qlib_backtest.py.tpl"
 ARTIFACTS_DIR = Path(__file__).resolve().parents[2] / "data" / "artifacts"
@@ -217,6 +217,7 @@ class Coder:
             formula=formula,
             metrics=metrics,
             passed=passed,
+            execution_succeeded=True,
             status="success" if error_message is None else "failed",
             failure_stage=None if error_message is None else "run",
             failure_reason=None if error_message is None else "backtest_error",
@@ -261,6 +262,7 @@ class Coder:
                 coverage=0.0,
             ),
             passed=False,
+            execution_succeeded=False,
             status="failed",
             failure_stage=failure_stage,
             failure_reason=failure_reason,
