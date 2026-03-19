@@ -118,3 +118,7 @@ $open, $high, $low, $close, $volume, $factor, $amount
 对应文档：
 
 - `docs/futures/data-source-expansion-roadmap.md`
+
+如果你要实际准备本地数据，而不是只看设计边界：
+
+- `docs/reference/data-download-guide.md`

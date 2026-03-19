@@ -17,6 +17,8 @@
   - LLM 量化研究相关的项目、论文和数据源索引
 - `a_share_quant_frameworks.md`
   - A 股开源量化基础设施背景调研
+- `data-download-guide.md`
+  - Pixiu 本地数据下载、转换、增量更新和验证的执行指南
 - `qlib_data_pipeline_best_practices.md`
   - Qlib 日线数据管线的关键约束与清洗实践
 
