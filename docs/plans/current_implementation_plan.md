@@ -76,6 +76,17 @@ Last Reviewed: 2026-03-19
 - [ ] `moneyflow` / `stk_limit` 的真实下载与后续接入顺序仍待执行
 - [ ] 再次运行 Phase 4B 实验前，需确认扩展字段覆盖率与 Docker Stage 4 blocker 都已收口
 
+### Phase H: 独立重构 Epic（待启动）
+
+- [ ] `Data Capability Platform Refactor`
+  - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`
+- [ ] `FactorPool Boundary Refactor`
+  - 见 `docs/plans/2026-03-19-factor-pool-boundary-refactor-design.md`
+- [ ] `Orchestrator Boundary Refactor`
+  - 见 `docs/plans/2026-03-19-orchestrator-boundary-refactor-design.md`
+- [ ] 总顺序与依赖控制
+  - 见 `docs/plans/2026-03-19-refactor-roadmap.md`
+
 ### Phase 2: Hypothesis Expansion Engine ✅
 
 - [x] FailureConstraint schema（9 种 FailureMode：N_SHORT/N_MID/N_LONG/O_SHORT/O_MID/O_LONG/DRIFT/REGIME_MISMATCH/CONSTRAINT_VIOLATION）

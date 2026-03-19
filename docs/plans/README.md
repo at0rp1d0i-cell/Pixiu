@@ -16,6 +16,14 @@
   - 当前数据能力收口设计
 - `2026-03-19-data-capability-alignment-implementation.md`
   - 当前数据能力收口实施计划
+- `2026-03-19-refactor-roadmap.md`
+  - 三个独立 architecture epic 的总路线图
+- `2026-03-19-data-capability-platform-refactor-design.md`
+  - 数据能力平台化重构设计
+- `2026-03-19-factor-pool-boundary-refactor-design.md`
+  - FactorPool 边界拆分设计
+- `2026-03-19-orchestrator-boundary-refactor-design.md`
+  - orchestrator 包边界重构设计
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 
