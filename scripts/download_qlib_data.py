@@ -337,6 +337,7 @@ def build_bin(progress: dict) -> None:
 
             date_to_row = dict(zip(df["date"], df.index))
 
+            col_arrays: dict[str, np.ndarray] = {}
             for col in ["open", "high", "low", "close", "volume", "amount"]:
                 if col not in df.columns:
                     continue
@@ -349,7 +350,20 @@ def build_bin(progress: dict) -> None:
                             arr[day_idx] = float(val)
                         except (ValueError, TypeError):
                             pass
+                col_arrays[col] = arr
                 _write_bin(stock_dir / f"{col}.day.bin", start_idx, arr)
+
+            # vwap = amount / volume  (NaN where volume == 0)
+            if "amount" in col_arrays and "volume" in col_arrays:
+                amount_arr = col_arrays["amount"]
+                volume_arr = col_arrays["volume"]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    vwap_arr = np.where(
+                        volume_arr == 0,
+                        np.nan,
+                        amount_arr / volume_arr,
+                    ).astype(np.float32)
+                _write_bin(stock_dir / "vwap.day.bin", start_idx, vwap_arr)
 
             # factor (复权因子) — set to 1.0 placeholder if not present
             factor_path = stock_dir / "factor.day.bin"

@@ -209,12 +209,13 @@ class _StubPoolWriteback:
     def get_passed_factors(self, island=None, limit=20):
         return []
 
-    def register_factor(self, report, verdict, risk_report, hypothesis: str = ""):
+    def register_factor(self, report, verdict, risk_report, hypothesis: str = "", note=None):
         self.calls.append({
             "report": report,
             "verdict": verdict,
             "risk_report": risk_report,
             "hypothesis": hypothesis,
+            "note": note,
         })
 
 

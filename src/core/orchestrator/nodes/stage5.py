@@ -58,6 +58,7 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
                         verdict=verdict,
                         risk_report=risk_report,
                         hypothesis=hypothesis,
+                        note=note,
                     )
                 except Exception as e:
                     logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
