@@ -131,9 +131,6 @@ class SubspaceRegistry(PixiuBase):
             for spec in BASE_FIELD_SPECS + EXPERIMENTAL_FIELD_SPECS
             if spec.formula_name in available_fields
         ]
-        if not available_field_specs:
-            available_field_specs = list(BASE_FIELD_SPECS)
-            available_fields = {spec.formula_name for spec in available_field_specs}
 
         configs = {
             "factor_algebra": SubspaceConfig(

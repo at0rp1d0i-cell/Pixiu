@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 pytestmark = pytest.mark.unit
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.factor_pool.pool import FactorPool, _InMemoryClient
 from src.factor_pool.scheduler import IslandScheduler, VIRGIN_ISLAND_SHARPE, T_INIT, T_MIN, RESET_MIN_RUNS
@@ -45,7 +45,11 @@ from src.scheduling.subspace_context import (
     build_narrative_mining_context,
     build_subspace_context,
 )
-from src.formula.capabilities import get_runtime_formula_capabilities
+from src.formula.capabilities import (
+    BASE_FIELD_SPECS,
+    EXPERIMENTAL_FIELD_SPECS,
+    get_runtime_formula_capabilities,
+)
 
 
 @pytest.fixture()
@@ -647,6 +651,29 @@ class TestSubspaceRegistryDefaults:
             assert c.category
             assert len(c.extraction_targets) > 0
             assert len(c.example_patterns) > 0
+
+
+def test_subspace_registry_does_not_reintroduce_base_field_fallback_when_capabilities_empty():
+    from src.formula.capabilities import FormulaCapabilities
+
+    empty_caps = FormulaCapabilities(
+        field_status={},
+        approved_operators=tuple(),
+        total_instruments=0,
+        min_coverage_ratio=0.95,
+    )
+
+    for spec in BASE_FIELD_SPECS + EXPERIMENTAL_FIELD_SPECS:
+        empty_caps.field_status[spec.formula_name] = MagicMock(available=False)
+
+    with patch("src.schemas.exploration.get_runtime_formula_capabilities", return_value=empty_caps):
+        registry = SubspaceRegistry.get_default_registry()
+
+    assert registry.configs["factor_algebra"].allowed_primitives == []
+    assert not any(
+        p.category in {PrimitiveCategory.PRICE_VOLUME, PrimitiveCategory.FUNDAMENTAL}
+        for p in registry.primitives
+    )
 
 
 @pytest.mark.smoke

@@ -30,9 +30,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.core.env import load_dotenv_if_available
+
+load_dotenv_if_available()
+
 # ── Config ──────────────────────────────────────────────────────────────────
 
-PROJECT_ROOT   = Path(__file__).resolve().parents[1]
 DATA_DIR       = PROJECT_ROOT / "data"
 STAGING_DIR    = DATA_DIR / "fundamental_staging" / "fina_indicator"
 _qlib_env = os.getenv("QLIB_DATA_DIR")
@@ -91,14 +98,15 @@ def _write_bin(path: Path, start_idx: int, values: np.ndarray) -> None:
 
 # ── Calendar ─────────────────────────────────────────────────────────────────
 
-def read_calendar() -> list[str]:
-    """Return sorted list of trading days as YYYY-MM-DD strings."""
-    return [d.strip() for d in CALENDAR_FILE.read_text().splitlines() if d.strip()]
+def read_calendar() -> list[pd.Timestamp]:
+    """Return sorted list of trading days as pandas timestamps."""
+    days = [d.strip() for d in CALENDAR_FILE.read_text().splitlines() if d.strip()]
+    return list(pd.to_datetime(days, format="%Y-%m-%d"))
 
 
 # ── PIT forward-fill ─────────────────────────────────────────────────────────
 
-def pit_fill(df: pd.DataFrame, calendar: list[str]) -> pd.DataFrame:
+def pit_fill(df: pd.DataFrame, calendar: list[pd.Timestamp]) -> pd.DataFrame:
     """
     Forward-fill fina_indicator records onto the full trading calendar
     using Point-in-Time semantics.
@@ -111,24 +119,27 @@ def pit_fill(df: pd.DataFrame, calendar: list[str]) -> pd.DataFrame:
 
     Returns a DataFrame indexed by calendar date with one row per trading day.
     """
-    # Normalise ann_date: YYYYMMDD → YYYY-MM-DD
+    # Normalise ann_date to datetime for merge_asof.
     df = df.copy()
     df["ann_date"] = pd.to_datetime(df["ann_date"], format="%Y%m%d", errors="coerce")
     df = df.dropna(subset=["ann_date"])
-    df["ann_date"] = df["ann_date"].dt.strftime("%Y-%m-%d")
 
-    # Keep only fields we care about (plus ann_date key)
-    keep_cols = ["ann_date"] + [c for c in FIELDS if c in df.columns]
+    if "end_date" in df.columns:
+        df["end_date"] = pd.to_datetime(df["end_date"], format="%Y%m%d", errors="coerce")
+
+    # Keep only fields we care about plus PIT ordering keys.
+    keep_cols = ["ann_date"] + [c for c in ("end_date",) if c in df.columns] + [c for c in FIELDS if c in df.columns]
     df = df[keep_cols].copy()
 
     # When multiple records share the same ann_date, keep the most recent
-    # end_date (already sorted, or just keep last occurrence per ann_date)
-    df = df.sort_values("ann_date", kind="stable")
+    # end_date, which is typically the more complete/latest filing for that day.
+    sort_keys = ["ann_date"] + (["end_date"] if "end_date" in df.columns else [])
+    df = df.sort_values(sort_keys, kind="stable")
     df = df.drop_duplicates(subset=["ann_date"], keep="last")
     df = df.reset_index(drop=True)
 
     # Build a calendar DataFrame to merge into
-    cal_df = pd.DataFrame({"date": calendar})
+    cal_df = pd.DataFrame({"date": pd.to_datetime(calendar)})
 
     # merge_asof: for each row in cal_df, find the last row in df
     # where ann_date <= date  (both must be sorted ascending)

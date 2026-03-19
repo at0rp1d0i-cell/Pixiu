@@ -78,7 +78,7 @@
 - A 股估值因子的 IC 通常在 0.02-0.04 之间，不要期望太高
 - 估值因子是典型的**慢因子**，持仓周期建议 ≥ 20 日
 - 避免在行业内部做估值排名时混合周期股和成长股
-- 注意 FUNDAMENTAL_FIELDS_ENABLED 环境变量：如果为 false，不要假设基本面字段可用
+- 不要假设 `$pb/$pe_ttm/$float_mv/$turnover_rate` 一定可用；是否可用以当前 prompt 注入的 runtime 可用字段列表为准
 
 ---
 

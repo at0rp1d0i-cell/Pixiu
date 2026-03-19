@@ -5,6 +5,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.core.env import load_dotenv_if_available
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 DEFAULT_MIN_COVERAGE_RATIO = 0.95
@@ -100,6 +102,8 @@ class FormulaCapabilities:
 
 
 def _resolve_qlib_dir(provider_uri: str | Path | None = None) -> Path:
+    load_dotenv_if_available()
+
     if provider_uri is not None:
         return Path(provider_uri)
 
@@ -125,16 +129,22 @@ def _read_min_coverage_ratio() -> float:
     return min(max(value, 0.0), 1.0)
 
 
+def _canonical_universe_dirs(instrument_dirs: list[Path]) -> list[Path]:
+    universe = [path for path in instrument_dirs if (path / "close.day.bin").exists()]
+    return universe or instrument_dirs
+
+
 def _count_feature_bins(features_dir: Path) -> tuple[int, Counter[str]]:
     if not features_dir.exists():
         return 0, Counter()
 
     instrument_dirs = [path for path in features_dir.iterdir() if path.is_dir()]
+    universe_dirs = _canonical_universe_dirs(instrument_dirs)
     counter: Counter[str] = Counter()
-    for instrument_dir in instrument_dirs:
+    for instrument_dir in universe_dirs:
         for bin_path in instrument_dir.glob("*.day.bin"):
             counter[bin_path.name] += 1
-    return len(instrument_dirs), counter
+    return len(universe_dirs), counter
 
 
 def get_runtime_formula_capabilities(

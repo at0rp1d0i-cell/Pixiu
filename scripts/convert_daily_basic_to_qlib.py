@@ -19,14 +19,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.data_pipeline.daily_basic import (
     DAILY_BASIC_STAGING_DIR,
     QLIB_DAILY_BASIC_FIELDS,
     build_daily_basic_feature_arrays,
     ts_code_to_qlib,
 )
+from src.core.env import load_dotenv_if_available
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv_if_available()
+
 _qlib_env = os.getenv("QLIB_DATA_DIR")
 if _qlib_env:
     QLIB_DIR = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env

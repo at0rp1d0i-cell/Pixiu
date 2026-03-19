@@ -47,13 +47,16 @@ from pathlib import Path
 import pandas as pd
 import tushare as ts
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.core.env import load_dotenv_if_available
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
 load_dotenv_if_available()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 

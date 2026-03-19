@@ -215,6 +215,50 @@ def test_alpha_researcher_system_prompt_injects_runtime_available_fields():
     assert "$roe" in system_message.content
 
 
+def test_alpha_researcher_composed_prompt_avoids_legacy_skill_contracts():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.extend(messages)
+        resp = MagicMock()
+        resp.content = '''{
+            "notes": [{
+                "note_id": "x", "island": "valuation", "iteration": 2,
+                "hypothesis": "test", "economic_intuition": "test",
+                "proposed_formula": "Mean($roe, 5)",
+                "risk_factors": [], "market_context_date": "2026-03-19"
+            }],
+            "generation_rationale": "test"
+        }'''
+        return resp
+
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch('src.agents.researcher.format_available_fields_for_prompt', return_value="  基础价量字段：$close\n  扩展实验字段：$roe"):
+            with patch('src.agents.researcher.get_runtime_formula_capabilities', return_value=MagicMock()):
+                with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+                    researcher = AlphaResearcher(island="valuation")
+                    asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=2,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert captured_messages
+    system_message = captured_messages[0]
+    assert "$roe" in system_message.content
+    assert "FUNDAMENTAL_FIELDS_ENABLED" not in system_message.content
+    assert "CSRank" not in system_message.content
+    assert "get_island_best_factors" not in system_message.content
+    assert "AKShare 工具" not in system_message.content
+
+
 def test_hypothesis_gen_node_note_count():
     """hypothesis_gen_node 的 research_notes 数量应 >= active_islands × 2"""
     from src.agents.researcher import hypothesis_gen_node

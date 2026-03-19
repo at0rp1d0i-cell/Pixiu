@@ -37,6 +37,10 @@ from pathlib import Path
 
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.core.env import load_dotenv_if_available
 
 load_dotenv_if_available()
@@ -58,7 +62,6 @@ logger = logging.getLogger("margin_downloader")
 
 # ── Config ───────────────────────────────────────────────────────────────────────
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR   = PROJECT_ROOT / "data" / "fundamental_staging" / "margin_history"
 OUTPUT_FILE  = OUTPUT_DIR / "margin_history.parquet"
 

@@ -21,6 +21,10 @@ from pathlib import Path
 import pandas as pd
 import tushare as ts
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.core.env import load_dotenv_if_available
 from src.data_pipeline.daily_basic import DAILY_BASIC_STAGING_DIR, get_daily_basic_field_string
 
@@ -39,7 +43,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("daily_basic_downloader")
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 PROGRESS_FILE = DATA_DIR / "daily_basic_download_progress.json"
 START_DATE = "20100101"
