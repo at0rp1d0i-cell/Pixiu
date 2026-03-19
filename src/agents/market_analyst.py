@@ -14,9 +14,9 @@ import re
 from datetime import date
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 
-from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, MarketRegime
+from src.llm.openai_compat import build_researcher_llm
+from src.schemas.market_context import MarketContextMemo, MarketRegime
 from src.market.regime_detector import RegimeDetector
 from src.schemas.stage_io import MarketContextOutput
 
@@ -28,6 +28,10 @@ MCP_SERVER_PATH = os.path.abspath(
 
 RSS_SERVER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "rss_server.py")
+)
+
+TUSHARE_SERVER_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "tushare_server.py")
 )
 
 MARKET_ANALYST_SYSTEM_PROMPT = """你是 Pixiu 的市场分析师，负责每日开盘前生成市场上下文备忘录。
@@ -84,12 +88,7 @@ class MarketAnalyst:
 
     def __init__(self, mcp_tools: list):
         self.tools = {t.name: t for t in mcp_tools}
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-            base_url=os.getenv("RESEARCHER_BASE_URL"),
-            api_key=os.getenv("RESEARCHER_API_KEY"),
-            temperature=0.1,
-        ).bind_tools(mcp_tools)
+        self.llm = build_researcher_llm(temperature=0.1).bind_tools(mcp_tools)
 
     @staticmethod
     def _extract_tool_text(result) -> str:
@@ -143,12 +142,7 @@ class MarketAnalyst:
             messages.append(HumanMessage(
                 content="工具调用轮次已用完。请根据已获取的数据，直接输出 MarketContextMemo JSON。"
             ))
-            llm_no_tools = ChatOpenAI(
-                model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-                base_url=os.getenv("RESEARCHER_BASE_URL"),
-                api_key=os.getenv("RESEARCHER_API_KEY"),
-                temperature=0.1,
-            )
+            llm_no_tools = build_researcher_llm(temperature=0.1)
             response = await llm_no_tools.ainvoke(messages)
 
         return self._parse_memo(response.content)
@@ -237,7 +231,7 @@ async def _market_context_async(state: dict) -> dict:
     active_islands = list(state.get("active_islands", ["momentum"]))
 
     try:
-        mcp_client = MultiServerMCPClient({
+        servers: dict = {
             "akshare": {
                 "command": "python",
                 "args": [mcp_server_path],
@@ -248,7 +242,14 @@ async def _market_context_async(state: dict) -> dict:
                 "args": [RSS_SERVER_PATH],
                 "transport": "stdio",
             },
-        })
+        }
+        if os.getenv("TUSHARE_TOKEN"):
+            servers["tushare"] = {
+                "command": "python",
+                "args": [TUSHARE_SERVER_PATH],
+                "transport": "stdio",
+            }
+        mcp_client = MultiServerMCPClient(servers)
         tools = await mcp_client.get_tools()
         analyst = MarketAnalyst(mcp_tools=tools)
         memo = await analyst.analyze()

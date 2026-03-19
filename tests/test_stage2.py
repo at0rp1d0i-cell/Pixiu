@@ -9,16 +9,17 @@ Sources:
   - tests/test_research_note_hypothesis_bridge.py
   - tests/test_stage2_hypothesis_output.py
 """
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import asyncio
+
 import pytest
-
-pytestmark = pytest.mark.unit
-
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch, ExplorationQuestion
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 from src.scheduling.subspace_scheduler import SubspaceScheduler
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────────────────
@@ -78,9 +79,10 @@ def test_alpha_researcher_returns_batch():
         "generation_rationale": "两种不同的动量机制：价格动量和量价动量"
     }'''
 
-    with patch('src.agents.researcher.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             researcher = AlphaResearcher(island="momentum")
             batch = asyncio.run(researcher.generate_batch(
@@ -117,9 +119,10 @@ def test_alpha_researcher_batch_diversity():
         "generation_rationale": "两种不同机制"
     }'''
 
-    with patch('src.agents.researcher.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             researcher = AlphaResearcher(island="momentum")
             batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
@@ -161,9 +164,10 @@ def test_alpha_researcher_with_feedback():
         pool_tags=[],
     )
 
-    with patch('src.agents.researcher.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             researcher = AlphaResearcher(island="momentum")
             batch = asyncio.run(researcher.generate_batch(
@@ -227,9 +231,10 @@ def test_batch_notes_carry_exploration_subspace():
         "generation_rationale": "测试子空间溯源"
     }'''
 
-    with patch('src.agents.researcher.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             researcher = AlphaResearcher(island="momentum")
             batch = asyncio.run(researcher.generate_batch(
@@ -804,7 +809,7 @@ def _make_note_for_output(island: str, suffix: str) -> FactorResearchNote:
         iteration=1,
         hypothesis=f"{island} 假设 {suffix}",
         economic_intuition=f"{island} 经济直觉 {suffix}",
-        proposed_formula=f"Ref($close, -5) / Ref($close, -20) - 1",
+        proposed_formula="Ref($close, -5) / Ref($close, -20) - 1",
         risk_factors=["市场反转"],
         market_context_date="2026-03-16",
         inspired_by=f"来源_{suffix}",

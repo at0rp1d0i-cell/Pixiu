@@ -5,17 +5,18 @@ Sources:
   - tests/test_market_context.py
   - tests/test_regime_detector.py
 """
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import asyncio
 import math
+
 import pytest
-
-pytestmark = pytest.mark.unit
-
-from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.schemas.market_context import MarketContextMemo, HistoricalInsight, MarketRegime
 from src.agents.literature_miner import LiteratureMiner
 from src.market.regime_detector import RegimeDetector, RegimeSignals
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────────────────
@@ -30,10 +31,11 @@ def test_market_analyst_empty_fallback():
     mock_response.tool_calls = []
     mock_response.content = '{"invalid": "json_no_schema_match"}'
 
-    with patch('src.agents.market_analyst.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.market_analyst.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.bind_tools = MagicMock(return_value=mock_chat)
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             analyst = MarketAnalyst(mcp_tools=[])
             memo = asyncio.run(analyst.analyze())
@@ -60,10 +62,11 @@ def test_market_analyst_valid_json_parsing():
         "raw_summary": "今日北向净流入12.5亿"
     }'''
 
-    with patch('src.agents.market_analyst.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.market_analyst.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.bind_tools = MagicMock(return_value=mock_chat)
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             analyst = MarketAnalyst(mcp_tools=[])
             memo = asyncio.run(analyst.analyze())
@@ -72,6 +75,33 @@ def test_market_analyst_valid_json_parsing():
     assert "momentum" in memo.suggested_islands
     assert memo.northbound is not None
     assert memo.northbound.net_buy_bn == 12.5
+
+
+def test_market_analyst_falls_back_to_openai_env():
+    """当 RESEARCHER_* 未设置时，Stage 1 应回退到 OPENAI_* 配置。"""
+    from src.agents.market_analyst import MarketAnalyst
+
+    with patch('src.agents.market_analyst.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+        mock_builder.return_value = mock_chat
+        MarketAnalyst(mcp_tools=[])
+
+    mock_builder.assert_called_once_with(temperature=0.1)
+
+
+def test_market_analyst_loads_dotenv_before_llm_init():
+    """Stage 1 应通过共享 helper 初始化 LLM。"""
+    from src.agents.market_analyst import MarketAnalyst
+
+    with patch('src.agents.market_analyst.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {}, clear=True):
+            MarketAnalyst(mcp_tools=[])
+
+    mock_builder.assert_called_once()
 
 
 # ─────────────────────────────────────────────────────────
@@ -476,9 +506,10 @@ def test_prefilter_filter_batch_regime_param():
     mock_response = MagicMock()
     mock_response.content = '{"aligned": true, "reason": "一致"}'
 
-    with patch("src.agents.prefilter.ChatOpenAI") as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch("src.agents.prefilter.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
             pf = PreFilter(factor_pool=mock_pool)
             approved, filtered = asyncio.run(

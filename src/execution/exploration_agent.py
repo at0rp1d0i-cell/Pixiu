@@ -1,11 +1,10 @@
 import uuid
-import os
 import json
 import re
-from langchain_openai import ChatOpenAI
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion
-from src.schemas.exploration import ExplorationRequest, ExplorationResult
+from src.schemas.exploration import ExplorationResult
 from src.execution.docker_runner import DockerRunner
+from src.llm.openai_compat import build_researcher_llm
 
 EXPLORATION_SYSTEM_PROMPT = """你是一个量化数据分析师，专门用 Python 探索 A 股市场数据。
 你的工作是回答研究员的探索性问题，帮助他们验证假设。
@@ -28,13 +27,7 @@ print("EXPLORATION_RESULT_JSON:" + json.dumps({"findings": "...", "key_statistic
 
 class ExplorationAgent:
     def __init__(self):
-        # Fallback to general openai keys if specific researcher keys are missing
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", os.getenv("OPENAI_MODEL", "deepseek-chat")),
-            base_url=os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE")),
-            api_key=os.getenv("RESEARCHER_API_KEY", os.getenv("OPENAI_API_KEY")),
-            temperature=0.3,  # 低温度，代码生成要精确
-        )
+        self.llm = build_researcher_llm(temperature=0.3)  # 低温度，代码生成要精确
         self.runner = DockerRunner()
 
     async def explore(

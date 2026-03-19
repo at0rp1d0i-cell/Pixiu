@@ -20,25 +20,14 @@ import re
 from typing import Optional
 
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
+from src.llm.openai_compat import build_researcher_llm
 from src.schemas.stage_io import PrefilterOutput
 
 logger = logging.getLogger(__name__)
-
-
-def _load_dotenv_if_available():
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
-
-
-_load_dotenv_if_available()
 
 
 # ─────────────────────────────────────────────────────────
@@ -202,10 +191,7 @@ class AlignmentChecker:
     """
 
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-            base_url=os.getenv("RESEARCHER_BASE_URL"),
-            api_key=os.getenv("RESEARCHER_API_KEY"),
+        self.llm = build_researcher_llm(
             temperature=0,
             max_tokens=200,  # 输出很短
         )

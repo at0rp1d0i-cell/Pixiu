@@ -28,6 +28,7 @@ dependencies = [
     "fredapi>=0.5.2",
     "yfinance>=1.2.0",
     "feedparser>=6.0",
+    "tushare>=1.4.25",
 ]
 
 [dependency-groups]

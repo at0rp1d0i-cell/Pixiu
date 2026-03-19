@@ -2,14 +2,15 @@
 Stage 3 PreFilter TDD Tests
 按照 `docs/design/stage-3-prefilter.md` 的测试要求编写。
 """
-import pytest
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-pytestmark = pytest.mark.unit
-from unittest.mock import patch, MagicMock, AsyncMock
+import asyncio
+import pytest
 
 from src.schemas.research_note import FactorResearchNote
 from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker, PreFilter
+
+pytestmark = pytest.mark.unit
 
 
 def _make_note(**kwargs) -> FactorResearchNote:
@@ -145,9 +146,10 @@ def test_alignment_checker_consistent():
     mock_response = MagicMock()
     mock_response.content = '{"aligned": true, "reason": "公式捕捉了价格动量"}'
 
-    with patch('src.agents.prefilter.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             checker = AlignmentChecker()
             note = _make_note()
@@ -158,9 +160,10 @@ def test_alignment_checker_consistent():
 
 def test_alignment_checker_failure_graceful():
     """AlignmentChecker LLM 调用失败时应放行（不阻塞流程）"""
-    with patch('src.agents.prefilter.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(side_effect=Exception("网络错误"))
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             checker = AlignmentChecker()
             note = _make_note()
@@ -192,9 +195,10 @@ def test_prefilter_top_k_limit():
     mock_response = MagicMock()
     mock_response.content = '{"aligned": true, "reason": "一致"}'
 
-    with patch('src.agents.prefilter.ChatOpenAI') as MockLLM:
-        mock_chat = MockLLM.return_value
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
             prefilter = PreFilter(factor_pool=mock_pool)
             approved, filtered = asyncio.run(prefilter.filter_batch(notes))

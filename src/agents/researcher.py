@@ -15,7 +15,6 @@ from datetime import date
 from typing import Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
@@ -23,22 +22,12 @@ from src.schemas.stage_io import HypothesisGenOutput
 from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
+from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
 from src.schemas.exploration import SubspaceRegistry
 from src.skills.loader import SkillLoader
 from src.hypothesis.mutation import SymbolicMutator, try_all_mutations, build_mutation_record_dict
-
-
-def load_dotenv_if_available():
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
-
-
-load_dotenv_if_available()
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
@@ -138,12 +127,7 @@ class AlphaResearcher:
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.registry = registry or SubspaceRegistry.get_default_registry()
         self.factor_pool = factor_pool
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-            base_url=os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE")),
-            api_key=os.getenv("RESEARCHER_API_KEY", os.getenv("OPENAI_API_KEY")),
-            temperature=0.8,  # 稍高温度，促进多样性
-        )
+        self.llm = build_researcher_llm(temperature=0.8)
 
     async def generate_batch(
         self,
@@ -472,4 +456,3 @@ async def _hypothesis_gen_async(state: dict) -> dict:
 def hypothesis_gen_node(state: dict) -> HypothesisGenOutput:
     """LangGraph 同步入口。"""
     return asyncio.run(_hypothesis_gen_async(state))
-
