@@ -7,11 +7,7 @@ Sources:
 """
 import asyncio
 import json
-import os
-import sys
 import pytest
-
-pytestmark = pytest.mark.unit
 
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -19,7 +15,6 @@ from src.execution.coder import Coder
 from src.execution.docker_runner import DockerRunner, ExecutionResult
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.backtest import BacktestReport
-from src.schemas.thresholds import THRESHOLDS
 from src.schemas.exploration import (
     PrimitiveCategory,
     SubspaceConfig,
@@ -27,6 +22,8 @@ from src.schemas.exploration import (
     SubspaceRegistry,
 )
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────────────────
@@ -84,6 +81,7 @@ def test_coder_valid_formula(mock_note):
     assert report.factor_spec.hypothesis == mock_note.hypothesis
     assert report.artifacts is not None
     assert report.passed is True
+    assert report.execution_succeeded is True
     assert report.metrics.sharpe == 2.8
     assert report.metrics.annualized_return == 0.3
     assert report.metrics.turnover_rate == 0.2
@@ -117,6 +115,7 @@ def test_coder_invalid_formula(mock_note):
         report = asyncio.run(coder.run_backtest(mock_note))
 
     assert report.passed is False
+    assert report.execution_succeeded is True
     assert report.status == "failed"
     assert report.failure_stage == "run"
     assert "SyntaxError" in report.error_message
@@ -138,6 +137,7 @@ def test_coder_output_parsing(mock_note):
 
     report = coder._parse_result(mock_exec_result, mock_note, "test_factor", "$close")
     assert report.passed is False
+    assert report.execution_succeeded is False
     assert report.status == "failed"
     assert report.failure_stage == "run"
     assert report.failure_reason == "execution_failed"

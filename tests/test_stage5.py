@@ -10,18 +10,19 @@ import asyncio
 import json
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from src.agents.judgment import Critic, PortfolioManager, ReportWriter, RiskAuditor
 from src.execution.coder import Coder
 from src.execution.docker_runner import ExecutionResult
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport
+from src.schemas.judgment import CriticVerdict, ThresholdCheck
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
+
+pytestmark = pytest.mark.unit
 
 
 # ─────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ def _make_report(
             turnover_rate=turnover_rate,
         ),
         passed=error_message is None,
+        execution_succeeded=error_message is None,
         execution_time_seconds=1.0,
         qlib_output_raw="BACKTEST_RESULT_JSON:{}",
         error_message=error_message,
@@ -158,6 +160,37 @@ def test_portfolio_manager_and_report_writer_generate_minimal_outputs():
     assert "## Best Factor" in cio_report.full_report_markdown
 
 
+def test_report_writer_ignores_failed_verdicts_when_picking_best_factor():
+    passed_report = _make_report(factor_id="momentum_passed", sharpe=2.8)
+    failed_report = _make_report(factor_id="momentum_failed", sharpe=6.0)
+
+    passed_verdict = asyncio.run(Critic().evaluate(passed_report))
+    failed_verdict = passed_verdict.model_copy(
+        update={
+            "report_id": failed_report.report_id,
+            "factor_id": failed_report.factor_id,
+            "note_id": failed_report.note_id,
+            "overall_passed": False,
+            "decision": "reject",
+            "score": 0.1,
+            "failure_mode": passed_verdict.failure_mode,
+            "failure_explanation": "synthetic failure",
+            "reason_codes": ["LOW_SHARPE"],
+        }
+    )
+
+    state = AgentState(
+        current_round=1,
+        backtest_reports=[passed_report, failed_report],
+        critic_verdicts=[passed_verdict, failed_verdict],
+    )
+
+    cio_report = asyncio.run(ReportWriter().generate_cio_report(state))
+
+    assert cio_report.best_new_factor == passed_report.factor_id
+    assert cio_report.best_new_sharpe == passed_report.metrics.sharpe
+
+
 # ─────────────────────────────────────────────────────────
 # From test_judgment_pool_writeback.py
 # ─────────────────────────────────────────────────────────
@@ -195,6 +228,7 @@ def _make_report_for_writeback(note_id: str, sharpe: float = 3.0, passed: bool =
             turnover_rate=0.2,
         ),
         passed=passed,
+        execution_succeeded=True,
         execution_time_seconds=1.0,
         qlib_output_raw="BACKTEST_RESULT_JSON:{}",
         error_message=None,
@@ -441,8 +475,7 @@ class TestRiskAuditor:
 # ─────────────────────────────────────────────────────────
 
 class TestConstraintExtractor:
-    def _make_failed_verdict(self) -> "CriticVerdict":
-        from src.schemas.judgment import CriticVerdict, ThresholdCheck
+    def _make_failed_verdict(self) -> CriticVerdict:
         from src.schemas.failure_constraint import FailureMode
 
         return CriticVerdict(
@@ -462,9 +495,7 @@ class TestConstraintExtractor:
             register_to_pool=True,
         )
 
-    def _make_passed_verdict(self) -> "CriticVerdict":
-        from src.schemas.judgment import CriticVerdict, ThresholdCheck
-
+    def _make_passed_verdict(self) -> CriticVerdict:
         return CriticVerdict(
             report_id="report-002",
             factor_id="momentum_20260309_02",
@@ -533,7 +564,6 @@ class TestConstraintExtractor:
 class TestScoring:
     def test_decide_promotes_high_score(self):
         from src.agents.judgment._scoring import _decide
-        from src.schemas.judgment import ThresholdCheck
 
         report = _make_report(sharpe=3.0)
         result = _decide(report, overall_passed=True, score=0.9, failed_checks=[])
@@ -542,7 +572,6 @@ class TestScoring:
 
     def test_decide_rejects_low_score(self):
         from src.agents.judgment._scoring import _decide
-        from src.schemas.judgment import ThresholdCheck
 
         report = _make_report(sharpe=-0.5)
         failed = [ThresholdCheck(metric="sharpe", value=-0.5, threshold=2.67, passed=False)]
