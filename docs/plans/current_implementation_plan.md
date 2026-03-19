@@ -1,14 +1,14 @@
 # Current Implementation Plan
 
-> 更新时间：2026-03-17
+> 更新时间：2026-03-19
 > 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
 
 ---
 
 ## 目标
 
-把 Pixiu 从“规格领先、运行时分叉”的状态，推进到“Stage 4/5 闭环可收敛、测试入口稳定”的状态。
-并逐步完成 authority model 收口：LLM 负责认知，deterministic 系统负责执行真值。
+把 Pixiu 从“主干闭环可运行但数据与能力边界仍漂移”的状态，推进到“Stage 2-5 合约更一致、数据能力真实可见、实验可解释”的状态。
+并继续完成 authority model 收口：LLM 负责认知，deterministic 系统负责执行真值。
 
 ---
 
@@ -22,6 +22,7 @@
 - [x] 建立测试管线设计
 - [x] 拆分旧总览文档中过重主题
 - [x] 建立 Stage 4→5 golden path 收口规格
+- [x] 完成 docs reorganization，默认阅读路径已收口
 
 ### Phase B: Stage 4 收口
 
@@ -51,6 +52,22 @@
 - [x] 设计并落最小 `state_store`
 - [x] 收敛 CLI/API 到稳定数据面的最小读路径
 - [ ] 再考虑 Dashboard 落地
+
+### Phase F: 实验可观测性
+
+- [x] `round_*.json` 已补充 prefilter / execution / judgment 级别的诊断摘要
+- [x] 可直接区分 Stage 3 拒绝、Stage 4 执行、Stage 5 verdict 的主要失败来源
+- [ ] 如有需要，再决定是否把这批 round telemetry 上推到 control plane
+
+### Phase G: 数据能力收口（进行中）
+
+- [x] 新增 runtime capability manifest，Stage 2/3 按本地 Qlib 覆盖率动态决定字段可用性
+- [x] `fina_indicator -> Qlib bins` 转换链已打通，`$roe` 已可进入 runtime 可用字段集合
+- [x] `daily_basic` 下载与转换链已建立（`pb / pe_ttm / turnover_rate / float_mv`）
+- [x] `moneyflow_hsgt` 下载脚本已建立，可作为下一批 Stage 1 / regime 资金流数据
+- [ ] `daily_basic` 全量下载仍在进行中，尚未达到 runtime coverage 阈值
+- [ ] `pb / pe_ttm / turnover_rate / float_mv` 进入 Stage 2/3 可用列表前，需要下载和转换完成
+- [ ] 再次运行 Phase 4B 实验前，需确认扩展字段覆盖率与 Docker Stage 4 blocker 都已收口
 
 ### Phase 2: Hypothesis Expansion Engine ✅
 
@@ -103,4 +120,7 @@
 - 默认测试入口已经稳定
 - 最小 control-plane state_store 已经落地
 - richer contract 已开始进入主干，但仍处在新旧字段双轨期
-- 当前主任务转为 richer contract 收口、控制平面扩展和产品层收口
+- 当前主任务已经转为三条主线
+- 数据能力收口与下载链稳定化
+- Researcher 技能/工具边界继续收口
+- richer contract、控制平面和产品层继续推进

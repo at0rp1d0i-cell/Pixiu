@@ -14,6 +14,7 @@ Last Reviewed: 2026-03-19
 如果你想看数据层边界和当前运行时真相，先读：
 
 - `docs/design/15_data-sources.md`
+- `docs/reference/tushare-dataset-matrix.md`
 
 这里更偏运维和执行，不重复系统设计。
 
@@ -27,6 +28,7 @@ Last Reviewed: 2026-03-19
 | `fina_indicator` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_fundamental_to_qlib.py` |
 | `daily_basic` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_daily_basic_to_qlib.py` |
 | 融资融券历史 parquet | 结构化 staging / 后续特征扩展 | 否 | `data/fundamental_staging/margin_history/margin_history.parquet` | `scripts/download_margin_history.py` |
+| 沪深港通资金流向 parquet | 北向/南向资金流 staging | 否 | `data/fundamental_staging/moneyflow_hsgt/moneyflow_hsgt.parquet` | `scripts/download_moneyflow_hsgt.py` |
 
 最小可运行集只有一项：
 
@@ -45,7 +47,9 @@ uv sync --dev
 以下脚本依赖 `TUSHARE_TOKEN`：
 
 - `scripts/download_fundamental_data.py`
+- `scripts/download_daily_basic_data.py`
 - `scripts/download_margin_history.py`
+- `scripts/download_moneyflow_hsgt.py`
 
 推荐在 shell 或 `.env` 中设置：
 
@@ -60,7 +64,9 @@ export TUSHARE_TOKEN=<your_token>
 - `data/qlib_bin/`
 - `data/parquet_staging/baostock_raw/`
 - `data/fundamental_staging/fina_indicator/`
+- `data/fundamental_staging/daily_basic/`
 - `data/fundamental_staging/margin_history/`
+- `data/fundamental_staging/moneyflow_hsgt/`
 - `logs/`
 
 ## 4. Recommended Order
@@ -146,6 +152,12 @@ uv run python scripts/convert_daily_basic_to_qlib.py
 
 这两条转换链都默认依赖你已经先跑过 `download_qlib_data.py`。
 
+需要明确的一点：
+
+- parquet 下载完成 != 字段已经对 Stage 2/3 可用
+- 只有当字段被转换成 `data/qlib_bin/features/**.day.bin`，并且覆盖率达到 runtime capability 阈值后，Researcher / PreFilter 才会把它视为可用字段
+- 当前 capability 扫描以主交易宇宙为准，不会因为 staging 目录里多出一些股票就自动放宽字段白名单
+
 ### 4.3 想补融资融券历史
 
 ```bash
@@ -160,6 +172,19 @@ uv run python scripts/download_margin_history.py
 - 日志写到 `logs/margin_download.log`
 
 这份数据现在更像结构化 staging，不是当前 Stage 4 主路径直接消费的数据。
+
+### 4.4 想补北向/南向资金流
+
+```bash
+uv run python scripts/download_moneyflow_hsgt.py
+```
+
+特点：
+
+- 使用 Tushare `moneyflow_hsgt`
+- 输出单个 parquet：`data/fundamental_staging/moneyflow_hsgt/moneyflow_hsgt.parquet`
+- 适合先给 Stage 1 / regime 基础设施层使用
+- 比 `hk_hold` 更适合作为当前北向资金的主信号
 
 ## 5. Script-by-script Notes
 
@@ -212,6 +237,21 @@ tail -f logs/qlib_download.log
 - `data/daily_basic_download_progress.json`
 - `logs/daily_basic_download.log`
 
+运行中的检查方式：
+
+```bash
+uv run python - <<'PY'
+import json
+from pathlib import Path
+p = Path("data/daily_basic_download_progress.json")
+if p.exists():
+    data = json.loads(p.read_text())
+    print("done", len(data.get("done", [])))
+    print("failed", len(data.get("failed", {})))
+    print("updated_at", data.get("updated_at"))
+PY
+```
+
 ### `scripts/convert_fundamental_to_qlib.py`
 
 适用场景：
@@ -250,6 +290,18 @@ tail -f logs/qlib_download.log
 - `data/fundamental_staging/margin_history/margin_history.parquet`
 - `logs/margin_download.log`
 
+### `scripts/download_moneyflow_hsgt.py`
+
+适用场景：
+
+- 想补北向/南向日度资金流
+- 想为 `northbound` island 和 Stage 1 市场上下文准备稳定结构化输入
+
+关键文件：
+
+- `data/fundamental_staging/moneyflow_hsgt/moneyflow_hsgt.parquet`
+- `logs/moneyflow_hsgt_download.log`
+
 ## 6. Validation Checklist
 
 ### 主路径最小检查
@@ -257,6 +309,17 @@ tail -f logs/qlib_download.log
 ```bash
 test -f data/qlib_bin/calendars/day.txt && echo ok
 find data/qlib_bin/features -maxdepth 2 -name '*.day.bin' | head
+```
+
+### 扩展字段是否真正进入 runtime
+
+```bash
+uv run python - <<'PY'
+from src.formula.capabilities import get_runtime_formula_capabilities
+caps = get_runtime_formula_capabilities()
+print("available_fields", ",".join(caps.available_fields))
+print("available_experimental", ",".join(caps.available_experimental_fields) or "(none)")
+PY
 ```
 
 ### 基本面检查

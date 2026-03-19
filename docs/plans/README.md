@@ -6,10 +6,6 @@
 
 - `current_implementation_plan.md`
   - 当前主线实现计划
-- `2026-03-18-docs-reorganization-design.md`
-  - 当前文档整编设计
-- `2026-03-18-docs-reorganization-implementation-plan.md`
-  - 当前文档整编实施计划
 - `agent_team_operating_model.md`
   - root / worker / reviewer / explorer 的协作规则和时间盒
 - `engineering-debt.md`
@@ -19,7 +15,15 @@
 - `2026-03-18-phase4-experiment-plan.md`
   - 当前 Phase 4B 受控实验计划
 - `2026-03-18-mirofish-integration-analysis.md`
-  - 当前 MiroFish Go/No-Go 决策参考
+  - 当前 MiroFish Go/No-Go 决策参考（更像决策备忘，不是实施计划）
+- `2026-03-19-data-capability-alignment-design.md`
+  - 当前数据能力收口设计
+- `2026-03-19-data-capability-alignment-implementation.md`
+  - 当前数据能力收口实施计划
+- `2026-03-19-multi-agent-skills-expansion-design.md`
+  - Skills 扩展设计稿（待收口为可执行版）
+- `2026-03-19-skills-expansion-implementation.md`
+  - Skills 扩展实施计划（待修订）
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 
@@ -33,6 +37,12 @@
 - 只剩历史价值的审计基线
 - 失效的 `current_tasks` 类清单
 - 只用于追溯历史决策过程的计划文档
+
+最近已归档的例子：
+
+- `2026-03-18-docs-reorganization-design.md`
+- `2026-03-18-docs-reorganization-implementation-plan.md`
+- `2026-03-19-experiment-round-observability-implementation.md`
 
 ## 不适合放在这里的内容
 

@@ -15,7 +15,7 @@
 **Files:**
 - Create: `docs/00_documentation-standard.md`
 - Modify: `docs/README.md`
-- Reference: `docs/plans/2026-03-18-docs-reorganization-design.md`
+- Reference: `docs/archive/plans/2026-03-18-docs-reorganization-design.md`
 
 **Step 1: Draft the documentation standard**
 
@@ -346,4 +346,3 @@ Expected:
 **Step 3: Record residual risks**
 
 If any long design docs still need a second-wave split, note them explicitly in the final report rather than leaving them implicit.
-

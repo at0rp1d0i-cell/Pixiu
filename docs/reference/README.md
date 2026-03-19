@@ -21,6 +21,8 @@
   - A 股开源量化基础设施背景调研
 - `data-download-guide.md`
   - Pixiu 本地数据下载、转换、增量更新和验证的执行指南
+- `tushare-dataset-matrix.md`
+  - Tushare 官方数据面与 Pixiu 接入优先级矩阵
 - `qlib_data_pipeline_best_practices.md`
   - Qlib 日线数据管线的关键约束与清洗实践
 

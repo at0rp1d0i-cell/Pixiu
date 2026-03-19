@@ -24,6 +24,10 @@
 1. `docs/plans/current_implementation_plan.md`
 2. `docs/plans/README.md`
 
+### 要准备本地数据或恢复下载
+
+1. `docs/reference/data-download-guide.md`
+
 ### 要看未来路线
 
 1. `docs/futures/README.md`
