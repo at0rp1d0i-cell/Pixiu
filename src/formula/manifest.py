@@ -4,43 +4,11 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class FormulaFieldSpec:
-    formula_name: str
-    bin_stem: str
-    source: str
-    description: str
-    category: str
-
-
-@dataclass(frozen=True)
 class FormulaOperatorSpec:
     name: str
     qlib_syntax: str
     description: str
     category: str
-
-
-BASE_FIELD_SPECS = (
-    FormulaFieldSpec("$open", "open", "qlib_price_volume", "开盘价", "price_volume"),
-    FormulaFieldSpec("$high", "high", "qlib_price_volume", "最高价", "price_volume"),
-    FormulaFieldSpec("$low", "low", "qlib_price_volume", "最低价", "price_volume"),
-    FormulaFieldSpec("$close", "close", "qlib_price_volume", "收盘价", "price_volume"),
-    FormulaFieldSpec("$volume", "volume", "qlib_price_volume", "成交量", "price_volume"),
-    FormulaFieldSpec("$vwap", "vwap", "qlib_price_volume", "成交量加权均价", "price_volume"),
-    FormulaFieldSpec("$amount", "amount", "qlib_price_volume", "成交额", "price_volume"),
-    FormulaFieldSpec("$factor", "factor", "qlib_price_volume", "复权因子", "price_volume"),
-)
-
-EXPERIMENTAL_FIELD_SPECS = (
-    FormulaFieldSpec("$roe", "roe", "fina_indicator", "净资产收益率", "fundamental"),
-    FormulaFieldSpec("$pb", "pb", "daily_basic", "市净率", "fundamental"),
-    FormulaFieldSpec("$pe_ttm", "pe_ttm", "daily_basic", "滚动市盈率", "fundamental"),
-    FormulaFieldSpec("$turnover_rate", "turnover_rate", "daily_basic", "换手率", "fundamental"),
-    FormulaFieldSpec("$float_mv", "float_mv", "daily_basic", "流通市值", "fundamental"),
-)
-
-ALL_FIELD_SPECS = BASE_FIELD_SPECS + EXPERIMENTAL_FIELD_SPECS
-FIELD_SPECS_BY_NAME = {spec.formula_name: spec for spec in ALL_FIELD_SPECS}
 
 APPROVED_OPERATORS = (
     "Mean", "Std", "Var", "Max", "Min", "Sum",

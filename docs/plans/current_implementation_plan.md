@@ -68,20 +68,22 @@ Last Reviewed: 2026-03-19
 - [x] 新增 runtime capability manifest，Stage 2/3 按本地 Qlib 覆盖率动态决定字段可用性
 - [x] `fina_indicator -> Qlib bins` 转换链已打通，`$roe` 已可进入 runtime 可用字段集合
 - [x] `daily_basic` 下载与转换链已建立（`pb / pe_ttm / turnover_rate / float_mv`）
+- [x] `daily_basic` 全量下载已完成（`5490 / 5490`），尾项失败已补跑成功
+- [x] `pb / pe_ttm / turnover_rate / float_mv` 已全部达到 runtime coverage 阈值并进入 Stage 2/3 可用字段列表
 - [x] `moneyflow_hsgt` 下载脚本已建立，可作为下一批 Stage 1 / regime 资金流数据
 - [x] `moneyflow` / `stk_limit` staging 下载脚本已建立，进入 P1 数据面准备阶段
 - [x] Tushare 下载脚本已内建 localhost proxy 清理，避免本地失效代理导致批量下载中断
-- [ ] `daily_basic` 全量下载仍在进行中，尚未达到 runtime coverage 阈值
-- [ ] `pb / pe_ttm / turnover_rate / float_mv` 进入 Stage 2/3 可用列表前，需要下载和转换完成
 - [ ] `moneyflow` / `stk_limit` 的真实下载与后续接入顺序仍待执行
 - [ ] 再次运行 Phase 4B 实验前，需确认扩展字段覆盖率与 Docker Stage 4 blocker 都已收口
 
-### Phase H: 独立重构 Epic（待启动）
+### Phase H: 独立重构 Epic（进行中）
 
 - [ ] `Data Capability Platform Refactor`
   - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`
   - 第一批实施计划：`docs/plans/2026-03-19-data-capability-platform-refactor-implementation.md`
-  - 当前先收口 canonical formula capability kernel（field/operator manifest + 错误示例清理），再进入完整 dataset registry/readiness 分层
+  - [x] Slice 1：canonical formula capability kernel（field/operator manifest + 错误示例清理）
+  - [x] Slice 2：formula-exposed dataset registry + readiness（`qlib_price_volume / fina_indicator / daily_basic`）
+  - [ ] Slice 3：扩展到 non-formula dataset readiness 与 Stage 1 / regime data reporting
 - [ ] `FactorPool Boundary Refactor`
   - 见 `docs/plans/2026-03-19-factor-pool-boundary-refactor-design.md`
 - [ ] `Orchestrator Boundary Refactor`

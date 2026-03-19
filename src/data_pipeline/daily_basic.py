@@ -1,29 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DAILY_BASIC_STAGING_DIR = PROJECT_ROOT / "data" / "fundamental_staging" / "daily_basic"
+from src.data_pipeline.datasets import DAILY_BASIC_DATASET
 
-DAILY_BASIC_SOURCE_FIELDS = (
-    "ts_code",
-    "trade_date",
-    "turnover_rate",
-    "pe_ttm",
-    "pb",
-    "circ_mv",
-)
+DAILY_BASIC_STAGING_DIR = DAILY_BASIC_DATASET.staging_path
 
+DAILY_BASIC_SOURCE_FIELDS = DAILY_BASIC_DATASET.required_source_fields
 DAILY_BASIC_FIELD_MAP = {
-    "turnover_rate": "turnover_rate",
-    "pe_ttm": "pe_ttm",
-    "pb": "pb",
-    # Tushare daily_basic exposes circ_mv in market-value units and Pixiu
-    # preserves that raw scale while renaming it to the runtime-facing field.
-    "circ_mv": "float_mv",
+    field.source_field: field.bin_stem
+    for field in DAILY_BASIC_DATASET.formula_fields
 }
 
 QLIB_DAILY_BASIC_FIELDS = tuple(DAILY_BASIC_FIELD_MAP.values())

@@ -55,6 +55,10 @@ from src.data_pipeline.tushare_batch import (  # noqa: E402
     run_per_stock_download,
     save_progress_file,
 )
+from src.data_pipeline.fina_indicator import (  # noqa: E402
+    FINA_INDICATOR_STAGING_DIR,
+    get_fina_indicator_field_string,
+)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
@@ -67,14 +71,8 @@ logger = bootstrap_tushare_script(
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 DATA_DIR       = PROJECT_ROOT / "data"
-STAGING_DIR    = DATA_DIR / "fundamental_staging" / "fina_indicator"
+STAGING_DIR    = FINA_INDICATOR_STAGING_DIR
 PROGRESS_FILE  = DATA_DIR / "fundamental_download_progress.json"
-
-FINA_FIELDS = (
-    "ts_code,ann_date,end_date,eps,dt_eps,roe,roe_waa,roe_dt,roa,"
-    "netprofit_margin,gross_margin,current_ratio,quick_ratio,"
-    "debt_to_assets,assets_turn"
-)
 
 SLEEP_BETWEEN_STOCKS = 0.3   # seconds — ~200 calls/min, conservative
 CHECKPOINT_EVERY     = 50    # save progress every N stocks
@@ -118,7 +116,7 @@ def fetch_fina_indicator(ts_code: str) -> pd.DataFrame | None:
     """
     try:
         pro = _get_pro()
-        df = pro.fina_indicator(ts_code=ts_code, fields=FINA_FIELDS)
+        df = pro.fina_indicator(ts_code=ts_code, fields=get_fina_indicator_field_string())
         return df
     except Exception as e:
         raise RuntimeError(str(e)) from e

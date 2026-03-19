@@ -96,7 +96,7 @@ def test_runtime_formula_capabilities_resolve_qlib_data_dir_from_dotenv(
     def fake_load_dotenv() -> None:
         monkeypatch.setenv("QLIB_DATA_DIR", str(qlib_dir))
 
-    with patch("src.formula.capabilities.load_dotenv_if_available", side_effect=fake_load_dotenv):
+    with patch("src.data_pipeline.readiness.load_dotenv_if_available", side_effect=fake_load_dotenv):
         capabilities = get_runtime_formula_capabilities()
 
     assert capabilities.total_instruments == 1

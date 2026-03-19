@@ -149,3 +149,11 @@ After this slice lands, the next Epic A slice should add:
 - explicit staged/materialized/runtime-available readiness helpers
 - non-formula dataset registry entries
 - capability reporting for Stage 1 / regime data
+
+---
+
+## Status Update
+
+- `2026-03-19` Slice 1 已完成：canonical formula capability kernel（field/operator manifest + 错误示例清理）已落地。
+- `2026-03-19` Slice 2 已完成：`qlib_price_volume / fina_indicator / daily_basic` 的 dataset registry + readiness 已落地，field truth 已从 `src/formula/` 下沉到 `src/data_pipeline/`。
+- 下一刀应聚焦 non-formula dataset readiness 与 Stage 1 / regime 数据能力报告，而不是继续扩字段表。

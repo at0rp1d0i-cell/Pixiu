@@ -35,14 +35,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.env import load_dotenv_if_available
+from src.core.env import load_dotenv_if_available  # noqa: E402
+from src.data_pipeline.fina_indicator import (  # noqa: E402
+    FINA_INDICATOR_STAGING_DIR,
+    QLIB_FINA_INDICATOR_FIELDS,
+)
 
 load_dotenv_if_available()
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
 DATA_DIR       = PROJECT_ROOT / "data"
-STAGING_DIR    = DATA_DIR / "fundamental_staging" / "fina_indicator"
+STAGING_DIR    = FINA_INDICATOR_STAGING_DIR
 _qlib_env = os.getenv("QLIB_DATA_DIR")
 if _qlib_env:
     QLIB_DIR = Path(_qlib_env) if os.path.isabs(_qlib_env) else PROJECT_ROOT / _qlib_env
@@ -50,22 +54,6 @@ else:
     QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 CALENDAR_FILE  = QLIB_DIR / "calendars" / "day.txt"
 FEATURES_DIR   = QLIB_DIR / "features"
-
-# Fields to write (parquet column name → bin file stem)
-FIELDS = [
-    "eps",
-    "dt_eps",
-    "roe",
-    "roe_waa",
-    "roe_dt",
-    "roa",
-    "netprofit_margin",
-    "gross_margin",
-    "current_ratio",
-    "quick_ratio",
-    "debt_to_assets",
-    "assets_turn",
-]
 
 PROGRESS_EVERY = 200  # print progress every N stocks
 
@@ -129,7 +117,9 @@ def pit_fill(df: pd.DataFrame, calendar: list[pd.Timestamp]) -> pd.DataFrame:
         df["end_date"] = pd.to_datetime(df["end_date"], format="%Y%m%d", errors="coerce")
 
     # Keep only fields we care about plus PIT ordering keys.
-    keep_cols = ["ann_date"] + [c for c in ("end_date",) if c in df.columns] + [c for c in FIELDS if c in df.columns]
+    keep_cols = ["ann_date"] + [c for c in ("end_date",) if c in df.columns] + [
+        c for c in QLIB_FINA_INDICATOR_FIELDS if c in df.columns
+    ]
     df = df[keep_cols].copy()
 
     # When multiple records share the same ann_date, keep the most recent
@@ -174,7 +164,7 @@ def convert_stock(
 
     # Skip if all target bins already exist
     existing = {b.stem.split(".")[0] for b in qlib_dir.glob("*.day.bin")} if qlib_dir.exists() else set()
-    target_fields = [f for f in FIELDS]
+    target_fields = [f for f in QLIB_FINA_INDICATOR_FIELDS]
     if not overwrite and existing.issuperset(target_fields):
         return False  # all bins present, skip
 
@@ -200,7 +190,7 @@ def convert_stock(
     qlib_dir.mkdir(parents=True, exist_ok=True)
 
     wrote_any = False
-    for field in FIELDS:
+    for field in QLIB_FINA_INDICATOR_FIELDS:
         bin_path = qlib_dir / f"{field}.day.bin"
         if bin_path.exists() and not overwrite:
             continue  # already present, skip individual field

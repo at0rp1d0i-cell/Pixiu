@@ -1,35 +1,37 @@
 from __future__ import annotations
 
-import os
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.core.env import load_dotenv_if_available
-from src.formula.manifest import (
+from src.data_pipeline.datasets import (
     ALL_FIELD_SPECS,
-    APPROVED_OPERATORS,
     BASE_FIELD_SPECS,
     EXPERIMENTAL_FIELD_SPECS,
     FIELD_SPECS_BY_NAME as _FIELD_SPECS_BY_NAME,
+    DatasetFieldSpec,
+    get_formula_dataset_specs,
+)
+from src.data_pipeline.readiness import (
+    FieldCoverageStatus,
+    get_dataset_readiness,
+    read_min_coverage_ratio,
+)
+from src.formula.manifest import (
+    APPROVED_OPERATORS,
     FORMULA_OPERATOR_SPECS,
-    FormulaFieldSpec,
     FormulaOperatorSpec as _FormulaOperatorSpec,
     OPERATOR_SPECS_BY_NAME as _OPERATOR_SPECS_BY_NAME,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
-DEFAULT_MIN_COVERAGE_RATIO = 0.95
-
 FIELD_SPECS_BY_NAME = _FIELD_SPECS_BY_NAME
+FormulaFieldSpec = DatasetFieldSpec
 FormulaOperatorSpec = _FormulaOperatorSpec
 OPERATOR_SPECS_BY_NAME = _OPERATOR_SPECS_BY_NAME
 
 
 @dataclass(frozen=True)
 class RuntimeFieldStatus:
-    spec: FormulaFieldSpec
+    spec: DatasetFieldSpec
     instrument_count: int
     total_instruments: int
     coverage_ratio: float
@@ -68,73 +70,30 @@ class FormulaCapabilities:
         )
 
 
-def _resolve_qlib_dir(provider_uri: str | Path | None = None) -> Path:
-    load_dotenv_if_available()
-
-    if provider_uri is not None:
-        return Path(provider_uri)
-
-    qlib_env = os.getenv("QLIB_DATA_DIR")
-    if qlib_env:
-        return Path(qlib_env) if os.path.isabs(qlib_env) else PROJECT_ROOT / qlib_env
-
-    return DEFAULT_QLIB_DIR
-
-
-def _resolve_features_dir(provider_uri: str | Path | None = None) -> Path:
-    return _resolve_qlib_dir(provider_uri) / "features"
-
-
-def _read_min_coverage_ratio() -> float:
-    raw = os.getenv("PIXIU_FIELD_MIN_COVERAGE_RATIO")
-    if not raw:
-        return DEFAULT_MIN_COVERAGE_RATIO
-    try:
-        value = float(raw)
-    except ValueError:
-        return DEFAULT_MIN_COVERAGE_RATIO
-    return min(max(value, 0.0), 1.0)
-
-
-def _canonical_universe_dirs(instrument_dirs: list[Path]) -> list[Path]:
-    universe = [path for path in instrument_dirs if (path / "close.day.bin").exists()]
-    return universe or instrument_dirs
-
-
-def _count_feature_bins(features_dir: Path) -> tuple[int, Counter[str]]:
-    if not features_dir.exists():
-        return 0, Counter()
-
-    instrument_dirs = [path for path in features_dir.iterdir() if path.is_dir()]
-    universe_dirs = _canonical_universe_dirs(instrument_dirs)
-    counter: Counter[str] = Counter()
-    for instrument_dir in universe_dirs:
-        for bin_path in instrument_dir.glob("*.day.bin"):
-            counter[bin_path.name] += 1
-    return len(universe_dirs), counter
-
-
 def get_runtime_formula_capabilities(
-    provider_uri: str | Path | None = None,
+    provider_uri=None,
     min_coverage_ratio: float | None = None,
 ) -> FormulaCapabilities:
-    min_ratio = _read_min_coverage_ratio() if min_coverage_ratio is None else min_coverage_ratio
-    features_dir = _resolve_features_dir(provider_uri)
-    total_instruments, counter = _count_feature_bins(features_dir)
-
+    min_ratio = read_min_coverage_ratio() if min_coverage_ratio is None else min_coverage_ratio
+    dataset_readiness = get_dataset_readiness(
+        get_formula_dataset_specs(),
+        provider_uri=provider_uri,
+        min_coverage_ratio=min_ratio,
+    )
     field_status: dict[str, RuntimeFieldStatus] = {}
-    for spec in ALL_FIELD_SPECS:
-        bin_name = f"{spec.bin_stem}.day.bin"
-        instrument_count = counter.get(bin_name, 0)
-        coverage_ratio = (instrument_count / total_instruments) if total_instruments else 0.0
-        available = instrument_count > 0 and coverage_ratio >= min_ratio
-        field_status[spec.formula_name] = RuntimeFieldStatus(
-            spec=spec,
-            instrument_count=instrument_count,
-            total_instruments=total_instruments,
-            coverage_ratio=coverage_ratio,
-            available=available,
-        )
+    total_instruments = 0
+    for dataset in get_formula_dataset_specs():
+        readiness = dataset_readiness[dataset.name]
+        for spec in dataset.formula_fields:
+            status: FieldCoverageStatus = readiness.field_status[spec.formula_name]
+            total_instruments = max(total_instruments, status.total_instruments)
+            field_status[spec.formula_name] = RuntimeFieldStatus(
+                spec=spec,
+                instrument_count=status.instrument_count,
+                total_instruments=status.total_instruments,
+                coverage_ratio=status.coverage_ratio,
+                available=status.runtime_available,
+            )
 
     return FormulaCapabilities(
         field_status=field_status,
