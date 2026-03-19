@@ -1,10 +1,14 @@
 # RSS MCP Server 规格文档
 
-Status: active
+Status: historical
 Owner: coordinator
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-19
 
-> 版本：v1.0 | 日期：2026-03-18 | 状态：待实现
+> Archived on 2026-03-19. The Phase 1 Stage 1 RSS integration has already landed in
+> `src/agents/market_analyst.py`. The remaining future work is Stage 2 Researcher
+> toolization, which is tracked in `docs/plans/current_implementation_plan.md`.
+
+> 版本：v1.0 | 日期：2026-03-18 | 状态：已归档
 
 ---
 

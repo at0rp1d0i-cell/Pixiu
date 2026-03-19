@@ -90,12 +90,12 @@ class SubspaceConfig(PixiuBase):
     enabled: bool = True
     priority: int = 1
     description: str
-    applicable_islands: List[str] = []
-    allowed_primitives: List[str] = []
-    allowed_operators: List[MutationOperator] = []
-    source_markets: List[str] = []
-    narrative_sources: List[str] = []
-    regime_types: List[str] = []
+    applicable_islands: List[str] = Field(default_factory=list)
+    allowed_primitives: List[str] = Field(default_factory=list)
+    allowed_operators: List[MutationOperator] = Field(default_factory=list)
+    source_markets: List[str] = Field(default_factory=list)
+    narrative_sources: List[str] = Field(default_factory=list)
+    regime_types: List[str] = Field(default_factory=list)
 
 
 class ExplorationStrategy(PixiuBase):
@@ -106,8 +106,8 @@ class ExplorationStrategy(PixiuBase):
     description: str
     max_candidates: int = 3
     diversity_threshold: float = 0.3
-    required_context: List[str] = []
-    forbidden_patterns: List[str] = []
+    required_context: List[str] = Field(default_factory=list)
+    forbidden_patterns: List[str] = Field(default_factory=list)
 
 
 class CompositionConstraints(PixiuBase):
@@ -119,11 +119,11 @@ class CompositionConstraints(PixiuBase):
 
 class SubspaceRegistry(PixiuBase):
     """探索子空间注册表 - 管理所有子空间配置和结构化上下文"""
-    configs: Dict[str, SubspaceConfig] = {}
-    strategies: Dict[str, ExplorationStrategy] = {}
-    primitives: List[FactorPrimitive] = []
-    mechanism_templates: List[MarketMechanismTemplate] = []
-    narrative_categories: List[NarrativeCategory] = []
+    configs: Dict[str, SubspaceConfig] = Field(default_factory=dict)
+    strategies: Dict[str, ExplorationStrategy] = Field(default_factory=dict)
+    primitives: List[FactorPrimitive] = Field(default_factory=list)
+    mechanism_templates: List[MarketMechanismTemplate] = Field(default_factory=list)
+    narrative_categories: List[NarrativeCategory] = Field(default_factory=list)
     composition_constraints: CompositionConstraints = Field(default_factory=CompositionConstraints)
 
     @classmethod

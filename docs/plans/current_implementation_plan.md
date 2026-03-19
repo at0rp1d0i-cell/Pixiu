@@ -1,5 +1,9 @@
 # Current Implementation Plan
 
+Status: active
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
 > 更新时间：2026-03-19
 > 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
 

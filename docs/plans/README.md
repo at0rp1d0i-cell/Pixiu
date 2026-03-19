@@ -6,12 +6,8 @@
 
 - `current_implementation_plan.md`
   - 当前主线实现计划
-- `agent_team_operating_model.md`
-  - root / worker / reviewer / explorer 的协作规则和时间盒
 - `engineering-debt.md`
   - 当前已知工程债清单
-- `2026-03-18-rss-mcp-spec.md`
-  - 当前 RSS / MCP 扩展规格
 - `2026-03-18-phase4-experiment-plan.md`
   - 当前 Phase 4B 受控实验计划
 - `2026-03-18-mirofish-integration-analysis.md`
@@ -20,8 +16,6 @@
   - 当前数据能力收口设计
 - `2026-03-19-data-capability-alignment-implementation.md`
   - 当前数据能力收口实施计划
-- `2026-03-19-tushare-p1-expansion-implementation.md`
-  - Tushare P1 数据面扩展计划（`moneyflow / stk_limit` staging 与下载期收口）
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 
@@ -41,16 +35,20 @@
 - `2026-03-18-docs-reorganization-design.md`
 - `2026-03-18-docs-reorganization-implementation-plan.md`
 - `2026-03-19-experiment-round-observability-implementation.md`
+- `agent_team_operating_model.md`
+- `2026-03-18-rss-mcp-spec.md`
 - `2026-03-19-multi-agent-skills-expansion-design.md`
 - `2026-03-19-skills-expansion-implementation.md`
+- `2026-03-19-tushare-p1-expansion-implementation.md`
 
 ## 不适合放在这里的内容
 
 - 长期架构设计
 - interface contract
 - 稳定的测试规范
+- 长期协作规则
 
-这些应该留在 `docs/design/` 或 `docs/overview/`。
+这些应该留在 `docs/design/`、`docs/overview/` 或仓库根部的 `AGENTS.md`。
 
 ## 约定
 

@@ -22,6 +22,6 @@ class FactorPoolRecord(PixiuBase):
     turnover: Optional[float] = None
     max_drawdown: Optional[float] = None
     coverage: Optional[float] = None
-    tags: List[str] = []
+    tags: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     subspace_origin: Optional[str] = None  # 生成此因子的 Stage 2 子空间

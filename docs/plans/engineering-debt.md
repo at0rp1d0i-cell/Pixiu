@@ -1,5 +1,9 @@
 # Pixiu v2 杂项待办清单
 
+Status: active
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
 > 更新时间：2026-03-18
 > 说明：本文件只保留当前代码仍然存在的工程债。随 Phase 3 重构一起消失的旧文件问题，已不再保留在 active 清单中。
 

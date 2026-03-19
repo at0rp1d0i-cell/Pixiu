@@ -37,23 +37,23 @@ class CriticVerdict(PixiuBase):
     score: float = 0.0
 
     # 逐项检查
-    checks: List[ThresholdCheck] = []
-    passed_checks: List[str] = []
-    failed_checks: List[str] = []
+    checks: List[ThresholdCheck] = Field(default_factory=list)
+    passed_checks: List[str] = Field(default_factory=list)
+    failed_checks: List[str] = Field(default_factory=list)
 
     # 失败归因（overall_passed=False 时必填）
     failure_mode: Optional[FailureMode] = None
     failure_explanation: Optional[str] = None
     suggested_fix: Optional[str] = None
     summary: str = ""
-    reason_codes: List[str] = []
+    reason_codes: List[str] = Field(default_factory=list)
 
     # 判断时的市场 regime
     regime_at_judgment: Optional[str] = None
 
     # FactorPool 写入决策
     register_to_pool: bool
-    pool_tags: List[str] = []
+    pool_tags: List[str] = Field(default_factory=list)
 
     @field_validator("failure_mode", mode="before")
     @classmethod
@@ -81,7 +81,7 @@ class RiskAuditReport(PixiuBase):
     factor_id: str
     overfitting_score: float
     overfitting_flag: bool
-    correlation_flags: List[CorrelationFlag] = []
+    correlation_flags: List[CorrelationFlag] = Field(default_factory=list)
     recommendation: str
     audit_notes: str
 
@@ -94,7 +94,7 @@ class FactorWeight(PixiuBase):
 class PortfolioAllocation(PixiuBase):
     allocation_id: str
     timestamp: str
-    factor_weights: List[FactorWeight] = []
+    factor_weights: List[FactorWeight] = Field(default_factory=list)
     expected_portfolio_sharpe: float
     expected_portfolio_ic: float
     diversification_score: float
@@ -117,12 +117,12 @@ class CIOReport(PixiuBase):
     portfolio_change_summary: str
 
     # 值得关注的发现
-    highlights: List[str] = []
-    risks: List[str] = []
+    highlights: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
 
     # 全文报告
     full_report_markdown: str
 
     # 等待 CIO 操作
-    suggested_actions: List[str] = []
+    suggested_actions: List[str] = Field(default_factory=list)
     requires_human_decision: bool = True

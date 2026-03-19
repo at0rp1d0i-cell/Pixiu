@@ -1,5 +1,13 @@
 # Tushare P1 Expansion Implementation Plan
 
+Status: historical
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
+> Archived on 2026-03-19. The staged `moneyflow` / `stk_limit` pipelines and adjacent
+> data-contract cleanup have already landed. Remaining data-surface follow-up is now
+> tracked centrally in `docs/plans/current_implementation_plan.md`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Extend Pixiu's local Tushare data surface beyond `daily_basic`/`fina_indicator` with the next highest-value daily datasets, while keeping runtime contracts and docs aligned.

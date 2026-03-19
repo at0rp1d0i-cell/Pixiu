@@ -1,5 +1,13 @@
 # Agent Team Operating Model
 
+Status: historical
+Owner: coordinator
+Last Reviewed: 2026-03-19
+
+> Archived on 2026-03-19. The durable collaboration rules now live primarily in
+> `AGENTS.md`, while current agent role boundaries live in
+> `docs/design/30_agent-team.md`. Keep this file only as a historical operating memo.
+
 > 角色：定义当前仓库里 root / worker / reviewer / explorer 的最小协作规则
 
 ## 1. 目标

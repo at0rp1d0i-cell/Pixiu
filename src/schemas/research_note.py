@@ -1,4 +1,7 @@
 from typing import Optional, List
+
+from pydantic import Field
+
 from src.schemas import PixiuBase
 from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
 
@@ -21,7 +24,7 @@ class FactorResearchNote(PixiuBase):
     final_formula: Optional[str] = None # 最终公式，探索完成后填入
 
     # 探索性请求（可选）
-    exploration_questions: List[ExplorationQuestion] = []  
+    exploration_questions: List[ExplorationQuestion] = Field(default_factory=list)
 
     # 参数
     universe: str = "csi300"
@@ -30,8 +33,8 @@ class FactorResearchNote(PixiuBase):
     backtest_end: str = "2025-03-31"
 
     # Regime 基础设施层 — 每个 research note 必须声明 regime 适用性
-    applicable_regimes: List[str] = []          # 适用的 regime
-    invalid_regimes: List[str] = []             # 失效的 regime
+    applicable_regimes: List[str] = Field(default_factory=list)  # 适用的 regime
+    invalid_regimes: List[str] = Field(default_factory=list)     # 失效的 regime
     regime_switch_rule: Optional[str] = None    # regime 切换规则
 
     # 预期与风险
@@ -130,4 +133,3 @@ class AlphaResearcherBatch(PixiuBase):
     island: str
     notes: List[FactorResearchNote]   # 2-3 个，要求差异化经济逻辑
     generation_rationale: str          # 为何选择这几个方向（供审计）
-

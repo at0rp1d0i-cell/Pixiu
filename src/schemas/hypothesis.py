@@ -7,6 +7,9 @@ StrategySpec: 回答"到底测什么"
 """
 from typing import Optional, List, Dict
 from enum import Enum
+
+from pydantic import Field
+
 from src.schemas import PixiuBase
 
 
@@ -47,14 +50,14 @@ class Hypothesis(PixiuBase):
     economic_rationale: str                     # 经济学原理
 
     # Regime 基础设施层 — 每个 hypothesis 必须声明 regime 适用性
-    applicable_regimes: List[str] = []          # 适用的 regime（如 bull, low_vol）
-    invalid_regimes: List[str] = []             # 失效的 regime（如 crisis, bear）
+    applicable_regimes: List[str] = Field(default_factory=list)  # 适用的 regime（如 bull, low_vol）
+    invalid_regimes: List[str] = Field(default_factory=list)     # 失效的 regime（如 crisis, bear）
     regime_switch_rule: Optional[str] = None    # regime 切换规则（如何判断进入/退出）
 
     # 可选字段
     candidate_driver: Optional[str] = None      # 潜在驱动因素
-    inspirations: List[str] = []                # 启发来源
-    failure_priors: List[str] = []              # 已知失败前提
+    inspirations: List[str] = Field(default_factory=list)   # 启发来源
+    failure_priors: List[str] = Field(default_factory=list) # 已知失败前提
 
     # 溯源字段 — Stage 2 子空间追踪
     exploration_subspace: Optional[ExplorationSubspace] = None  # 生成此假设的子空间
@@ -79,4 +82,4 @@ class StrategySpec(PixiuBase):
 
     # 可选字段
     holding_period: Optional[int] = None        # 持仓周期（天）
-    parameter_notes: Dict[str, str] = {}        # 参数说明
+    parameter_notes: Dict[str, str] = Field(default_factory=dict)  # 参数说明
