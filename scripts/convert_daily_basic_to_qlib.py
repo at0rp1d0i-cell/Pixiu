@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import struct
 import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -52,13 +53,13 @@ def read_calendar() -> list[str]:
     return [day.strip() for day in CALENDAR_FILE.read_text().splitlines() if day.strip()]
 
 
-def convert_stock(parquet_path: Path, calendar: list[str]) -> bool:
+def convert_stock(parquet_path: Path, calendar: list[str], *, overwrite: bool = False) -> bool:
     ts_code = parquet_path.stem
     qlib_dir = FEATURES_DIR / ts_code_to_qlib(ts_code)
     existing = {path.name for path in qlib_dir.glob("*.day.bin")} if qlib_dir.exists() else set()
 
     target_bins = {f"{field}.day.bin" for field in QLIB_DAILY_BASIC_FIELDS}
-    if existing.issuperset(target_bins):
+    if not overwrite and existing.issuperset(target_bins):
         return False
 
     df = pd.read_parquet(parquet_path)
@@ -71,7 +72,7 @@ def convert_stock(parquet_path: Path, calendar: list[str]) -> bool:
     wrote_any = False
     for field, array in arrays.items():
         bin_path = qlib_dir / f"{field}.day.bin"
-        if bin_path.exists():
+        if bin_path.exists() and not overwrite:
             continue
         _write_bin(bin_path, 0, array)
         wrote_any = True
@@ -79,7 +80,20 @@ def convert_stock(parquet_path: Path, calendar: list[str]) -> bool:
     return wrote_any
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert staged Tushare daily_basic parquet files to qlib bins.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Rewrite existing daily_basic qlib bins instead of skipping them.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     if not DAILY_BASIC_STAGING_DIR.exists():
         print(
             f"Staging directory not found: {DAILY_BASIC_STAGING_DIR}\n"
@@ -105,7 +119,7 @@ def main() -> None:
     converted = 0
     skipped = 0
     for parquet_file in parquet_files:
-        if convert_stock(parquet_file, calendar):
+        if convert_stock(parquet_file, calendar, overwrite=args.overwrite):
             converted += 1
         else:
             skipped += 1

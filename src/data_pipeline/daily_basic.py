@@ -21,6 +21,8 @@ DAILY_BASIC_FIELD_MAP = {
     "turnover_rate": "turnover_rate",
     "pe_ttm": "pe_ttm",
     "pb": "pb",
+    # Tushare daily_basic exposes circ_mv in market-value units and Pixiu
+    # preserves that raw scale while renaming it to the runtime-facing field.
     "circ_mv": "float_mv",
 }
 

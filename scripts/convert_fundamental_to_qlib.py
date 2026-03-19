@@ -25,6 +25,7 @@ Usage:
 import struct
 import sys
 import os
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -159,8 +160,9 @@ def pit_fill(df: pd.DataFrame, calendar: list[pd.Timestamp]) -> pd.DataFrame:
 
 def convert_stock(
     parquet_path: Path,
-    calendar: list[str],
-    cal_index: dict[str, int],
+    calendar: list[pd.Timestamp],
+    *,
+    overwrite: bool = False,
 ) -> bool:
     """
     Convert one stock's fina_indicator parquet to qlib bins.
@@ -173,7 +175,7 @@ def convert_stock(
     # Skip if all target bins already exist
     existing = {b.stem.split(".")[0] for b in qlib_dir.glob("*.day.bin")} if qlib_dir.exists() else set()
     target_fields = [f for f in FIELDS]
-    if existing.issuperset(target_fields):
+    if not overwrite and existing.issuperset(target_fields):
         return False  # all bins present, skip
 
     try:
@@ -200,7 +202,7 @@ def convert_stock(
     wrote_any = False
     for field in FIELDS:
         bin_path = qlib_dir / f"{field}.day.bin"
-        if bin_path.exists():
+        if bin_path.exists() and not overwrite:
             continue  # already present, skip individual field
 
         if field not in filled.columns:
@@ -222,7 +224,21 @@ def convert_stock(
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert staged Tushare fina_indicator parquet files to qlib bins.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Rewrite existing fundamental qlib bins instead of skipping them.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     # Guard: staging directory must exist
     if not STAGING_DIR.exists():
         print(
@@ -243,7 +259,6 @@ def main() -> None:
 
     print(f"Reading calendar from {CALENDAR_FILE} ...", flush=True)
     calendar = read_calendar()
-    cal_index = {d: i for i, d in enumerate(calendar)}
     print(f"Calendar: {len(calendar)} days ({calendar[0]} ~ {calendar[-1]})", flush=True)
 
     parquet_files = sorted(STAGING_DIR.glob("*.parquet"))
@@ -258,7 +273,7 @@ def main() -> None:
     skipped   = 0
 
     for i, path in enumerate(parquet_files, 1):
-        wrote = convert_stock(path, calendar, cal_index)
+        wrote = convert_stock(path, calendar, overwrite=args.overwrite)
         if wrote:
             converted += 1
         else:

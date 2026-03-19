@@ -70,10 +70,17 @@ def _get_pro():
 def load_progress() -> dict:
     if PROGRESS_FILE.exists():
         with open(PROGRESS_FILE, encoding="utf-8") as handle:
-            return json.load(handle)
+            progress = json.load(handle)
+            progress.setdefault("done", [])
+            progress.setdefault("failed", {})
+            progress.setdefault("empty_counts", {})
+            progress.setdefault("empty_done", [])
+            return progress
     return {
         "done": [],
         "failed": {},
+        "empty_counts": {},
+        "empty_done": [],
         "started_at": datetime.now().isoformat(),
     }
 
@@ -109,8 +116,10 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
     DAILY_BASIC_STAGING_DIR.mkdir(parents=True, exist_ok=True)
     done_set = set(progress["done"])
     failed_dict: dict[str, str] = progress.get("failed", {})
+    empty_counts: dict[str, int] = progress.get("empty_counts", {})
+    empty_done_set = set(progress.get("empty_done", []))
 
-    pending = [code for code in stock_codes if code not in done_set]
+    pending = [code for code in stock_codes if code not in done_set and code not in empty_done_set]
     logger.info(
         "[Phase 2] Pending: %d / %d (skipped %d already done)",
         len(pending),
@@ -124,12 +133,29 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
             if df is not None and not df.empty:
                 out_path = DAILY_BASIC_STAGING_DIR / f"{ts_code}.parquet"
                 df.to_parquet(out_path, index=False)
+                done_set.add(ts_code)
+                progress["done"] = list(done_set)
+                failed_dict.pop(ts_code, None)
+                empty_counts.pop(ts_code, None)
+                empty_done_set.discard(ts_code)
             else:
-                logger.warning("[Phase 2] [%d/%d] %s — empty result, marking done", i, len(pending), ts_code)
-
-            done_set.add(ts_code)
-            progress["done"] = list(done_set)
-            failed_dict.pop(ts_code, None)
+                empty_attempts = empty_counts.get(ts_code, 0) + 1
+                empty_counts[ts_code] = empty_attempts
+                if empty_attempts >= 2:
+                    empty_done_set.add(ts_code)
+                    logger.warning(
+                        "[Phase 2] [%d/%d] %s — empty result twice, marking empty_done",
+                        i,
+                        len(pending),
+                        ts_code,
+                    )
+                else:
+                    logger.warning(
+                        "[Phase 2] [%d/%d] %s — empty result, will retry on next run",
+                        i,
+                        len(pending),
+                        ts_code,
+                    )
         except Exception as exc:
             failed_dict[ts_code] = str(exc)
             progress["failed"] = failed_dict
@@ -137,18 +163,23 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
 
         if i % CHECKPOINT_EVERY == 0:
             progress["failed"] = failed_dict
+            progress["empty_counts"] = empty_counts
+            progress["empty_done"] = list(empty_done_set)
             save_progress(progress)
             logger.info(
-                "[Phase 2] Checkpoint %d/%d — done: %d, failed: %d",
+                "[Phase 2] Checkpoint %d/%d — done: %d, failed: %d, empty_done: %d",
                 i,
                 len(pending),
                 len(done_set),
                 len(failed_dict),
+                len(empty_done_set),
             )
 
         time.sleep(SLEEP_BETWEEN_STOCKS)
 
     progress["failed"] = failed_dict
+    progress["empty_counts"] = empty_counts
+    progress["empty_done"] = list(empty_done_set)
     save_progress(progress)
 
 
