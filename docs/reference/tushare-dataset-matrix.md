@@ -28,11 +28,11 @@ Tushare 的问题不是“有没有数据”，而是“太多接口都能下，
 | 价量基础行情 | `daily` / `pro_bar` / `adj_factor` | 回测直接读取层 | 回测底座 | 已采用，继续用 Qlib 主链 |
 | 每日指标 | `daily_basic` | 扩展结构化字段层 | 估值、换手率、市值 | P0，已在下载与转换 |
 | 财务指标 | `fina_indicator` | 扩展结构化字段层 | `roe` 等财务质量信号 | P0，已转换 |
-| 个股资金流 | `moneyflow` | 扩展结构化字段层 / Agent 上下文层 | 量价/资金流 alpha | P1，建议尽快接 |
+| 个股资金流 | `moneyflow` | 扩展结构化字段层 / Agent 上下文层 | 量价/资金流 alpha | P1，下载脚本已就位 |
 | 沪深港通日资金流 | `moneyflow_hsgt` | Agent 上下文层 | 北向/南向宏观风险偏好 | P1，已开始接入 |
 | 沪深港通持股明细 | `hk_hold` | Agent 上下文层 | 北向历史持仓结构 | 历史价值高，但注意官方断档 |
 | 融资融券汇总/明细 | `margin` / `margin_detail` | 扩展结构化字段层 / Agent 上下文层 | 杠杆风险偏好 | P1，汇总已接，明细待补 |
-| 每日涨跌停价格 | `stk_limit` | 扩展结构化字段层 | A 股特有约束与时滞 | P1，建议尽快接 |
+| 每日涨跌停价格 | `stk_limit` | 扩展结构化字段层 | A 股特有约束与时滞 | P1，下载脚本已就位 |
 | 指数成分和权重 | `index_weight` | Agent 上下文层 / 数据治理层 | 基准、成分调整、风格暴露 | P2，值得接 |
 | 指数成分全集 | `index_member_all` | 数据治理层 | 行业/指数 membership | P2，值得接 |
 | 三大财务报表 | `income` / `balancesheet` / `cashflow` | 扩展结构化字段层 | 更丰富的会计特征 | P2，慎重接入 |
@@ -86,7 +86,8 @@ Tushare 的问题不是“有没有数据”，而是“太多接口都能下，
 - `fina_indicator` staging 已完整，`roe` 已进入 runtime capability
 - `daily_basic` 正在全量下载中，`pb / pe_ttm / turnover_rate / float_mv` 还未达到 capability 覆盖阈值
 - `margin` 汇总历史已具备单表下载脚本
-- `moneyflow_hsgt` 已有历史下载脚本，适合 Stage 1 北向上下文
+- `moneyflow_hsgt` 历史文件已落地，适合 Stage 1 北向上下文
+- `moneyflow` / `stk_limit` 已有 staging 下载脚本，但还未进入 runtime capability
 
 ## 5. Key Constraints
 

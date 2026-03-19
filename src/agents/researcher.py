@@ -21,7 +21,11 @@ from src.schemas.stage_io import HypothesisGenOutput
 from src.schemas.judgment import CriticVerdict
 from src.schemas.market_context import MarketContextMemo
 from src.factor_pool.pool import FactorPool
-from src.formula.capabilities import format_available_fields_for_prompt, get_runtime_formula_capabilities
+from src.formula.capabilities import (
+    FormulaCapabilities,
+    format_available_fields_for_prompt,
+    get_runtime_formula_capabilities,
+)
 from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
@@ -117,8 +121,7 @@ def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 
 
-def _build_researcher_system_prompt() -> str:
-    capabilities = get_runtime_formula_capabilities()
+def _build_researcher_system_prompt(capabilities: FormulaCapabilities) -> str:
     return ALPHA_RESEARCHER_SYSTEM_PROMPT.format(
         available_fields_block=format_available_fields_for_prompt(capabilities),
     )
@@ -129,10 +132,12 @@ class AlphaResearcher:
 
     def __init__(self, island: str, skill_loader: Optional[SkillLoader] = None,
                  registry: Optional[SubspaceRegistry] = None,
-                 factor_pool: Optional[FactorPool] = None):
+                 factor_pool: Optional[FactorPool] = None,
+                 capabilities: Optional[FormulaCapabilities] = None):
         self.island = island
         self.skill_loader = skill_loader or _SKILL_LOADER
-        self.registry = registry or SubspaceRegistry.get_default_registry()
+        self.capabilities = capabilities or get_runtime_formula_capabilities()
+        self.registry = registry or SubspaceRegistry.get_default_registry(capabilities=self.capabilities)
         self.factor_pool = factor_pool
         self.llm = build_researcher_llm(profile="researcher")
 
@@ -218,7 +223,7 @@ class AlphaResearcher:
             subspace=subspace_hint,
             island=self.island,
         )
-        system_content = _build_researcher_system_prompt()
+        system_content = _build_researcher_system_prompt(self.capabilities)
         if skill_context:
             system_content = (
                 system_content + "\n\n## 研究规范与子空间框架\n\n" + skill_context

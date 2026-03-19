@@ -41,9 +41,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.env import load_dotenv_if_available
+from src.core.env import clear_localhost_proxy_env, load_dotenv_if_available
 
 load_dotenv_if_available()
+_cleared_proxy_vars = clear_localhost_proxy_env()
 
 # ── Logging ─────────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,8 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("margin_downloader")
+if _cleared_proxy_vars:
+    logger.info("Cleared localhost proxy vars for direct Tushare access: %s", ", ".join(_cleared_proxy_vars))
 
 # ── Config ───────────────────────────────────────────────────────────────────────
 

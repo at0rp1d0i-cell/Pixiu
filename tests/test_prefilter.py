@@ -9,6 +9,7 @@ import pytest
 
 from src.schemas.research_note import FactorResearchNote
 from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker, PreFilter
+from src.formula.capabilities import get_runtime_formula_capabilities
 
 pytestmark = pytest.mark.unit
 
@@ -341,3 +342,16 @@ def test_prefilter_tracks_top_k_truncation_in_diagnostics(monkeypatch):
         "candidate_2",
         "candidate_3",
     ]
+
+
+def test_prefilter_uses_provided_capabilities_without_runtime_rescan():
+    capabilities = get_runtime_formula_capabilities()
+
+    with patch("src.agents.prefilter.get_runtime_formula_capabilities", side_effect=AssertionError("should not rescan")):
+        prefilter = PreFilter(
+            factor_pool=MagicMock(),
+            capabilities=capabilities,
+        )
+
+    assert set(prefilter.validator.allowed_fields) == set(capabilities.available_fields)
+    assert set(prefilter.validator.approved_operators) == set(capabilities.approved_operators)

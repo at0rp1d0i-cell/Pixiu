@@ -6,7 +6,12 @@ Exploration schemas
 from typing import List, Dict, Optional, Any
 from enum import Enum
 from pydantic import Field
-from src.formula.capabilities import BASE_FIELD_SPECS, EXPERIMENTAL_FIELD_SPECS, get_runtime_formula_capabilities
+from src.formula.capabilities import (
+    BASE_FIELD_SPECS,
+    EXPERIMENTAL_FIELD_SPECS,
+    FormulaCapabilities,
+    get_runtime_formula_capabilities,
+)
 from src.schemas import PixiuBase
 from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
 from src.schemas.research_note import ExplorationQuestion
@@ -122,9 +127,12 @@ class SubspaceRegistry(PixiuBase):
     composition_constraints: CompositionConstraints = Field(default_factory=CompositionConstraints)
 
     @classmethod
-    def get_default_registry(cls) -> "SubspaceRegistry":
+    def get_default_registry(
+        cls,
+        capabilities: Optional[FormulaCapabilities] = None,
+    ) -> "SubspaceRegistry":
         """获取默认注册表配置（含原语词汇表、机制模板、叙事类别）"""
-        capabilities = get_runtime_formula_capabilities()
+        capabilities = capabilities or get_runtime_formula_capabilities()
         available_fields = set(capabilities.available_fields)
         available_field_specs = [
             spec

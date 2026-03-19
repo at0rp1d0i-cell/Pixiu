@@ -24,6 +24,8 @@
   - Skills 扩展设计稿（待收口为可执行版）
 - `2026-03-19-skills-expansion-implementation.md`
   - Skills 扩展实施计划（待修订）
+- `2026-03-19-tushare-p1-expansion-implementation.md`
+  - Tushare P1 数据面扩展计划（`moneyflow / stk_limit` staging 与下载期收口）
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 

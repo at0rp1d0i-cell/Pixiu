@@ -20,7 +20,7 @@ from typing import Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.formula.capabilities import get_allowed_formula_fields, get_approved_formula_operators
+from src.formula.capabilities import FormulaCapabilities, get_runtime_formula_capabilities
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
@@ -46,8 +46,11 @@ class Validator:
         allowed_fields: Optional[set[str]] = None,
         approved_operators: Optional[set[str]] = None,
     ):
-        self.allowed_fields = allowed_fields or set(get_allowed_formula_fields())
-        self.approved_operators = approved_operators or set(get_approved_formula_operators())
+        capabilities = None
+        if allowed_fields is None or approved_operators is None:
+            capabilities = get_runtime_formula_capabilities()
+        self.allowed_fields = allowed_fields or set(capabilities.available_fields)
+        self.approved_operators = approved_operators or set(capabilities.approved_operators)
 
     def validate(self, note: FactorResearchNote) -> tuple[bool, str]:
         """返回 (passed: bool, reason: str)"""
@@ -340,8 +343,17 @@ class RegimeFilter:
 class PreFilter:
     """Stage 3 四重过滤器组合执行器。"""
 
-    def __init__(self, factor_pool: FactorPool, validator: Optional[Validator] = None):
-        self.validator = validator or Validator()
+    def __init__(
+        self,
+        factor_pool: FactorPool,
+        validator: Optional[Validator] = None,
+        capabilities: Optional[FormulaCapabilities] = None,
+    ):
+        self.capabilities = capabilities or get_runtime_formula_capabilities()
+        self.validator = validator or Validator(
+            allowed_fields=set(self.capabilities.available_fields),
+            approved_operators=set(self.capabilities.approved_operators),
+        )
         self.novelty = NoveltyFilter(pool=factor_pool, threshold=THRESHOLDS.min_novelty_threshold)
         self.alignment = AlignmentChecker()
         self.constraint_checker = ConstraintChecker(pool=factor_pool)

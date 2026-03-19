@@ -65,8 +65,11 @@
 - [x] `fina_indicator -> Qlib bins` 转换链已打通，`$roe` 已可进入 runtime 可用字段集合
 - [x] `daily_basic` 下载与转换链已建立（`pb / pe_ttm / turnover_rate / float_mv`）
 - [x] `moneyflow_hsgt` 下载脚本已建立，可作为下一批 Stage 1 / regime 资金流数据
+- [x] `moneyflow` / `stk_limit` staging 下载脚本已建立，进入 P1 数据面准备阶段
+- [x] Tushare 下载脚本已内建 localhost proxy 清理，避免本地失效代理导致批量下载中断
 - [ ] `daily_basic` 全量下载仍在进行中，尚未达到 runtime coverage 阈值
 - [ ] `pb / pe_ttm / turnover_rate / float_mv` 进入 Stage 2/3 可用列表前，需要下载和转换完成
+- [ ] `moneyflow` / `stk_limit` 的真实下载与后续接入顺序仍待执行
 - [ ] 再次运行 Phase 4B 实验前，需确认扩展字段覆盖率与 Docker Stage 4 blocker 都已收口
 
 ### Phase 2: Hypothesis Expansion Engine ✅

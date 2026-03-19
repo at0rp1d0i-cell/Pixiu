@@ -25,6 +25,8 @@ Last Reviewed: 2026-03-19
 | A 股价量 Qlib 数据 | Stage 4 回测直接读取 | 是 | `data/qlib_bin/` | `scripts/download_qlib_data.py` |
 | 基本面 parquet 暂存 | 基本面原始 staging | 否 | `data/fundamental_staging/fina_indicator/` | `scripts/download_fundamental_data.py` |
 | `daily_basic` parquet 暂存 | 市场派生字段原始 staging | 否 | `data/fundamental_staging/daily_basic/` | `scripts/download_daily_basic_data.py` |
+| `moneyflow` parquet 暂存 | 个股资金流原始 staging | 否 | `data/fundamental_staging/moneyflow/` | `scripts/download_moneyflow_data.py` |
+| `stk_limit` parquet 暂存 | 涨跌停价格原始 staging | 否 | `data/fundamental_staging/stk_limit/` | `scripts/download_stk_limit_data.py` |
 | `fina_indicator` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_fundamental_to_qlib.py` |
 | `daily_basic` Qlib bins | 供实验扩展字段使用 | 否 | `data/qlib_bin/features/{symbol}/` | `scripts/convert_daily_basic_to_qlib.py` |
 | 融资融券历史 parquet | 结构化 staging / 后续特征扩展 | 否 | `data/fundamental_staging/margin_history/margin_history.parquet` | `scripts/download_margin_history.py` |
@@ -50,12 +52,19 @@ uv sync --dev
 - `scripts/download_daily_basic_data.py`
 - `scripts/download_margin_history.py`
 - `scripts/download_moneyflow_hsgt.py`
+- `scripts/download_moneyflow_data.py`
+- `scripts/download_stk_limit_data.py`
 
 推荐在 shell 或 `.env` 中设置：
 
 ```bash
 export TUSHARE_TOKEN=<your_token>
 ```
+
+说明：
+
+- Tushare 下载脚本现在会自动清理指向 `127.0.0.1` / `localhost` 的代理环境变量，避免本地失效代理导致批量下载中断
+- 非 localhost 的显式代理不会被自动移除
 
 ### 目录预期
 
@@ -65,6 +74,8 @@ export TUSHARE_TOKEN=<your_token>
 - `data/parquet_staging/baostock_raw/`
 - `data/fundamental_staging/fina_indicator/`
 - `data/fundamental_staging/daily_basic/`
+- `data/fundamental_staging/moneyflow/`
+- `data/fundamental_staging/stk_limit/`
 - `data/fundamental_staging/margin_history/`
 - `data/fundamental_staging/moneyflow_hsgt/`
 - `logs/`
@@ -185,6 +196,19 @@ uv run python scripts/download_moneyflow_hsgt.py
 - 输出单个 parquet：`data/fundamental_staging/moneyflow_hsgt/moneyflow_hsgt.parquet`
 - 适合先给 Stage 1 / regime 基础设施层使用
 - 比 `hk_hold` 更适合作为当前北向资金的主信号
+
+### 4.5 想补个股资金流与涨跌停约束
+
+```bash
+uv run python scripts/download_moneyflow_data.py
+uv run python scripts/download_stk_limit_data.py
+```
+
+当前定位：
+
+- `moneyflow` 更适合后续 `volume / northbound / volatility` 研究与 Stage 1 上下文增强
+- `stk_limit` 更适合 A 股特有约束、时滞和制度边界研究
+- 两者当前都只进入 staging，不会自动变成 Stage 2/3 可用公式字段
 
 ## 5. Script-by-script Notes
 
@@ -329,6 +353,42 @@ uv run python scripts/convert_daily_basic_to_qlib.py --overwrite
 - `data/fundamental_staging/moneyflow_hsgt/moneyflow_hsgt.parquet`
 - `logs/moneyflow_hsgt_download.log`
 
+### `scripts/download_moneyflow_data.py`
+
+适用场景：
+
+- 想补个股级资金流强弱、大小单结构与净流入信号
+
+关键文件：
+
+- `data/fundamental_staging/moneyflow/{ts_code}.parquet`
+- `data/moneyflow_download_progress.json`
+- `logs/moneyflow_download.log`
+
+可选降速：
+
+```bash
+PIXIU_TUSHARE_SLEEP_SECONDS=1.0 uv run python scripts/download_moneyflow_data.py
+```
+
+### `scripts/download_stk_limit_data.py`
+
+适用场景：
+
+- 想补 A 股每日涨跌停价带与制度约束边界
+
+关键文件：
+
+- `data/fundamental_staging/stk_limit/{ts_code}.parquet`
+- `data/stk_limit_download_progress.json`
+- `logs/stk_limit_download.log`
+
+可选降速：
+
+```bash
+PIXIU_TUSHARE_SLEEP_SECONDS=1.0 uv run python scripts/download_stk_limit_data.py
+```
+
 ## 6. Validation Checklist
 
 ### 主路径最小检查
@@ -354,6 +414,8 @@ PY
 ```bash
 find data/fundamental_staging/fina_indicator -maxdepth 1 -name '*.parquet' | head
 find data/fundamental_staging/daily_basic -maxdepth 1 -name '*.parquet' | head
+find data/fundamental_staging/moneyflow -maxdepth 1 -name '*.parquet' | head
+find data/fundamental_staging/stk_limit -maxdepth 1 -name '*.parquet' | head
 find data/qlib_bin/features -maxdepth 2 \\( -name 'roe.day.bin' -o -name 'pb.day.bin' -o -name 'pe_ttm.day.bin' -o -name 'turnover_rate.day.bin' -o -name 'float_mv.day.bin' \\) | head
 ```
 

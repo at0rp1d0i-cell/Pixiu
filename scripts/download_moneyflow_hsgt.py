@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.env import load_dotenv_if_available
+from src.core.env import clear_localhost_proxy_env, load_dotenv_if_available
 from src.data_pipeline.moneyflow_hsgt import (
     MONEYFLOW_HSGT_COLUMNS,
     MONEYFLOW_HSGT_FILE,
@@ -32,6 +32,7 @@ from src.data_pipeline.moneyflow_hsgt import (
 )
 
 load_dotenv_if_available()
+_cleared_proxy_vars = clear_localhost_proxy_env()
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -45,6 +46,8 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("moneyflow_hsgt_downloader")
+if _cleared_proxy_vars:
+    logger.info("Cleared localhost proxy vars for direct Tushare access: %s", ", ".join(_cleared_proxy_vars))
 
 SLEEP_BETWEEN = 0.2
 

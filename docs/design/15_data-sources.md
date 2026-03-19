@@ -4,9 +4,9 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-19
 
-> 版本：2.1
+> 版本：2.2
 > 前置依赖：`11_interface-contracts.md`
 
 ---
@@ -67,7 +67,8 @@ $open, $high, $low, $close, $volume, $factor, $amount
 
 - 部分 staging 已存在
 - `fina_indicator` / `daily_basic` → Qlib bins 正在收口
-- `moneyflow_hsgt` 正进入结构化 staging，优先服务 Stage 1 / northbound 上下文
+- `moneyflow_hsgt` 已进入结构化 staging，优先服务 Stage 1 / northbound 上下文
+- `moneyflow` / `stk_limit` staging 下载链已就位，但尚未进入 runtime capability
 - 运行时字段可用性不再只看设计文档，而要看本地 `qlib_bin/features/**` 的真实覆盖率
 
 ### Layer 4: 新闻/叙事搜索层
@@ -108,7 +109,7 @@ $open, $high, $low, $close, $volume, $factor, $amount
 | valuation | 价格均值回归代理 | 基本面入库后会明显增强 |
 | sentiment / narrative | 上下文有限 | 新闻、公告、叙事数据仍待扩展 |
 
-当前更优先补的是 `moneyflow_hsgt` 这类连续日级资金流，而不是依赖已断档的 `hk_hold` 增量。
+当前更优先补的是 `moneyflow_hsgt` 这类连续日级资金流，以及 `moneyflow` / `stk_limit` 这类 A 股特有日频结构化信号，而不是依赖已断档的 `hk_hold` 增量。
 
 ## 5. Future Work Boundary
 

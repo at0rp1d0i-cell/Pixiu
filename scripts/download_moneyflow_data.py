@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Download Tushare daily_basic for all listed A-share stocks.
+Download Tushare moneyflow for all listed A-share stocks.
 
 Output:
-  data/fundamental_staging/daily_basic/{ts_code}.parquet
-  data/daily_basic_download_progress.json
+  data/fundamental_staging/moneyflow/{ts_code}.parquet
+  data/moneyflow_download_progress.json
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.env import clear_localhost_proxy_env, load_dotenv_if_available
-from src.data_pipeline.daily_basic import DAILY_BASIC_STAGING_DIR, get_daily_basic_field_string
+from src.data_pipeline.moneyflow import MONEYFLOW_STAGING_DIR, get_moneyflow_field_string, normalize_moneyflow_frame
 
 load_dotenv_if_available()
 _cleared_proxy_vars = clear_localhost_proxy_env()
 
-LOG_DIR = Path(__file__).resolve().parents[1] / "logs"
+LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
@@ -39,18 +39,18 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / "daily_basic_download.log", encoding="utf-8"),
+        logging.FileHandler(LOG_DIR / "moneyflow_download.log", encoding="utf-8"),
     ],
 )
-logger = logging.getLogger("daily_basic_downloader")
+logger = logging.getLogger("moneyflow_downloader")
 if _cleared_proxy_vars:
     logger.info("Cleared localhost proxy vars for direct Tushare access: %s", ", ".join(_cleared_proxy_vars))
 
 DATA_DIR = PROJECT_ROOT / "data"
-PROGRESS_FILE = DATA_DIR / "daily_basic_download_progress.json"
+PROGRESS_FILE = DATA_DIR / "moneyflow_download_progress.json"
 START_DATE = "20100101"
 END_DATE = datetime.today().strftime("%Y%m%d")
-SLEEP_BETWEEN_STOCKS = 0.3
+SLEEP_BETWEEN_STOCKS = float(os.getenv("PIXIU_TUSHARE_SLEEP_SECONDS", "0.3"))
 CHECKPOINT_EVERY = 50
 
 _pro = None
@@ -61,10 +61,7 @@ def _get_pro():
     if _pro is None:
         token = os.getenv("TUSHARE_TOKEN")
         if not token:
-            raise RuntimeError(
-                "TUSHARE_TOKEN environment variable is not set. "
-                "Export it before running: export TUSHARE_TOKEN=<your_token>"
-            )
+            raise RuntimeError("TUSHARE_TOKEN environment variable is not set.")
         _pro = ts.pro_api(token)
         logger.info("Tushare Pro API initialized.")
     return _pro
@@ -105,18 +102,18 @@ def fetch_stock_list() -> list[str]:
     return codes
 
 
-def fetch_daily_basic(ts_code: str) -> pd.DataFrame | None:
+def fetch_moneyflow(ts_code: str) -> pd.DataFrame | None:
     pro = _get_pro()
-    return pro.daily_basic(
+    return pro.moneyflow(
         ts_code=ts_code,
         start_date=START_DATE,
         end_date=END_DATE,
-        fields=get_daily_basic_field_string(),
+        fields=get_moneyflow_field_string(),
     )
 
 
 def download_all(progress: dict, stock_codes: list[str]) -> None:
-    DAILY_BASIC_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+    MONEYFLOW_STAGING_DIR.mkdir(parents=True, exist_ok=True)
     done_set = set(progress["done"])
     failed_dict: dict[str, str] = progress.get("failed", {})
     empty_counts: dict[str, int] = progress.get("empty_counts", {})
@@ -132,10 +129,10 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
 
     for i, ts_code in enumerate(pending, 1):
         try:
-            df = fetch_daily_basic(ts_code)
+            df = fetch_moneyflow(ts_code)
             if df is not None and not df.empty:
-                out_path = DAILY_BASIC_STAGING_DIR / f"{ts_code}.parquet"
-                df.to_parquet(out_path, index=False)
+                out_path = MONEYFLOW_STAGING_DIR / f"{ts_code}.parquet"
+                normalize_moneyflow_frame(df).to_parquet(out_path, index=False)
                 done_set.add(ts_code)
                 progress["done"] = list(done_set)
                 failed_dict.pop(ts_code, None)
@@ -187,13 +184,11 @@ def download_all(progress: dict, stock_codes: list[str]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Download Tushare daily_basic for all A-share stocks.",
-    )
+    parser = argparse.ArgumentParser(description="Download Tushare moneyflow for all A-share stocks.")
     parser.add_argument(
         "--list-only",
         action="store_true",
-        help="Only fetch and print the stock list, do not download daily_basic.",
+        help="Only fetch and print the stock list, do not download moneyflow.",
     )
     return parser.parse_args()
 
@@ -201,8 +196,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     logger.info("=" * 60)
-    logger.info("Pixiu — Tushare daily_basic Batch Downloader")
-    logger.info("Output: %s", DAILY_BASIC_STAGING_DIR)
+    logger.info("Pixiu — Tushare moneyflow Batch Downloader")
+    logger.info("Output: %s", MONEYFLOW_STAGING_DIR)
     logger.info("Progress: %s", PROGRESS_FILE)
     logger.info("=" * 60)
 
