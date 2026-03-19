@@ -24,6 +24,7 @@ from src.factor_pool.pool import FactorPool
 from src.formula.capabilities import (
     FormulaCapabilities,
     format_available_fields_for_prompt,
+    format_available_operators_for_prompt,
     get_runtime_formula_capabilities,
 )
 from src.llm.openai_compat import build_researcher_llm
@@ -49,8 +50,11 @@ ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于
 可用字段（当前运行时，以本地 Qlib feature store 为准）：
 {available_fields_block}
 
+可用算子（当前运行时 allowlist）：
+{available_operators_block}
+
 注意：
-- 只有上方明确列出的字段可以出现在 proposed_formula 中
+- 只有上方明确列出的字段和算子可以出现在 proposed_formula 中
 - 不要假设某个“常见字段”一定可用
 - 如果估值/基本面字段当前不可用，请退化到价量代理
 
@@ -103,6 +107,7 @@ def _today_str() -> str:
 def _build_researcher_system_prompt(capabilities: FormulaCapabilities) -> str:
     return ALPHA_RESEARCHER_SYSTEM_PROMPT.format(
         available_fields_block=format_available_fields_for_prompt(capabilities),
+        available_operators_block=format_available_operators_for_prompt(capabilities),
     )
 
 

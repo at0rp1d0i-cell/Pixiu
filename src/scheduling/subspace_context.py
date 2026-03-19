@@ -63,7 +63,7 @@ def build_factor_algebra_context(
     lines.append("\n### 组合规则")
     lines.append(f"- 最大嵌套深度: {registry.composition_constraints.max_nesting_depth}")
     lines.append(f"- 最大算子总数: {registry.composition_constraints.max_total_operators}")
-    lines.append("- 时间变换可嵌套（如 Mean(Ref($close, -1), 5)）")
+    lines.append("- 时间变换可嵌套（如 Mean(Ref($close, 1), 5)）")
     lines.append("- 截面算子用于横截面排名/标准化")
     lines.append(f"- 当前 Island: {island}，请围绕此方向构造因子")
 
@@ -152,7 +152,7 @@ def build_narrative_mining_context(registry: SubspaceRegistry) -> str:
     for cat in registry.narrative_categories:
         lines.append(f"\n**{cat.category}**")
         lines.append(f"  抽取目标: {', '.join(cat.extraction_targets)}")
-        lines.append(f"  示例模式:")
+        lines.append("  示例模式:")
         for pat in cat.example_patterns:
             lines.append(f"    - {pat}")
 

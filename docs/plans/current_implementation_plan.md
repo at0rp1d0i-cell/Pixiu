@@ -80,6 +80,8 @@ Last Reviewed: 2026-03-19
 
 - [ ] `Data Capability Platform Refactor`
   - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`
+  - 第一批实施计划：`docs/plans/2026-03-19-data-capability-platform-refactor-implementation.md`
+  - 当前先收口 canonical formula capability kernel（field/operator manifest + 错误示例清理），再进入完整 dataset registry/readiness 分层
 - [ ] `FactorPool Boundary Refactor`
   - 见 `docs/plans/2026-03-19-factor-pool-boundary-refactor-design.md`
 - [ ] `Orchestrator Boundary Refactor`

@@ -6,58 +6,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.core.env import load_dotenv_if_available
+from src.formula.manifest import (
+    ALL_FIELD_SPECS,
+    APPROVED_OPERATORS,
+    BASE_FIELD_SPECS,
+    EXPERIMENTAL_FIELD_SPECS,
+    FIELD_SPECS_BY_NAME as _FIELD_SPECS_BY_NAME,
+    FORMULA_OPERATOR_SPECS,
+    FormulaFieldSpec,
+    FormulaOperatorSpec as _FormulaOperatorSpec,
+    OPERATOR_SPECS_BY_NAME as _OPERATOR_SPECS_BY_NAME,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
 DEFAULT_MIN_COVERAGE_RATIO = 0.95
 
-
-@dataclass(frozen=True)
-class FormulaFieldSpec:
-    formula_name: str
-    bin_stem: str
-    source: str
-    description: str
-    category: str
-
-
-BASE_FIELD_SPECS = (
-    FormulaFieldSpec("$open", "open", "qlib_price_volume", "开盘价", "price_volume"),
-    FormulaFieldSpec("$high", "high", "qlib_price_volume", "最高价", "price_volume"),
-    FormulaFieldSpec("$low", "low", "qlib_price_volume", "最低价", "price_volume"),
-    FormulaFieldSpec("$close", "close", "qlib_price_volume", "收盘价", "price_volume"),
-    FormulaFieldSpec("$volume", "volume", "qlib_price_volume", "成交量", "price_volume"),
-    FormulaFieldSpec("$vwap", "vwap", "qlib_price_volume", "成交量加权均价", "price_volume"),
-    FormulaFieldSpec("$amount", "amount", "qlib_price_volume", "成交额", "price_volume"),
-    FormulaFieldSpec("$factor", "factor", "qlib_price_volume", "复权因子", "price_volume"),
-)
-
-EXPERIMENTAL_FIELD_SPECS = (
-    FormulaFieldSpec("$roe", "roe", "fina_indicator", "净资产收益率", "fundamental"),
-    FormulaFieldSpec("$pb", "pb", "daily_basic", "市净率", "fundamental"),
-    FormulaFieldSpec("$pe_ttm", "pe_ttm", "daily_basic", "滚动市盈率", "fundamental"),
-    FormulaFieldSpec("$turnover_rate", "turnover_rate", "daily_basic", "换手率", "fundamental"),
-    FormulaFieldSpec("$float_mv", "float_mv", "daily_basic", "流通市值", "fundamental"),
-)
-
-ALL_FIELD_SPECS = BASE_FIELD_SPECS + EXPERIMENTAL_FIELD_SPECS
-FIELD_SPECS_BY_NAME = {spec.formula_name: spec for spec in ALL_FIELD_SPECS}
-
-APPROVED_OPERATORS = (
-    "Mean", "Std", "Var", "Max", "Min", "Sum",
-    "Ref", "Delta", "Slope", "Rsquare", "Resi",
-    "Rank", "Abs", "Sign",
-    "Log", "Power", "Sqrt",
-    "Corr", "Cov",
-    "If", "Gt", "Lt", "Ge", "Le", "Eq", "Ne",
-    "And", "Or", "Not",
-    "Add", "Sub", "Mul", "Div",
-    "IdxMax", "IdxMin", "Comb", "Count", "Mad",
-    "WMA", "EMA",
-    "Ts_Mean", "Ts_Std", "Ts_Max", "Ts_Min", "Ts_Sum",
-    "Ts_Rank", "Ts_Corr", "Ts_Cov", "Ts_WMA", "Ts_Slope",
-    "SignedPower", "Greater", "Less",
-)
+FIELD_SPECS_BY_NAME = _FIELD_SPECS_BY_NAME
+FormulaOperatorSpec = _FormulaOperatorSpec
+OPERATOR_SPECS_BY_NAME = _OPERATOR_SPECS_BY_NAME
 
 
 @dataclass(frozen=True)
@@ -209,4 +176,22 @@ def format_available_fields_for_prompt(capabilities: FormulaCapabilities) -> str
         lines.append(f"  当前未就绪字段（禁止使用）：{', '.join(unavailable_experimental)}")
     if not lines:
         lines.append("  （当前未检测到本地 Qlib 可用字段，禁止猜测未列出的字段）")
+    return "\n".join(lines)
+
+
+def format_available_operators_for_prompt(capabilities: FormulaCapabilities) -> str:
+    approved = set(capabilities.approved_operators)
+    common_specs = [spec for spec in FORMULA_OPERATOR_SPECS if spec.name in approved]
+    described_names = {spec.name for spec in common_specs}
+    remaining = [name for name in capabilities.approved_operators if name not in described_names]
+
+    lines: list[str] = []
+    if common_specs:
+        lines.append("  常用稳定算子：")
+        for spec in common_specs:
+            lines.append(f"    - `{spec.qlib_syntax}` — {spec.description}")
+    if remaining:
+        lines.append(f"  其余运行时 allowlist：{', '.join(remaining)}")
+    if not lines:
+        lines.append("  （当前未配置运行时算子 allowlist）")
     return "\n".join(lines)

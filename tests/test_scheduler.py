@@ -8,20 +8,13 @@ Sources:
   - tests/test_subspace_context.py
   - tests/test_subspace_registry.py
 """
-import os
-import sys
-import math
 import random
-import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-pytestmark = pytest.mark.unit
-
 from unittest.mock import MagicMock, patch
 
-from src.factor_pool.pool import FactorPool, _InMemoryClient
-from src.factor_pool.scheduler import IslandScheduler, VIRGIN_ISLAND_SHARPE, T_INIT, T_MIN, RESET_MIN_RUNS
+import pytest
+
+from src.factor_pool.pool import FactorPool
+from src.factor_pool.scheduler import IslandScheduler, VIRGIN_ISLAND_SHARPE, T_MIN, RESET_MIN_RUNS
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.exploration import (
     SubspaceRegistry,
@@ -35,7 +28,6 @@ from src.schemas.hypothesis import ExplorationSubspace, MutationOperator
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.scheduling.subspace_scheduler import (
     SchedulerState,
-    SubspaceAllocation,
     SubspaceScheduler,
 )
 from src.scheduling.subspace_context import (
@@ -50,6 +42,8 @@ from src.formula.capabilities import (
     EXPERIMENTAL_FIELD_SPECS,
     get_runtime_formula_capabilities,
 )
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
@@ -189,7 +183,6 @@ class TestReset:
     def test_reset_swaps_islands(self, pool):
         sched = IslandScheduler(pool, seed=0)
         original_active = set(sched._active_islands)
-        original_reserve = set(sched._reserve_islands)
 
         from src.factor_pool.scheduler import RESET_MIN_RUNS
         for i in range(RESET_MIN_RUNS):
@@ -551,6 +544,7 @@ class TestContextBuilders:
         assert len(ctx) > 100
         assert "原语" in ctx or "primitive" in ctx.lower()
         assert "$close" in ctx
+        assert "Ref($field, -N)" not in ctx
 
     def test_symbolic_mutation_non_empty(self, default_registry):
         ctx = build_symbolic_mutation_context(default_registry, None, "momentum")
@@ -623,6 +617,11 @@ class TestSubspaceRegistryDefaults:
         capabilities = get_runtime_formula_capabilities()
         if capabilities.available_experimental_fields:
             assert PrimitiveCategory.FUNDAMENTAL in cats
+
+    def test_temporal_primitives_use_non_future_templates(self, registry):
+        primitives = {p.name: p for p in registry.primitives}
+        assert primitives["Ref"].qlib_syntax == "Ref($field, N)"
+        assert primitives["Delta"].qlib_syntax == "Delta($field, N)"
 
     def test_primitive_fields(self, registry):
         for p in registry.primitives:

@@ -126,7 +126,7 @@ Mean(Abs($close/Ref($close,1)-1) / ($volume * $close), 20)
 
 # 2. 量价背离因子（资金撤退信号）
 # 负相关 = 放量下跌 or 缩量上涨，均为弱势
-Corr(Rank($volume, 10), Rank($close, 10), 20)
+Corr(Rank($volume), Rank($close), 20)
 
 # 3. 波动率期限结构斜率（短期 vs 长期波动）
 # 短波 > 长波 = 近期异动，反转或趋势加速

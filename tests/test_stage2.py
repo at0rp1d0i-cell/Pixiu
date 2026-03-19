@@ -215,6 +215,43 @@ def test_alpha_researcher_system_prompt_injects_runtime_available_fields():
     assert "$roe" in system_message.content
 
 
+def test_alpha_researcher_system_prompt_injects_runtime_operator_block():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.extend(messages)
+        resp = MagicMock()
+        resp.content = '''{
+            "notes": [{
+                "note_id": "x", "island": "momentum", "iteration": 1,
+                "hypothesis": "test", "economic_intuition": "test",
+                "proposed_formula": "Mean($close, 5)",
+                "risk_factors": [], "market_context_date": "2026-03-19"
+            }],
+            "generation_rationale": "test"
+        }'''
+        return resp
+
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch('src.agents.researcher.format_available_fields_for_prompt', return_value="  基础价量字段：$close"):
+            with patch('src.agents.researcher.format_available_operators_for_prompt', return_value="  常用稳定算子：\n    - `Ref($field, N)` — N 日前的值"):
+                with patch('src.agents.researcher.get_runtime_formula_capabilities', return_value=MagicMock()):
+                    with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+                        researcher = AlphaResearcher(island="momentum")
+                        asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert captured_messages
+    system_message = captured_messages[0]
+    assert "可用算子" in system_message.content
+    assert "Ref($field, N)" in system_message.content
+    assert "Ref($field, -N)" not in system_message.content
+
+
 def test_alpha_researcher_composed_prompt_avoids_legacy_skill_contracts():
     from src.agents.researcher import AlphaResearcher
 

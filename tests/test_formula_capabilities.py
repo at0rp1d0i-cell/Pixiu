@@ -8,6 +8,8 @@ import pytest
 from src.formula.capabilities import (
     APPROVED_OPERATORS,
     FIELD_SPECS_BY_NAME,
+    OPERATOR_SPECS_BY_NAME,
+    format_available_operators_for_prompt,
     get_runtime_formula_capabilities,
 )
 
@@ -100,3 +102,17 @@ def test_runtime_formula_capabilities_resolve_qlib_data_dir_from_dotenv(
     assert capabilities.total_instruments == 1
     assert "$close" in capabilities.available_fields
     assert "$open" in capabilities.available_fields
+
+
+def test_formula_operator_specs_use_canonical_non_future_examples(tmp_path: Path):
+    capabilities = get_runtime_formula_capabilities(
+        provider_uri=tmp_path,
+        min_coverage_ratio=0.95,
+    )
+
+    operator_block = format_available_operators_for_prompt(capabilities)
+
+    assert OPERATOR_SPECS_BY_NAME["Ref"].qlib_syntax == "Ref($field, N)"
+    assert OPERATOR_SPECS_BY_NAME["Rank"].qlib_syntax == "Rank($field)"
+    assert "Ref($field, -N)" not in operator_block
+    assert "Ref($field, N)" in operator_block

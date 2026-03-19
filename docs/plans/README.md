@@ -20,6 +20,8 @@
   - 三个独立 architecture epic 的总路线图
 - `2026-03-19-data-capability-platform-refactor-design.md`
   - 数据能力平台化重构设计
+- `2026-03-19-data-capability-platform-refactor-implementation.md`
+  - Epic A 第一刀实施计划（先收口 formula capability kernel）
 - `2026-03-19-factor-pool-boundary-refactor-design.md`
   - FactorPool 边界拆分设计
 - `2026-03-19-orchestrator-boundary-refactor-design.md`

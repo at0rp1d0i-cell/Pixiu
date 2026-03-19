@@ -10,6 +10,7 @@ from src.formula.capabilities import (
     BASE_FIELD_SPECS,
     EXPERIMENTAL_FIELD_SPECS,
     FormulaCapabilities,
+    OPERATOR_SPECS_BY_NAME,
     get_runtime_formula_capabilities,
 )
 from src.schemas import PixiuBase
@@ -51,6 +52,14 @@ class PrimitiveCategory(str, Enum):
     TEMPORAL_TRANSFORM = "temporal_transform"
     CROSS_SECTIONAL = "cross_sectional"
     REGIME_SWITCH = "regime_switch"
+
+
+_OPERATOR_CATEGORY_MAP = {
+    "temporal_transform": PrimitiveCategory.TEMPORAL_TRANSFORM,
+    "cross_sectional": PrimitiveCategory.CROSS_SECTIONAL,
+    "math": PrimitiveCategory.TEMPORAL_TRANSFORM,
+    "logic": PrimitiveCategory.TEMPORAL_TRANSFORM,
+}
 
 
 class FactorPrimitive(PixiuBase):
@@ -185,15 +194,22 @@ class SubspaceRegistry(PixiuBase):
             )
             for spec in available_field_specs
         ] + [
-            # Temporal Transforms
-            FactorPrimitive(name="Ref", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Ref($field, -N)", description="N 日前的值"),
-            FactorPrimitive(name="Mean", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Mean($field, N)", description="N 日均值"),
-            FactorPrimitive(name="Std", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Std($field, N)", description="N 日标准差"),
-            FactorPrimitive(name="Corr", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Corr($x, $y, N)", description="N 日相关系数"),
-            FactorPrimitive(name="Rank", category=PrimitiveCategory.CROSS_SECTIONAL, qlib_syntax="Rank($field)", description="截面排名"),
-            FactorPrimitive(name="Max", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Max($field, N)", description="N 日最大值"),
-            FactorPrimitive(name="Min", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Min($field, N)", description="N 日最小值"),
-            FactorPrimitive(name="Delta", category=PrimitiveCategory.TEMPORAL_TRANSFORM, qlib_syntax="Ref($field, 0) - Ref($field, -N)", description="N 日变化量"),
+            FactorPrimitive(
+                name=spec.name,
+                category=_OPERATOR_CATEGORY_MAP.get(spec.category, PrimitiveCategory.TEMPORAL_TRANSFORM),
+                qlib_syntax=spec.qlib_syntax,
+                description=spec.description,
+            )
+            for spec in (
+                OPERATOR_SPECS_BY_NAME["Ref"],
+                OPERATOR_SPECS_BY_NAME["Mean"],
+                OPERATOR_SPECS_BY_NAME["Std"],
+                OPERATOR_SPECS_BY_NAME["Corr"],
+                OPERATOR_SPECS_BY_NAME["Rank"],
+                OPERATOR_SPECS_BY_NAME["Max"],
+                OPERATOR_SPECS_BY_NAME["Min"],
+                OPERATOR_SPECS_BY_NAME["Delta"],
+            )
         ]
 
         # ── 跨市场机制模板（5+ 个） ──
