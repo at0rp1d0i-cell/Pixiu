@@ -3,12 +3,9 @@
 
 import qlib
 import json
-import sys
+from pathlib import Path
 from qlib.constant import REG_CN
 from qlib.data import D
-from qlib.contrib.evaluate import risk_analysis
-from qlib.contrib.strategy import TopkDropoutStrategy
-from qlib.backtest import backtest, executor
 import pandas as pd
 import numpy as np
 import warnings
@@ -26,11 +23,17 @@ try:
     qlib.init(provider_uri="/data/qlib_bin/", region=REG_CN)
 
     # 计算因子值
-    instruments = D.instruments(market=UNIVERSE)
+    universe_name = UNIVERSE
+    if not Path(f"/data/qlib_bin/instruments/{UNIVERSE}.txt").exists():
+        universe_name = "all"
+    instruments = D.instruments(market=universe_name)
     fields = [FORMULA]
-    field_names = ["factor"]
-    factor_df = D.features(instruments, fields, field_names,
-                           start_time=START_DATE, end_time=END_DATE)
+    factor_df = D.features(
+        instruments,
+        fields,
+        start_time=START_DATE,
+        end_time=END_DATE,
+    ).reset_index().rename(columns={fields[0]: "factor"})
     df = factor_df.dropna()
 
     # 按日排名（截面）
@@ -40,12 +43,16 @@ try:
     df["ret_1d"] = df.groupby("instrument")["factor"].shift(-1)  # 用真实收益率替代
     # 加载真实收益率
     ret_fields = ["$close/Ref($close,1)-1"]
-    ret_df = D.features(instruments, ret_fields, ["ret"],
-                        start_time=START_DATE, end_time=END_DATE)
-    df = df.join(ret_df, how="left")
+    ret_df = D.features(
+        instruments,
+        ret_fields,
+        start_time=START_DATE,
+        end_time=END_DATE,
+    ).reset_index().rename(columns={ret_fields[0]: "ret"})
+    df = df.merge(ret_df, on=["instrument", "datetime"], how="left")
     factor_coverage = (
-        factor_df["factor"].groupby("datetime").count()
-        / ret_df["ret"].groupby("datetime").count().replace(0, np.nan)
+        factor_df.groupby("datetime")["factor"].count()
+        / ret_df.groupby("datetime")["ret"].count().replace(0, np.nan)
     ).replace([np.inf, -np.inf], np.nan).dropna()
     coverage = float(factor_coverage.mean()) if len(factor_coverage) > 0 else 0.0
 
@@ -74,7 +81,7 @@ try:
     turnovers = []
     prev_set = set()
     for dt in dates:
-        curr_set = set(df[df["datetime"] == dt].nsmallest(TOPK, "rank").index.get_level_values("instrument"))
+        curr_set = set(df[df["datetime"] == dt].nsmallest(TOPK, "rank")["instrument"])
         if prev_set:
             changed = len(curr_set.symmetric_difference(prev_set)) / (2 * TOPK)
             turnovers.append(changed)

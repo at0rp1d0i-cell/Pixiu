@@ -78,9 +78,65 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
 - return_30d：近 30 日累计涨跌幅（%），数据不可用时填 null。
 不需要解释，直接输出 JSON。"""
 
+_DEFAULT_STAGE1_TIMEOUT_SEC = 25.0
+_DEFAULT_STAGE1_MAX_TOOL_ROUNDS = 3
+
 
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
+
+
+def _get_stage1_timeout_sec() -> float:
+    """Return a conservative wall-clock timeout for Stage 1 market fetching."""
+    raw = os.getenv("PIXIU_STAGE1_TIMEOUT_SEC")
+    if raw is None:
+        return _DEFAULT_STAGE1_TIMEOUT_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "[Stage 1] 无法解析 PIXIU_STAGE1_TIMEOUT_SEC=%r，回退默认值 %.1fs",
+            raw,
+            _DEFAULT_STAGE1_TIMEOUT_SEC,
+        )
+        return _DEFAULT_STAGE1_TIMEOUT_SEC
+    if value <= 0:
+        logger.warning(
+            "[Stage 1] PIXIU_STAGE1_TIMEOUT_SEC=%r 非法，回退默认值 %.1fs",
+            raw,
+            _DEFAULT_STAGE1_TIMEOUT_SEC,
+        )
+        return _DEFAULT_STAGE1_TIMEOUT_SEC
+    return value
+
+
+def _get_stage1_max_tool_rounds() -> int:
+    """Return the maximum number of ReAct tool rounds allowed in Stage 1."""
+    raw = os.getenv("PIXIU_STAGE1_MAX_TOOL_ROUNDS")
+    if raw is None:
+        return _DEFAULT_STAGE1_MAX_TOOL_ROUNDS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "[Stage 1] 无法解析 PIXIU_STAGE1_MAX_TOOL_ROUNDS=%r，回退默认值 %d",
+            raw,
+            _DEFAULT_STAGE1_MAX_TOOL_ROUNDS,
+        )
+        return _DEFAULT_STAGE1_MAX_TOOL_ROUNDS
+    if value <= 0:
+        logger.warning(
+            "[Stage 1] PIXIU_STAGE1_MAX_TOOL_ROUNDS=%r 非法，回退默认值 %d",
+            raw,
+            _DEFAULT_STAGE1_MAX_TOOL_ROUNDS,
+        )
+        return _DEFAULT_STAGE1_MAX_TOOL_ROUNDS
+    return value
+
+
+def _stage1_rss_enabled() -> bool:
+    raw = os.getenv("PIXIU_STAGE1_ENABLE_RSS", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class MarketAnalyst:
@@ -93,6 +149,21 @@ class MarketAnalyst:
         self.tools = {t.name: t for t in mcp_tools}
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
+
+    async def _invoke_tool_call(self, call: dict) -> ToolMessage:
+        """Invoke one MCP tool call and normalize it into a ToolMessage."""
+        tool = self.tools.get(call["name"])
+        if tool:
+            try:
+                raw_result = await tool.ainvoke(call["args"])
+            except Exception as e:
+                raw_result = f"工具调用失败: {e}"
+        else:
+            raw_result = f"工具不存在: {call['name']}"
+        return ToolMessage(
+            content=self._extract_tool_text(raw_result),
+            tool_call_id=call["id"],
+        )
 
     @staticmethod
     def _extract_tool_text(result) -> str:
@@ -124,32 +195,26 @@ class MarketAnalyst:
             HumanMessage(content="请生成今日市场上下文备忘录。"),
         ]
 
-        # ReAct 循环（最多 5 轮工具调用）
+        # ReAct 循环（默认最多 3 轮工具调用）
         used_all_rounds = False
-        for _ in range(5):
+        max_tool_rounds = _get_stage1_max_tool_rounds()
+        for _ in range(max_tool_rounds):
             response = await self.llm.ainvoke(messages)
             messages.append(response)
 
             if not getattr(response, "tool_calls", None):
                 break
 
-            for call in response.tool_calls:
-                tool = self.tools.get(call["name"])
-                if tool:
-                    try:
-                        raw_result = await tool.ainvoke(call["args"])
-                    except Exception as e:
-                        raw_result = f"工具调用失败: {e}"
-                    messages.append(ToolMessage(
-                        content=self._extract_tool_text(raw_result),
-                        tool_call_id=call["id"],
-                    ))
+            tool_messages = await asyncio.gather(
+                *(self._invoke_tool_call(call) for call in response.tool_calls)
+            )
+            messages.extend(tool_messages)
         else:
             used_all_rounds = True
 
-        # 如果 5 轮用完 LLM 还在调工具，追加一轮无工具调用让它输出 JSON
+        # 如果工具轮次用完 LLM 还在调工具，追加一轮无工具调用让它输出 JSON
         if used_all_rounds and not response.content.strip():
-            logger.info("[MarketAnalyst] 工具轮次用尽，追加 final call")
+            logger.info("[MarketAnalyst] 工具轮次用尽（max=%d），追加 final call", max_tool_rounds)
             messages.append(HumanMessage(
                 content="工具调用轮次已用完。请根据已获取的数据，直接输出 MarketContextMemo JSON。"
             ))
@@ -234,42 +299,57 @@ def _empty_memo(reason: str, active_islands: list[str] | None = None) -> MarketC
 # LangGraph 节点
 # ─────────────────────────────────────────────────────────
 
-async def _market_context_async(state: dict) -> dict:
-    """异步执行 Stage 1 市场上下文生成。"""
+async def _run_market_context_once(state: dict) -> dict:
+    """Execute one market-context fetch attempt without outer timeout handling."""
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
     mcp_server_path = MCP_SERVER_PATH
+
+    servers: dict = {
+        "akshare": {
+            "command": "python",
+            "args": [mcp_server_path],
+            "transport": "stdio",
+        },
+    }
+    if _stage1_rss_enabled():
+        servers["rss"] = {
+            "command": "python",
+            "args": [RSS_SERVER_PATH],
+            "transport": "stdio",
+        }
+    if os.getenv("TUSHARE_TOKEN"):
+        servers["tushare"] = {
+            "command": "python",
+            "args": [TUSHARE_SERVER_PATH],
+            "transport": "stdio",
+        }
+    mcp_client = MultiServerMCPClient(servers)
+    tools = await mcp_client.get_tools()
+    analyst = MarketAnalyst(mcp_tools=tools)
+    memo = await analyst.analyze()
+    logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
+    return {"market_context": memo}
+
+
+async def _market_context_async(state: dict) -> dict:
+    """异步执行 Stage 1 市场上下文生成。"""
     active_islands = list(state.get("active_islands", ["momentum"]))
+    timeout_sec = _get_stage1_timeout_sec()
 
     try:
-        servers: dict = {
-            "akshare": {
-                "command": "python",
-                "args": [mcp_server_path],
-                "transport": "stdio",
-            },
-            "rss": {
-                "command": "python",
-                "args": [RSS_SERVER_PATH],
-                "transport": "stdio",
-            },
+        return await asyncio.wait_for(_run_market_context_once(state), timeout=timeout_sec)
+    except TimeoutError:
+        logger.warning("[Stage 1] MarketAnalyst 超时（%.1fs），使用空上下文", timeout_sec)
+        return {
+            "market_context": _empty_memo(
+                f"Stage 1 timeout after {timeout_sec:.1f}s",
+                active_islands=active_islands,
+            )
         }
-        if os.getenv("TUSHARE_TOKEN"):
-            servers["tushare"] = {
-                "command": "python",
-                "args": [TUSHARE_SERVER_PATH],
-                "transport": "stdio",
-            }
-        mcp_client = MultiServerMCPClient(servers)
-        tools = await mcp_client.get_tools()
-        analyst = MarketAnalyst(mcp_tools=tools)
-        memo = await analyst.analyze()
-        logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
     except Exception as e:
         logger.warning("[Stage 1] MarketAnalyst 失败，使用空上下文: %s", e)
-        memo = _empty_memo(str(e), active_islands=active_islands)
-
-    return {"market_context": memo}
+        return {"market_context": _empty_memo(str(e), active_islands=active_islands)}
 
 
 def market_context_node(state: dict) -> MarketContextOutput:

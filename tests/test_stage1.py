@@ -9,12 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncio
 import math
+from datetime import date
 
 import pytest
 
 from src.schemas.market_context import MarketContextMemo, HistoricalInsight, MarketRegime
 from src.agents.literature_miner import LiteratureMiner
 from src.market.regime_detector import RegimeDetector, RegimeSignals
+from src.schemas.state import AgentState
 
 pytestmark = pytest.mark.unit
 
@@ -139,6 +141,87 @@ def test_market_analyst_injects_context_skill_into_system_prompt():
     assert "<!-- SKILL:MARKET_ANALYST_CONTEXT_FRAMING -->" in system_message.content
 
 
+def test_market_context_node_timeout_falls_back_to_empty_memo():
+    from src.agents.market_analyst import market_context_node
+
+    async def _hang(_state):
+        await asyncio.sleep(0.05)
+        return {"market_context": _make_market_memo()}
+
+    with patch.dict("os.environ", {"PIXIU_STAGE1_TIMEOUT_SEC": "0.01"}):
+        with patch("src.agents.market_analyst._run_market_context_once", side_effect=_hang):
+            result = market_context_node({"active_islands": ["momentum"]})
+
+    memo = result["market_context"]
+    assert isinstance(memo, MarketContextMemo)
+    assert memo.market_regime == MarketRegime.RANGE_BOUND
+    assert "timeout" in memo.raw_summary.lower()
+
+
+def test_run_market_context_once_uses_akshare_only_by_default():
+    from src.agents.market_analyst import _run_market_context_once
+
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[])
+
+    with patch.dict("os.environ", {}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
+            with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
+                result = asyncio.run(_run_market_context_once({}))
+
+    servers = mock_ctor.call_args.args[0]
+    assert "akshare" in servers
+    assert "rss" not in servers
+    assert "tushare" not in servers
+    assert isinstance(result["market_context"], MarketContextMemo)
+
+
+def test_run_market_context_once_includes_rss_when_opted_in():
+    from src.agents.market_analyst import _run_market_context_once
+
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[])
+
+    with patch.dict("os.environ", {"PIXIU_STAGE1_ENABLE_RSS": "1"}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
+            with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
+                asyncio.run(_run_market_context_once({}))
+
+    servers = mock_ctor.call_args.args[0]
+    assert "akshare" in servers
+    assert "rss" in servers
+
+
+def test_stage1_node_reuses_same_day_market_context_after_round_zero():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    cached_memo = _make_market_memo()
+    state = AgentState(current_round=1, market_context=cached_memo)
+
+    with patch("src.agents.market_analyst.market_context_node") as mock_market_node:
+        result = market_context_node(state)
+
+    assert result["market_context"] == cached_memo
+    assert result["stage_timings"]["market_context"] >= 0
+    assert result["stage_step_timings"]["market_context"]["cache_hit_ms"] >= 0
+    mock_market_node.assert_not_called()
+
+
+def test_stage1_node_queries_literature_for_suggested_islands_only():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    memo = _make_market_memo().model_copy(update={"suggested_islands": ["momentum"]})
+    state = AgentState(current_round=0)
+
+    with patch("src.agents.market_analyst.market_context_node", return_value={"market_context": memo}):
+        with patch("src.factor_pool.pool.get_factor_pool", return_value=MagicMock()):
+            with patch("src.agents.literature_miner.LiteratureMiner.retrieve_insights", new=AsyncMock(return_value=[])) as mock_retrieve:
+                result = market_context_node(state)
+
+    assert result["market_context"].suggested_islands == ["momentum"]
+    mock_retrieve.assert_awaited_once_with(active_islands=["momentum"])
+
+
 # ─────────────────────────────────────────────────────────
 # From test_market_context.py — LiteratureMiner Tests
 # ─────────────────────────────────────────────────────────
@@ -225,6 +308,19 @@ def test_literature_miner_pool_error_graceful():
 
 def _make_detector() -> RegimeDetector:
     return RegimeDetector()
+
+
+def _make_market_memo() -> MarketContextMemo:
+    return MarketContextMemo(
+        date=date.today().strftime("%Y-%m-%d"),
+        northbound=None,
+        macro_signals=[],
+        hot_themes=["AI算力"],
+        historical_insights=[],
+        suggested_islands=["momentum"],
+        market_regime=MarketRegime.BULL_TREND,
+        raw_summary="测试 market context",
+    )
 
 
 def _make_rising_closes(n: int = 60, start: float = 3000.0, slope: float = 10.0) -> list[float]:

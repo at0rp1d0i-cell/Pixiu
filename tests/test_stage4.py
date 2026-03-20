@@ -125,6 +125,23 @@ def test_coder_invalid_formula(mock_note):
     assert report.metrics.coverage == 0.0
 
 
+def test_coder_template_uses_current_qlib_features_signature(mock_note):
+    coder = Coder()
+
+    script = coder._compile(mock_note, "$close")
+
+    assert 'field_names = ["factor"]' not in script
+    assert 'D.features(\n        instruments,\n        fields,\n        start_time=START_DATE,' in script
+    assert ').reset_index().rename(columns={fields[0]: "factor"})' in script
+    assert ').reset_index().rename(columns={ret_fields[0]: "ret"})' in script
+    assert 'df = df.merge(ret_df, on=["instrument", "datetime"], how="left")' in script
+    assert 'factor_df.groupby("datetime")["factor"].count()' in script
+    assert 'ret_df.groupby("datetime")["ret"].count()' in script
+    assert 'nsmallest(TOPK, "rank")["instrument"]' in script
+    assert 'Path(f"/data/qlib_bin/instruments/{UNIVERSE}.txt").exists()' in script
+    assert 'universe_name = "all"' in script
+
+
 def test_coder_output_parsing(mock_note):
     """BACKTEST_RESULT_JSON 解析逻辑单元测试（不需要 Docker）"""
     coder = Coder()
