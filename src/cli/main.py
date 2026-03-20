@@ -12,13 +12,23 @@ Typer + Rich 命令行界面：启动系统、审批因子、查看状态
   pixiu report  ← 查看最新 CIO 报告
 """
 import asyncio
+import sys
+from contextlib import suppress
 from pathlib import Path
+from typing import Awaitable, TypeVar
 
 import typer
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
 from rich.markdown import Markdown
+
+from src.cli.progress import (
+    RunProgressTracker,
+    build_run_progress_panel,
+    load_run_state,
+)
 
 app = typer.Typer(
     name="pixiu",
@@ -26,6 +36,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+T = TypeVar("T")
 
 
 def _get_state_store():
@@ -57,10 +68,10 @@ def run(
     ))
 
     if mode == "single":
-        asyncio.run(run_single(island=island))
+        _run_with_progress(run_single(island=island), total_rounds=1)
     else:
         island_list = islands.split(",") if islands else None
-        asyncio.run(run_evolve(rounds=rounds, islands=island_list))
+        _run_with_progress(run_evolve(rounds=rounds, islands=island_list), total_rounds=rounds)
 
 
 @app.command()
@@ -202,6 +213,46 @@ def _inject_human_decision(decision: str) -> bool:
     except Exception as e:
         console.print(f"[red]注入失败: {e}[/red]")
         return False
+
+
+def _run_with_progress(coro: Awaitable[T], total_rounds: int | None = None) -> T:
+    """Run an async Pixiu command with optional Rich live progress."""
+    if not sys.stdout.isatty():
+        return asyncio.run(coro)
+
+    async def _runner() -> T:
+        task = asyncio.create_task(coro)
+        tracker = RunProgressTracker()
+
+        with Live(console=console, refresh_per_second=4, transient=False) as live:
+            while True:
+                with suppress(Exception):
+                    store = _get_state_store()
+                    run, snapshot = load_run_state(store)
+                    if run is not None:
+                        view = tracker.observe(
+                            run,
+                            snapshot,
+                            total_rounds=total_rounds,
+                        )
+                        live.update(build_run_progress_panel(view), refresh=True)
+
+                done, _ = await asyncio.wait({task}, timeout=0.5)
+                if task in done:
+                    result = await task
+                    with suppress(Exception):
+                        store = _get_state_store()
+                        run, snapshot = load_run_state(store)
+                        if run is not None:
+                            view = tracker.observe(
+                                run,
+                                snapshot,
+                                total_rounds=total_rounds,
+                            )
+                            live.update(build_run_progress_panel(view), refresh=True)
+                    return result
+
+    return asyncio.run(_runner())
 
 
 def main():
