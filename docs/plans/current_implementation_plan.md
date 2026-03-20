@@ -84,7 +84,7 @@ Last Reviewed: 2026-03-20
   - 实施计划：`docs/plans/2026-03-20-test-pipeline-refactor-implementation.md`
   - 这是 `FactorPool Boundary Refactor` 与 `Orchestrator Boundary Refactor` 的前置 gate
   - [x] Slice 1：canonical docs / marker truth 对齐
-  - [ ] Slice 2：test harness stabilization（fixture / env / globals）
+  - [ ] Slice 2：test harness stabilization（explicit marker、`sys.path` 清理、重型 smoke 归类已完成；剩余 fixture / env / globals）
   - [ ] Slice 3：approval / entrypoint / FactorPool / readiness 高价值 contract tests
 - [ ] `Data Capability Platform Refactor`
   - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`

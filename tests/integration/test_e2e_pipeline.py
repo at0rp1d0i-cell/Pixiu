@@ -131,7 +131,7 @@ def _mock_hypothesis_gen_node(state_dict):
 # Tests
 # ─────────────────────────────────────────────
 
-@pytest.mark.smoke
+# These are heavy local integration checks and should not be part of the smoke baseline.
 def test_e2e_pipeline_one_round_factors_fail(orchestrator_state_guard):
     """
     Full pipeline: 1 round, factors fail judgment → loop_control → END.
@@ -178,7 +178,6 @@ def test_e2e_pipeline_one_round_factors_fail(orchestrator_state_guard):
             assert result.get("approved_notes") == []
 
 
-@pytest.mark.smoke
 def test_e2e_pipeline_one_round_factors_pass(orchestrator_state_guard):
     """
     Full pipeline: 1 round, factors pass judgment → portfolio → loop_control → END.
@@ -226,7 +225,6 @@ def test_e2e_pipeline_one_round_factors_pass(orchestrator_state_guard):
             assert result.get("critic_verdicts") == []
 
 
-@pytest.mark.smoke
 def test_e2e_prefilter_rejects_all(orchestrator_state_guard):
     """
     Pipeline with all notes rejected by prefilter → skip Stage 4/5.

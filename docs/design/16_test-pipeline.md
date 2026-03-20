@@ -112,7 +112,7 @@ Last Reviewed: 2026-03-20
 
 当前口径修正：
 - `tests/integration/test_e2e_pipeline.py` 目前是 `integration` 文件，不应继续被当作唯一 canonical `e2e`
-- 其中几条 `smoke` 用例承担的是“重型本地集成烟测”角色，而不是完整真实环境 e2e
+- 该文件当前已收口为纯 `integration`，不再参与默认 `smoke` baseline
 
 ---
 
@@ -138,6 +138,7 @@ Last Reviewed: 2026-03-20
 
 当前状态：默认入口已经稳定，但少数 live/integration 文件仍保留过渡期的
 `sys.path.insert(...)`。这些不应继续扩散，并将在 Test Pipeline Refactor 中继续清理。
+当前剩余问题已经收窄到少量 live/env harness 收口，不再是普遍性的路径注入问题。
 
 ### Async 测试
 

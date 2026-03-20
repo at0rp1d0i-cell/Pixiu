@@ -58,7 +58,9 @@ Wave 2 status:
 - 已完成：`tests/conftest.py` 显式 primary marker enforcement
 - 已完成：`tests/integration/test_stage1_live.py`、`tests/integration/test_stage2_live.py`、`tests/integration/test_e2e_live.py`、`tests/integration/test_stage1_market_context.py` 的显式 `pytestmark`
 - 已完成：`tests/test_fundamental_pipeline.py`、`tests/test_moneyflow_pipeline.py`、`tests/test_stk_limit_pipeline.py` 的显式 `unit` marker
-- 仍待完成：统一 orchestrator reset fixture、`sys.path.insert(...)` 清理、import-time `.env` / skip 收口、过重 smoke/integration 重新归类
+- 已完成：`tests/conftest.py` 与 `tests/test_mcp_servers.py` 的 `sys.path.insert(...)` 清理
+- 已完成：`tests/integration/test_e2e_pipeline.py` 从重型 `smoke` 收回为纯 `integration`
+- 仍待完成：统一 orchestrator reset fixture 的进一步 adoption、import-time `.env` / skip 收口
 
 Write set:
 
@@ -82,6 +84,7 @@ Done when:
 
 - 测试基础设施不再明显依赖环境/全局状态偶然性
 - 显式 primary marker 已经成为默认规则
+- 默认 `smoke` baseline 不再夹带重型 local integration pipeline tests
 
 ---
 
