@@ -12,8 +12,11 @@ Typer + Rich 命令行界面：启动系统、审批因子、查看状态
   pixiu report  ← 查看最新 CIO 报告
 """
 import asyncio
+import logging
+import os
 import sys
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, TypeVar
 
@@ -37,12 +40,43 @@ app = typer.Typer(
 )
 console = Console()
 T = TypeVar("T")
+_LIVE_LOG_FILE: Path | None = None
 
 
 def _get_state_store():
     from src.control_plane.state_store import get_state_store
 
     return get_state_store()
+
+
+def _get_logs_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "logs"
+
+
+def _configure_tty_live_logging() -> Path:
+    """Route noisy runtime logs to a file so Rich Live owns the terminal."""
+    global _LIVE_LOG_FILE
+
+    log_dir = _get_logs_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"pixiu_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    root_logger = logging.getLogger()
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    for handler in list(root_logger.handlers):
+        if type(handler) is logging.StreamHandler:
+            root_logger.removeHandler(handler)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+
+    os.environ.setdefault("PIXIU_MCP_LOG_LEVEL", "WARNING")
+    _LIVE_LOG_FILE = log_path
+    return log_path
 
 
 @app.command()
@@ -222,6 +256,7 @@ def _run_with_progress(coro: Awaitable[T], total_rounds: int | None = None) -> T
         return asyncio.run(coro)
 
     async def _runner() -> T:
+        log_path = _configure_tty_live_logging()
         task = asyncio.create_task(coro)
         tracker = RunProgressTracker()
 
@@ -251,6 +286,7 @@ def _run_with_progress(coro: Awaitable[T], total_rounds: int | None = None) -> T
                                 total_rounds=total_rounds,
                             )
                             live.update(build_run_progress_panel(view), refresh=True)
+                    console.print(f"[dim]Run log saved to {log_path}[/dim]")
                     return result
 
     return asyncio.run(_runner())

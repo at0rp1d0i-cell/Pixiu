@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -78,6 +80,8 @@ def test_run_with_progress_uses_transient_live_when_tty(monkeypatch):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 
     captured = {}
+    configured = {}
+    printed = []
 
     class FakeLive:
         def __init__(self, *args, **kwargs):
@@ -94,9 +98,36 @@ def test_run_with_progress_uses_transient_live_when_tty(monkeypatch):
 
     monkeypatch.setattr(cli_main, "Live", FakeLive)
     monkeypatch.setattr(cli_main, "_get_state_store", lambda: (_ for _ in ()).throw(RuntimeError("no state")))
+    monkeypatch.setattr(cli_main, "_configure_tty_live_logging", lambda: configured.setdefault("path", Path("/tmp/pixiu.log")))
+    monkeypatch.setattr(cli_main.console, "print", lambda *args, **kwargs: printed.append((args, kwargs)))
 
     async def _coro():
         return 7
 
     assert cli_main._run_with_progress(_coro()) == 7
     assert captured["transient"] is True
+    assert configured["path"] == Path("/tmp/pixiu.log")
+    assert printed
+
+
+def test_configure_tty_live_logging_sets_mcp_log_level(monkeypatch, tmp_path: Path):
+    from src.cli import main as cli_main
+    import logging
+
+    monkeypatch.delenv("PIXIU_MCP_LOG_LEVEL", raising=False)
+    monkeypatch.setattr(cli_main, "_get_logs_dir", lambda: tmp_path / "logs")
+
+    root_logger = logging.getLogger()
+    original_handlers = list(root_logger.handlers)
+    try:
+        log_path = cli_main._configure_tty_live_logging()
+
+        assert os.environ["PIXIU_MCP_LOG_LEVEL"] == "WARNING"
+        assert log_path.parent.exists()
+    finally:
+        for handler in list(root_logger.handlers):
+            root_logger.removeHandler(handler)
+            with suppress(Exception):
+                handler.close()
+        for handler in original_handlers:
+            root_logger.addHandler(handler)

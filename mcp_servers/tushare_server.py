@@ -14,7 +14,8 @@ from functools import partial
 import tushare as ts
 from mcp.server.fastmcp import FastMCP
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+_LOG_LEVEL = os.getenv("PIXIU_MCP_LOG_LEVEL", "WARNING").upper()
+logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.WARNING), format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("tushare-mcp")
 
 app = FastMCP("tushare-mcp")
