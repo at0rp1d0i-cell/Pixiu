@@ -1,5 +1,5 @@
-# Pixiu-coder: Sandboxed backtest execution environment
-# Build: docker build -t Pixiu-coder:latest -f docker/Dockerfile.coder .
+# pixiu-coder: Sandboxed backtest execution environment
+# Build: docker build -t pixiu-coder:latest -f docker/Dockerfile.coder .
 # Usage: DockerRunner mounts scripts and qlib data, runs with --network=none
 #
 # Runtime mounts (by DockerRunner):

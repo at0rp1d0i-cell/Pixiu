@@ -15,10 +15,10 @@ class ExecutionResult:
 
 class DockerRunner:
     """
-    在 Pixiu-coder Docker 容器中执行 Python 脚本。
+    在 pixiu-coder Docker 容器中执行 Python 脚本。
     使用 subprocess，不依赖任何 LLM。
     """
-    IMAGE = "Pixiu-coder:latest"
+    DEFAULT_IMAGE = "pixiu-coder:latest"
     
     PROJECT_ROOT = Path(__file__).resolve().parents[2]
     _qlib_env = os.getenv("QLIB_DATA_DIR")
@@ -27,6 +27,9 @@ class DockerRunner:
     else:
         _qlib_path = PROJECT_ROOT / "data" / "qlib_bin"
     QLIB_DATA_PATH = str(_qlib_path)
+
+    def __init__(self, image: str | None = None):
+        self.image = image or os.getenv("PIXIU_DOCKER_IMAGE", self.DEFAULT_IMAGE)
 
     async def run_python(
         self,
@@ -48,7 +51,7 @@ class DockerRunner:
                 "-v", f"{script_path}:/tmp/script.py:ro",
                 "--memory=2g",                  # 内存限制
                 "--cpus=2.0",                   # CPU 限制
-                self.IMAGE,
+                self.image,
                 "python", "/tmp/script.py",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

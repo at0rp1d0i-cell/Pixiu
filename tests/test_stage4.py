@@ -241,6 +241,33 @@ def test_docker_runner_timeout():
         mock_proc.kill.assert_called_once()
 
 
+def test_docker_runner_uses_lowercase_default_image():
+    runner = DockerRunner()
+
+    async def _fake_wait_for(awaitable, timeout):
+        return await awaitable
+
+    async def _run():
+        with patch("asyncio.create_subprocess_exec") as mock_exec, \
+             patch("asyncio.wait_for", side_effect=_fake_wait_for):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await runner.run_python("print('ok')", timeout_seconds=1)
+            return mock_exec.call_args.args
+
+    args = asyncio.run(_run())
+    assert "pixiu-coder:latest" in args
+
+
+def test_docker_runner_honors_image_override(monkeypatch):
+    monkeypatch.setenv("PIXIU_DOCKER_IMAGE", "custom-registry/pixiu-coder:test")
+    runner = DockerRunner()
+    assert runner.image == "custom-registry/pixiu-coder:test"
+
+
 # ─────────────────────────────────────────────────────────
 # From test_exploration_registry.py
 # ─────────────────────────────────────────────────────────
