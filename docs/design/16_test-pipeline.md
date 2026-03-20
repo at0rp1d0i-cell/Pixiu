@@ -88,8 +88,8 @@ Last Reviewed: 2026-03-20
 - 现在 `tests/` 下所有被收集的测试都要求显式声明主 tier marker
 - `tests/conftest.py` 不再按文件名自动补 `live/e2e`
 - `tests/conftest.py` 不再自动补 `unit`；缺少主 tier marker 的测试会在 collection 阶段直接失败
-- `tests/conftest.py` 仍保留 live-like 测试的 `RESEARCHER_API_KEY` skip 逻辑与 proxy 清理
-- live/e2e 的 `.env` 读取与缺 key 跳过当前仍发生在 collection 阶段，下一步会收口到 runtime fixture/setup
+- `tests/conftest.py` 仍保留 live-like 测试的 runtime env 准备、`RESEARCHER_API_KEY` skip 逻辑与 proxy 清理
+- live/e2e 的 `.env` 读取与缺 key 跳过已收口到 runtime fixture/setup，不再污染 collection 阶段
 - `tests/integration/test_stage1_live.py`、`tests/integration/test_stage2_live.py`、`tests/integration/test_e2e_live.py`、`tests/integration/test_stage1_market_context.py`
   已经全部改成显式 `pytestmark`
 
@@ -137,9 +137,8 @@ Last Reviewed: 2026-03-20
 - 在 `pyproject.toml` 或 `pytest.ini` 中配置项目根路径
 - 运行 `pytest tests` 时可直接导入 `src.*`
 
-当前状态：默认入口已经稳定，但少数 live/integration 文件仍保留过渡期的
-`sys.path.insert(...)`。这些不应继续扩散，并将在 Test Pipeline Refactor 中继续清理。
-当前剩余问题已经收窄到少量 live/env harness 收口，不再是普遍性的路径注入问题。
+当前状态：默认入口已经稳定；当前 Slice 2 目标文件里的 `sys.path.insert(...)` 已清理完成。
+当前剩余问题已经收窄到少量 fixture / globals adoption，不再是普遍性的路径注入问题。
 
 ### Async 测试
 
@@ -167,7 +166,7 @@ Last Reviewed: 2026-03-20
 如果测试没有主 tier marker，collection 阶段会直接失败，不允许进入长期稳定 CI。
 
 当前状态：
-- `tests/conftest.py` 只负责校验主 tier marker、处理 live-like skip 和 proxy 清理
+- `tests/conftest.py` 只负责校验主 tier marker，并在 runtime fixture 中处理 live-like env 准备、skip 和 proxy 清理
 - 不再存在“无 marker 自动补成 `unit`”的兼容层
 - live/e2e 已全部显式标记
 
@@ -236,9 +235,8 @@ uv run pytest -q tests -m e2e
 截至 2026-03-20，仓库仍存在以下问题：
 
 - `live / e2e` 仍缺少稳定环境说明和自动化触发策略，默认 merge gate 继续排除这两层
-- live/e2e 的环境 gating 还在 collection 阶段完成，后续要继续收口到 runtime fixture/setup
 - async 测试的长期方案尚未定稿，当前是同步包装与少量原生 async 并存
-- 默认 `smoke or unit` 基线当前为 `527 passed, 26 deselected`
+- 默认 `smoke or unit` 基线当前为 `524 passed, 29 deselected`
 - CLI / API 的最小联通 smoke 已补齐；后续重点是保持 approval / report / human-gate 路径与真实 graph 路由一致
 - `test_e2e_pipeline.py` 的层级定位与文档曾经漂移，现已明确按 `integration` 处理
 - 部分 unit 测试仍会读取真实 runtime capability 或依赖模块级全局状态；这正是 Test Pipeline Refactor 的首要清理目标

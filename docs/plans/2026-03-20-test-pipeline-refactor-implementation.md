@@ -60,7 +60,8 @@ Wave 2 status:
 - 已完成：`tests/test_fundamental_pipeline.py`、`tests/test_moneyflow_pipeline.py`、`tests/test_stk_limit_pipeline.py` 的显式 `unit` marker
 - 已完成：`tests/conftest.py` 与 `tests/test_mcp_servers.py` 的 `sys.path.insert(...)` 清理
 - 已完成：`tests/integration/test_e2e_pipeline.py` 从重型 `smoke` 收回为纯 `integration`
-- 仍待完成：统一 orchestrator reset fixture 的进一步 adoption、将 live/e2e 的 `.env` load 与 missing-key skip 从 collection 收口到 runtime fixture/setup
+- 已完成：live/e2e 的 `.env` load 与 missing-key skip 已从 collection 收口到 runtime fixture/setup
+- 仍待完成：统一 orchestrator reset fixture 的进一步 adoption
 
 Write set:
 
