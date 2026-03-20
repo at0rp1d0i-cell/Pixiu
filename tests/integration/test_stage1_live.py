@@ -17,6 +17,8 @@ from src.agents.market_analyst import MarketAnalyst, MCP_SERVER_PATH, market_con
 from src.schemas.market_context import MarketContextMemo
 from src.schemas.state import AgentState
 
+pytestmark = pytest.mark.live
+
 
 def _extract_text(result) -> str:
     """从 MCP 工具返回值中提取 JSON 文本。

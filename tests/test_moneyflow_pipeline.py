@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from src.data_pipeline.moneyflow import normalize_moneyflow_frame
+
+pytestmark = pytest.mark.unit
 
 
 def test_normalize_moneyflow_frame_sorts_dedupes_and_coerces_numeric():

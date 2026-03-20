@@ -26,6 +26,8 @@ from src.schemas.market_context import MarketContextMemo
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
 
+pytestmark = pytest.mark.e2e
+
 
 def _make_backtest_report(note: FactorResearchNote, sharpe: float = 3.1) -> BacktestReport:
     """为 approved note 构造一个合法的 BacktestReport（绕过 Stage 4）。"""
@@ -139,7 +141,7 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
     from unittest.mock import AsyncMock
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
     with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool), \
-         patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
+         patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm):
         s3_result = prefilter_node(state)
 
     approved = s3_result.get("approved_notes", [])

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from src.data_pipeline.stk_limit import normalize_stk_limit_frame
+
+pytestmark = pytest.mark.unit
 
 
 def test_normalize_stk_limit_frame_sorts_dedupes_and_coerces_numeric():

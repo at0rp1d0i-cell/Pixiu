@@ -20,6 +20,10 @@ Purpose: Break the Test Pipeline Refactor into executable slices with disjoint w
 
 Owner: coordinator
 
+Status:
+
+- [x] 已完成：canonical docs / marker truth 已与当前 runtime/test reality 对齐
+
 Write set:
 
 - `docs/design/12_orchestrator.md`
@@ -49,6 +53,13 @@ Done when:
 
 Owner: worker
 
+Wave 2 status:
+
+- 已完成：`tests/conftest.py` 显式 primary marker enforcement
+- 已完成：`tests/integration/test_stage1_live.py`、`tests/integration/test_stage2_live.py`、`tests/integration/test_e2e_live.py`、`tests/integration/test_stage1_market_context.py` 的显式 `pytestmark`
+- 已完成：`tests/test_fundamental_pipeline.py`、`tests/test_moneyflow_pipeline.py`、`tests/test_stk_limit_pipeline.py` 的显式 `unit` marker
+- 仍待完成：统一 orchestrator reset fixture、`sys.path.insert(...)` 清理、import-time `.env` / skip 收口、过重 smoke/integration 重新归类
+
 Write set:
 
 - `tests/conftest.py`
@@ -70,6 +81,7 @@ Tasks:
 Done when:
 
 - 测试基础设施不再明显依赖环境/全局状态偶然性
+- 显式 primary marker 已经成为默认规则
 
 ---
 

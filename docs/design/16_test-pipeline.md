@@ -85,12 +85,12 @@ Last Reviewed: 2026-03-20
 - 失败优先视为环境或上游依赖问题，不直接阻塞普通开发
 
 当前状态说明：
-- 仓库仍保留一层过渡性的 `conftest.py` 文件名自动补 marker
-- `tests/integration/test_stage1_live.py`
-- `tests/integration/test_stage2_live.py`
-- `tests/integration/test_e2e_live.py`
-- `tests/integration/test_stage1_market_context.py`
-  目前仍部分依赖这层自动补标；目标状态是后续全部改成显式 `pytestmark`
+- 现在 `tests/` 下所有被收集的测试都要求显式声明主 tier marker
+- `tests/conftest.py` 不再按文件名自动补 `live/e2e`
+- `tests/conftest.py` 不再自动补 `unit`；缺少主 tier marker 的测试会在 collection 阶段直接失败
+- `tests/conftest.py` 仍保留 live-like 测试的 `RESEARCHER_API_KEY` skip 逻辑与 proxy 清理
+- `tests/integration/test_stage1_live.py`、`tests/integration/test_stage2_live.py`、`tests/integration/test_e2e_live.py`、`tests/integration/test_stage1_market_context.py`
+  已经全部改成显式 `pytestmark`
 
 典型覆盖：
 - `tests/test_mcp_servers.py` 中的 AKShare / cross-market 段落
@@ -137,7 +137,7 @@ Last Reviewed: 2026-03-20
 - 运行 `pytest tests` 时可直接导入 `src.*`
 
 当前状态：默认入口已经稳定，但少数 live/integration 文件仍保留过渡期的
-`sys.path.insert(...)`。这些不应继续扩散，并将在 Test Pipeline Refactor 中清理。
+`sys.path.insert(...)`。这些不应继续扩散，并将在 Test Pipeline Refactor 中继续清理。
 
 ### Async 测试
 
@@ -162,15 +162,12 @@ Last Reviewed: 2026-03-20
 - `live`
 - `e2e`
 
-如果测试没有 marker，不允许进入长期稳定 CI。
+如果测试没有主 tier marker，collection 阶段会直接失败，不允许进入长期稳定 CI。
 
-当前过渡状态：
-- `tests/conftest.py` 仍会对一部分文件按文件名自动补 `live/e2e`
-- 没有主 marker 的测试当前仍会被自动补成 `unit`
-
-这两条都属于过渡兼容，而不是目标状态。Test Pipeline Refactor 的目标是：
-- live/e2e 全部显式标记
-- 不再依赖“无 marker 自动算 unit”
+当前状态：
+- `tests/conftest.py` 只负责校验主 tier marker、处理 live-like skip 和 proxy 清理
+- 不再存在“无 marker 自动补成 `unit`”的兼容层
+- live/e2e 已全部显式标记
 
 ---
 
@@ -200,7 +197,7 @@ uv run pytest -q tests -m live
 uv run pytest -q tests -m e2e
 ```
 
-当前仓库已经完成 pytest 路径和 marker 基础配置，可以把上述命令视为稳定入口；但 `live / e2e` 仍不属于默认 merge gate。
+当前仓库已经完成 pytest 路径和 marker 基础配置，可以把上述命令视为稳定入口；`live / e2e` 仍不属于默认 merge gate。
 
 ---
 

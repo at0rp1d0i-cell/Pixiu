@@ -22,6 +22,8 @@ from src.schemas.judgment import CriticVerdict, RiskAuditReport
 from src.schemas.market_context import MarketContextMemo, MarketRegime
 from src.schemas.state import AgentState
 
+pytestmark = pytest.mark.integration
+
 
 # ─────────────────────────────────────────────────────────
 # Fixtures

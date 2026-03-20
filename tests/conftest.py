@@ -11,13 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PRIMARY_TIER_MARKERS = {"smoke", "unit", "integration", "live", "e2e"}
 LIVE_TIER_MARKERS = {"live", "e2e"}
-FILE_TIER_MARKERS = {
-    # live / e2e tests in integration/ subdir still need explicit tier assignment
-    "test_stage1_live.py": ("live",),
-    "test_stage2_live.py": ("live",),
-    "test_e2e_live.py": ("e2e",),
-    "test_stage1_market_context.py": ("integration",),
-}
 
 
 def _has_marker(item: pytest.Item, marker_name: str) -> bool:
@@ -29,10 +22,7 @@ def _has_primary_tier_marker(item: pytest.Item) -> bool:
 
 
 def _is_live_like_item(item: pytest.Item) -> bool:
-    tier_markers = FILE_TIER_MARKERS.get(item.path.name, ())
-    return any(marker_name in LIVE_TIER_MARKERS for marker_name in tier_markers) or any(
-        _has_marker(item, marker_name) for marker_name in LIVE_TIER_MARKERS
-    )
+    return any(_has_marker(item, marker_name) for marker_name in LIVE_TIER_MARKERS)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -43,17 +33,19 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if live_like_items:
         live_api_key_available = researcher_api_key_available()
 
+    missing_primary_markers: list[str] = []
     for item in items:
-        tier_markers = FILE_TIER_MARKERS.get(item.path.name, ())
-        for marker_name in tier_markers:
-            if not _has_marker(item, marker_name):
-                item.add_marker(getattr(pytest.mark, marker_name))
-
         if not _has_primary_tier_marker(item):
-            item.add_marker(pytest.mark.unit)
+            missing_primary_markers.append(str(item.path.relative_to(PROJECT_ROOT)))
 
         if _is_live_like_item(item) and not live_api_key_available:
             item.add_marker(pytest.mark.skip(reason="RESEARCHER_API_KEY 未设置，跳过真实场景测试"))
+
+    if missing_primary_markers:
+        raise pytest.UsageError(
+            "tests under tests/ must declare an explicit primary tier marker; "
+            f"missing markers in: {', '.join(sorted(missing_primary_markers))}"
+        )
 
 
 @pytest.fixture(autouse=True)

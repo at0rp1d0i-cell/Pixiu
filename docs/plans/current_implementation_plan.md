@@ -2,9 +2,9 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-19
+Last Reviewed: 2026-03-20
 
-> 更新时间：2026-03-19
+> 更新时间：2026-03-20
 > 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
 
 ---
@@ -48,6 +48,7 @@ Last Reviewed: 2026-03-19
 
 - [x] 配置 pytest 入口，无需手工 `PYTHONPATH`
 - [x] 注册 marker：`smoke/unit/integration/live/e2e`
+- [x] 显式 primary marker 已收口，`tests/conftest.py` 不再自动补 `unit/live/e2e`
 - [x] 将实验脚本隔离出默认 pytest 收集路径
 - [ ] 收敛 async 测试的长期策略：继续同步包装或正式引入 `pytest-asyncio`
 
@@ -82,7 +83,7 @@ Last Reviewed: 2026-03-19
   - 见 `docs/plans/2026-03-20-test-pipeline-refactor-design.md`
   - 实施计划：`docs/plans/2026-03-20-test-pipeline-refactor-implementation.md`
   - 这是 `FactorPool Boundary Refactor` 与 `Orchestrator Boundary Refactor` 的前置 gate
-  - [ ] Slice 1：canonical docs / marker truth 对齐
+  - [x] Slice 1：canonical docs / marker truth 对齐
   - [ ] Slice 2：test harness stabilization（fixture / env / globals）
   - [ ] Slice 3：approval / entrypoint / FactorPool / readiness 高价值 contract tests
 - [ ] `Data Capability Platform Refactor`
