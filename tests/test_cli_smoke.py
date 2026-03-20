@@ -92,3 +92,18 @@ def test_stop_command_stays_quiet_when_injection_fails(monkeypatch):
 
     assert result.exit_code == 0
     assert result.stdout.strip() == ""
+
+
+def test_run_command_skips_static_banner_when_tty(monkeypatch):
+    import src.core.orchestrator as orchestrator
+
+    monkeypatch.setattr(cli_main.sys.stdout, "isatty", lambda: True, raising=False)
+
+    calls: list[object] = []
+
+    monkeypatch.setattr(cli_main.console, "print", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(cli_main, "_run_with_progress", lambda coro, total_rounds=None: None)
+    monkeypatch.setattr(orchestrator, "run_evolve", lambda rounds, islands=None: object())
+
+    cli_main.run(mode="evolve", rounds=2, island="momentum", islands=None, verbose=False)
+    assert calls == []

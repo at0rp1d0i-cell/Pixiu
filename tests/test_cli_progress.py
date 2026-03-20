@@ -70,3 +70,33 @@ def test_run_with_progress_skips_live_when_not_tty(monkeypatch):
         return 42
 
     assert _run_with_progress(_coro()) == 42
+
+
+def test_run_with_progress_uses_transient_live_when_tty(monkeypatch):
+    from src.cli import main as cli_main
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    captured = {}
+
+    class FakeLive:
+        def __init__(self, *args, **kwargs):
+            captured["transient"] = kwargs.get("transient")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def update(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(cli_main, "Live", FakeLive)
+    monkeypatch.setattr(cli_main, "_get_state_store", lambda: (_ for _ in ()).throw(RuntimeError("no state")))
+
+    async def _coro():
+        return 7
+
+    assert cli_main._run_with_progress(_coro()) == 7
+    assert captured["transient"] is True

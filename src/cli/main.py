@@ -60,12 +60,13 @@ def run(
 
     from src.core.orchestrator import run_evolve, run_single
 
-    console.print(Panel(
-        f"[bold cyan]Pixiu v2 启动[/bold cyan]\n"
-        f"模式：[yellow]{mode}[/yellow]  |  轮次：[yellow]{rounds}[/yellow]  |  Island：[yellow]{island}[/yellow]",
-        title="🦅 Pixiu Quantitative Research",
-        border_style="cyan",
-    ))
+    if not sys.stdout.isatty():
+        console.print(Panel(
+            f"[bold cyan]Pixiu v2 启动[/bold cyan]\n"
+            f"模式：[yellow]{mode}[/yellow]  |  轮次：[yellow]{rounds}[/yellow]  |  Island：[yellow]{island}[/yellow]",
+            title="🦅 Pixiu Quantitative Research",
+            border_style="cyan",
+        ))
 
     if mode == "single":
         _run_with_progress(run_single(island=island), total_rounds=1)
@@ -224,7 +225,7 @@ def _run_with_progress(coro: Awaitable[T], total_rounds: int | None = None) -> T
         task = asyncio.create_task(coro)
         tracker = RunProgressTracker()
 
-        with Live(console=console, refresh_per_second=4, transient=False) as live:
+        with Live(console=console, refresh_per_second=4, transient=True) as live:
             while True:
                 with suppress(Exception):
                     store = _get_state_store()
