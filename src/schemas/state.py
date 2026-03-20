@@ -21,6 +21,8 @@ class AgentState(PixiuBase):
 
     # Stage 1 输出
     market_context: Optional[MarketContextMemo] = None
+    stage_timings: Dict[str, float] = Field(default_factory=dict)
+    stage_step_timings: Dict[str, Dict[str, float]] = Field(default_factory=dict)
 
     # Stage 2 输出
     research_notes: List[FactorResearchNote] = Field(default_factory=list)

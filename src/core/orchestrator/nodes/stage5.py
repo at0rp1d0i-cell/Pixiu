@@ -1,11 +1,13 @@
 """Stage 5: Judgment, portfolio, and report nodes."""
 import asyncio
 import logging
+from time import perf_counter
 from typing import Optional
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import JudgmentOutput, PortfolioOutput, ReportOutput
 from src.core.orchestrator._context import NODE_JUDGMENT, NODE_REPORT
+from src.core.orchestrator.timing import merge_stage_timing
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,14 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
 
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
-        return {"critic_verdicts": [], "risk_audit_reports": []}
+        return {
+            "critic_verdicts": [],
+            "risk_audit_reports": [],
+            **merge_stage_timing(state, "judgment", 0.0),
+        }
 
     logger.info("[Stage 5] 评判 %d 个回测报告...", len(state.backtest_reports))
+    started = perf_counter()
 
     pool = get_factor_pool()
     verdicts = []
@@ -80,8 +87,13 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
     asyncio.run(_run_judgment())
 
     passed_count = sum(1 for v in verdicts if v.overall_passed)
-    logger.info("[Stage 5] 通过: %d/%d", passed_count, len(verdicts))
-    result = {"critic_verdicts": verdicts, "risk_audit_reports": risk_reports}
+    elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+    logger.info("[Stage 5] 通过: %d/%d，耗时 %.2f ms", passed_count, len(verdicts), elapsed_ms)
+    result = {
+        "critic_verdicts": verdicts,
+        "risk_audit_reports": risk_reports,
+        **merge_stage_timing(state, "judgment", elapsed_ms),
+    }
     _write_snapshot(state.model_copy(update=result), NODE_JUDGMENT)
     return result
 
@@ -93,6 +105,7 @@ def portfolio_node(state: AgentState) -> PortfolioOutput:
     get_factor_pool = _control_plane.get_factor_pool
 
     logger.info("[Stage 5b] 更新组合权重...")
+    started = perf_counter()
 
     async def _run():
         pm = PortfolioManager(factor_pool=get_factor_pool())
@@ -101,11 +114,20 @@ def portfolio_node(state: AgentState) -> PortfolioOutput:
 
     try:
         allocation = asyncio.run(_run())
-        logger.info("[Stage 5b] 组合更新完成：%d 个因子", len(allocation.factor_weights))
-        return {"portfolio_allocation": allocation}
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.info("[Stage 5b] 组合更新完成：%d 个因子，耗时 %.2f ms", len(allocation.factor_weights), elapsed_ms)
+        return {
+            "portfolio_allocation": allocation,
+            **merge_stage_timing(state, "portfolio", elapsed_ms),
+        }
     except Exception as e:
-        logger.error("[Stage 5b] Portfolio 更新失败: %s", e)
-        return {"last_error": str(e), "error_stage": "portfolio"}
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.error("[Stage 5b] Portfolio 更新失败: %s (%.2f ms)", e, elapsed_ms)
+        return {
+            "last_error": str(e),
+            "error_stage": "portfolio",
+            **merge_stage_timing(state, "portfolio", elapsed_ms),
+        }
 
 
 def report_node(state: AgentState) -> ReportOutput:
@@ -117,6 +139,7 @@ def report_node(state: AgentState) -> ReportOutput:
     _write_snapshot = _control_plane._write_snapshot
 
     logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
+    started = perf_counter()
 
     async def _run():
         writer = ReportWriter()
@@ -124,11 +147,13 @@ def report_node(state: AgentState) -> ReportOutput:
 
     try:
         cio_report = asyncio.run(_run())
-        logger.info("[Stage 5c] CIO 报告生成完成，等待审批...")
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.info("[Stage 5c] CIO 报告生成完成，等待审批... (%.2f ms)", elapsed_ms)
         result = {
             "cio_report": cio_report,
             "awaiting_human_approval": True,
             "human_decision": None,
+            **merge_stage_timing(state, "report", elapsed_ms),
         }
         next_state = state.model_copy(update=result)
         _persist_cio_report(cio_report)
@@ -136,10 +161,12 @@ def report_node(state: AgentState) -> ReportOutput:
         _write_snapshot(next_state, NODE_REPORT, awaiting_human_approval=True)
         return result
     except Exception as e:
-        logger.error("[Stage 5c] 报告生成失败: %s", e)
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.error("[Stage 5c] 报告生成失败: %s (%.2f ms)", e, elapsed_ms)
         _update_run_record(NODE_REPORT, status="failed", last_error=str(e))
         return {
             "last_error": str(e),
             "error_stage": "report",
             "awaiting_human_approval": False,
+            **merge_stage_timing(state, "report", elapsed_ms),
         }

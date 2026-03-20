@@ -344,6 +344,17 @@ class TestLoopControlSnapshotWritten:
                 backtest_reports=[failed_report],
                 critic_verdicts=[failed_verdict],
             ).model_copy(update={
+                "stage_timings": {
+                    "market_context": 1200.0,
+                    "hypothesis_gen": 600.0,
+                    "prefilter": 300.0,
+                },
+                "stage_step_timings": {
+                    "market_context": {
+                        "market_analyst_ms": 900.0,
+                        "literature_miner_ms": 300.0,
+                    }
+                },
                 "prefilter_diagnostics": {
                     "input_count": 12,
                     "approved_count": 3,
@@ -360,7 +371,7 @@ class TestLoopControlSnapshotWritten:
                     mock_pool.return_value = MagicMock(
                         get_passed_factors=MagicMock(return_value=[])
                     )
-                    loop_control_node(state)
+                    result = loop_control_node(state)
 
             # round_005.json should have been written
             snapshot_path = tmp_path / run_id / "round_005.json"
@@ -381,6 +392,10 @@ class TestLoopControlSnapshotWritten:
             assert data["judgment"]["failure_mode_counts"]["low_sharpe"] == 1
             assert data["judgment"]["failed_check_counts"]["sharpe"] == 1
             assert data["judgment"]["sample_failures"][0]["factor_id"] == "failing_factor"
+            assert data["timings"]["stages_ms"]["market_context"] == 1200.0
+            assert data["timings"]["stages_ms"]["loop_control"] >= 0.0
+            assert data["timings"]["stage_steps_ms"]["market_context"]["market_analyst_ms"] == 900.0
+            assert data["timings"]["round_total_ms"] >= 2100.0
             assert set(data["scheduler_weights"]) == {
                 "factor_algebra",
                 "symbolic_mutation",
@@ -388,6 +403,8 @@ class TestLoopControlSnapshotWritten:
                 "narrative_mining",
             }
             assert sum(data["scheduler_weights"].values()) == pytest.approx(1.0)
+            assert result["stage_timings"] == {}
+            assert result["stage_step_timings"] == {}
         finally:
             # 恢复单例，避免污染其他测试
             _exp_mod._logger_instance = None

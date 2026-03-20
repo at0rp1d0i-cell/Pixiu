@@ -1,9 +1,11 @@
 """Stage 2: Hypothesis generation, synthesis, and note refinement nodes."""
 import asyncio
 import logging
+from time import perf_counter
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import HypothesisGenOutput, SynthesisOutput, NoteRefinementOutput
+from src.core.orchestrator.timing import merge_stage_timing
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,7 @@ def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     from .. import runtime as _runtime
 
     logger.info("[Stage 2] 并行生成假设... (Round %d)", state.current_round)
+    started = perf_counter()
 
     scheduler = _runtime.get_scheduler()
     active = getattr(scheduler, "get_active_islands", lambda: _config.ACTIVE_ISLANDS)()
@@ -26,18 +29,24 @@ def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     try:
         result = _gen_node(enriched)
         notes = result.get("research_notes", [])
-        logger.info("[Stage 2] 生成 %d 个候选", len(notes))
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.info("[Stage 2] 生成 %d 个候选，耗时 %.2f ms", len(notes), elapsed_ms)
+        timing_update = merge_stage_timing(state, "hypothesis_gen", elapsed_ms)
         return {
             "research_notes": notes,
             "hypotheses": result.get("hypotheses", []),
             "strategy_specs": result.get("strategy_specs", []),
             "subspace_generated": result.get("subspace_generated", {}),
+            **timing_update,
         }
     except Exception as e:
-        logger.error("[Stage 2] 假设生成失败: %s", e)
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.error("[Stage 2] 假设生成失败: %s (%.2f ms)", e, elapsed_ms)
+        timing_update = merge_stage_timing(state, "hypothesis_gen", elapsed_ms)
         return {
             "research_notes": [], "hypotheses": [], "strategy_specs": [],
             "subspace_generated": {}, "last_error": str(e), "error_stage": "hypothesis_gen",
+            **timing_update,
         }
 
 
@@ -51,9 +60,12 @@ def synthesis_node(state: AgentState) -> SynthesisOutput:
     notes = state.research_notes
     if len(notes) <= 1:
         logger.info("[Stage 2b] Synthesis: <= 1 个候选，跳过")
-        return {}
+        return {
+            **merge_stage_timing(state, "synthesis", 0.0),
+        }
 
     logger.info("[Stage 2b] Synthesis: 处理 %d 个候选...", len(notes))
+    started = perf_counter()
 
     async def _run():
         agent = SynthesisAgent()
@@ -62,25 +74,34 @@ def synthesis_node(state: AgentState) -> SynthesisOutput:
     try:
         result = asyncio.run(_run())
         removed = len(notes) - len(result.filtered_notes)
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
         logger.info(
-            "[Stage 2b] Synthesis 完成：去重 %d 个，识别 %d 个 family，%d 个 merge 建议",
+            "[Stage 2b] Synthesis 完成：去重 %d 个，识别 %d 个 family，%d 个 merge 建议，耗时 %.2f ms",
             removed,
             len(result.families),
             len(result.merge_candidates),
+            elapsed_ms,
         )
         return {
             "research_notes": result.filtered_notes,
             "synthesis_insights": result.insights + result.merge_candidates,
+            **merge_stage_timing(state, "synthesis", elapsed_ms),
         }
     except Exception as e:
-        logger.warning("[Stage 2b] Synthesis 失败（降级为 pass-through）: %s", e)
-        return {}
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        logger.warning("[Stage 2b] Synthesis 失败（降级为 pass-through）: %s (%.2f ms)", e, elapsed_ms)
+        return {
+            **merge_stage_timing(state, "synthesis", elapsed_ms),
+        }
 
 
 def note_refinement_node(state: AgentState) -> NoteRefinementOutput:
     """Stage 4a→2: 将 ExplorationResult 反馈给对应 ResearchNote，更新 final_formula。"""
     if not state.exploration_results:
-        return {}
+        return {
+            **merge_stage_timing(state, "note_refinement", 0.0),
+        }
+    started = perf_counter()
 
     result_map = {r.note_id: r for r in state.exploration_results}
 
@@ -98,4 +119,9 @@ def note_refinement_node(state: AgentState) -> NoteRefinementOutput:
             note = note.model_copy(update={"final_formula": note.proposed_formula, "status": "ready_for_backtest"})
         updated_notes.append(note)
 
-    return {"approved_notes": updated_notes}
+    elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+    logger.info("[Stage 4a→2] Note refinement 完成，耗时 %.2f ms", elapsed_ms)
+    return {
+        "approved_notes": updated_notes,
+        **merge_stage_timing(state, "note_refinement", elapsed_ms),
+    }

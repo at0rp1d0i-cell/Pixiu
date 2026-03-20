@@ -35,7 +35,13 @@ def test_run_progress_panel_includes_stage_round_and_snapshot_path(tmp_path: Pat
     run_dir = tmp_path / "experiment_runs" / run.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "round_000.json").write_text("{}", encoding="utf-8")
-    (run_dir / "round_003.json").write_text("{}", encoding="utf-8")
+    (run_dir / "round_003.json").write_text(
+        (
+            '{"timings":{"stages_ms":{"market_context":1250.5,"hypothesis_gen":620.0},'
+            '"round_total_ms":1870.5}}'
+        ),
+        encoding="utf-8",
+    )
 
     tracker = RunProgressTracker()
     view = tracker.observe(
@@ -53,6 +59,8 @@ def test_run_progress_panel_includes_stage_round_and_snapshot_path(tmp_path: Pat
     assert "market_context" in rendered
     assert "3/20" in rendered
     assert "round_003.json" in rendered
+    assert "1870.50 ms" in rendered
+    assert "market_context (1250.50 ms)" in rendered
 
 
 def test_run_with_progress_skips_live_when_not_tty(monkeypatch):

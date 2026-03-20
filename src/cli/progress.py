@@ -1,6 +1,7 @@
 """CLI progress helpers for Pixiu run commands."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,7 +30,18 @@ class RunProgressView:
     awaiting_human_approval: bool
     snapshot_path: Path | None
     snapshot_updated_at: datetime | None
+    latest_round_total_ms: float | None
+    slowest_stage: str | None
+    slowest_stage_ms: float | None
     last_error: str | None
+
+
+@dataclass(frozen=True)
+class SnapshotTimingSummary:
+    path: Path
+    round_total_ms: float | None
+    slowest_stage: str | None
+    slowest_stage_ms: float | None
 
 
 @dataclass
@@ -53,6 +65,7 @@ class RunProgressTracker:
             self._stage_started_at = now
 
         stage_started_at = self._stage_started_at or run.started_at
+        latest_snapshot = load_latest_snapshot_timing(run.run_id, runs_dir=runs_dir)
         return RunProgressView(
             run_id=run.run_id,
             mode=run.mode,
@@ -65,8 +78,11 @@ class RunProgressTracker:
             awaiting_human_approval=bool(
                 snapshot.awaiting_human_approval if snapshot else False
             ),
-            snapshot_path=find_latest_snapshot_path(run.run_id, runs_dir=runs_dir),
+            snapshot_path=latest_snapshot.path if latest_snapshot else None,
             snapshot_updated_at=snapshot.updated_at if snapshot else None,
+            latest_round_total_ms=latest_snapshot.round_total_ms if latest_snapshot else None,
+            slowest_stage=latest_snapshot.slowest_stage if latest_snapshot else None,
+            slowest_stage_ms=latest_snapshot.slowest_stage_ms if latest_snapshot else None,
             last_error=run.last_error,
         )
 
@@ -87,6 +103,45 @@ def find_latest_snapshot_path(run_id: str, runs_dir: Path | None = None) -> Path
             _round_number(path),
             path.stat().st_mtime,
         ),
+    )
+
+
+def load_latest_snapshot_timing(run_id: str, runs_dir: Path | None = None) -> SnapshotTimingSummary | None:
+    path = find_latest_snapshot_path(run_id, runs_dir=runs_dir)
+    if path is None:
+        return None
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return SnapshotTimingSummary(
+            path=path,
+            round_total_ms=None,
+            slowest_stage=None,
+            slowest_stage_ms=None,
+        )
+
+    timings = payload.get("timings", {}) if isinstance(payload, dict) else {}
+    stage_timings = timings.get("stages_ms", {}) if isinstance(timings, dict) else {}
+    round_total_ms = timings.get("round_total_ms") if isinstance(timings, dict) else None
+
+    if not isinstance(stage_timings, dict) or not stage_timings:
+        return SnapshotTimingSummary(
+            path=path,
+            round_total_ms=float(round_total_ms) if isinstance(round_total_ms, (int, float)) else None,
+            slowest_stage=None,
+            slowest_stage_ms=None,
+        )
+
+    slowest_stage, slowest_stage_ms = max(
+        ((str(name), float(value)) for name, value in stage_timings.items()),
+        key=lambda item: item[1],
+    )
+    return SnapshotTimingSummary(
+        path=path,
+        round_total_ms=float(round_total_ms) if isinstance(round_total_ms, (int, float)) else None,
+        slowest_stage=slowest_stage,
+        slowest_stage_ms=slowest_stage_ms,
     )
 
 
@@ -113,6 +168,18 @@ def build_run_progress_panel(
         _format_duration(datetime.now(UTC) - view.snapshot_updated_at)
         if view.snapshot_updated_at
         else "—",
+    )
+    table.add_row(
+        "Last Round",
+        f"{view.latest_round_total_ms:.2f} ms" if view.latest_round_total_ms is not None else "—",
+    )
+    table.add_row(
+        "Slowest Stage",
+        (
+            f"{view.slowest_stage} ({view.slowest_stage_ms:.2f} ms)"
+            if view.slowest_stage and view.slowest_stage_ms is not None
+            else "—"
+        ),
     )
     table.add_row("Last Error", view.last_error or "—")
 

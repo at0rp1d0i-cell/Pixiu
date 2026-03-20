@@ -24,6 +24,9 @@ from src.schemas.backtest import BacktestReport
 from src.schemas.exploration import ExplorationResult
 from src.schemas.judgment import CriticVerdict, RiskAuditReport, PortfolioAllocation, CIOReport
 
+StageTimings = dict[str, float]
+StageStepTimings = dict[str, dict[str, float]]
+
 
 # ── Stage 1 ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +41,8 @@ class MarketContextOutput(TypedDict, total=False):
     """
 
     market_context: MarketContextMemo
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
     last_error: str
     error_stage: str
 
@@ -58,6 +63,8 @@ class HypothesisGenOutput(TypedDict, total=False):
     hypotheses: list[Hypothesis]
     strategy_specs: list[StrategySpec]
     subspace_generated: dict[str, int]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
     last_error: str
     error_stage: str
 
@@ -74,6 +81,8 @@ class SynthesisOutput(TypedDict, total=False):
 
     research_notes: list[FactorResearchNote]
     synthesis_insights: list[SynthesisInsight]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 class NoteRefinementOutput(TypedDict, total=False):
@@ -87,6 +96,8 @@ class NoteRefinementOutput(TypedDict, total=False):
     """
 
     approved_notes: list[FactorResearchNote]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────────
@@ -123,6 +134,8 @@ class PrefilterOutput(TypedDict):
     approved_notes: list[FactorResearchNote]
     filtered_count: int
     prefilter_diagnostics: PrefilterDiagnostics
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 # ── Stage 4 ────────────────────────────────────────────────────────────────────
@@ -137,6 +150,8 @@ class ExplorationOutput(TypedDict):
     """
 
     exploration_results: list[ExplorationResult]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 class CoderOutput(TypedDict):
@@ -151,6 +166,8 @@ class CoderOutput(TypedDict):
 
     backtest_reports: list[BacktestReport]
     approved_notes: list[FactorResearchNote]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 # ── Stage 5 ────────────────────────────────────────────────────────────────────
@@ -166,6 +183,8 @@ class JudgmentOutput(TypedDict):
 
     critic_verdicts: list[CriticVerdict]
     risk_audit_reports: list[RiskAuditReport]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 class PortfolioOutput(TypedDict, total=False):
@@ -179,6 +198,8 @@ class PortfolioOutput(TypedDict, total=False):
     """
 
     portfolio_allocation: PortfolioAllocation
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
     last_error: str
     error_stage: str
 
@@ -198,6 +219,8 @@ class ReportOutput(TypedDict, total=False):
     cio_report: CIOReport
     awaiting_human_approval: bool
     human_decision: Optional[str]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
     last_error: str
     error_stage: str
 
@@ -212,6 +235,8 @@ class HumanGateOutput(TypedDict, total=False):
 
     human_decision: Optional[str]
     awaiting_human_approval: bool
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings
 
 
 class LoopControlOutput(TypedDict):
@@ -240,3 +265,5 @@ class LoopControlOutput(TypedDict):
     human_decision: Optional[str]
     last_error: Optional[str]
     error_stage: Optional[str]
+    stage_timings: StageTimings
+    stage_step_timings: StageStepTimings

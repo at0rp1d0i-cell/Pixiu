@@ -212,6 +212,14 @@ class ExperimentLogger:
             "factor_pool_size": factor_pool_size,
             "scheduler_weights": scheduler_weights,
             "scheduler_state": state.scheduler_state or {},
+            "timings": {
+                "stages_ms": dict(state.stage_timings),
+                "stage_steps_ms": {
+                    stage: dict(step_timings)
+                    for stage, step_timings in state.stage_step_timings.items()
+                },
+                "round_total_ms": round(sum(state.stage_timings.values()), 2),
+            },
             "errors": errors,
         }
 

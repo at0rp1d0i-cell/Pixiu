@@ -6,6 +6,7 @@ import time
 from src.schemas.state import AgentState
 from src.schemas.stage_io import HumanGateOutput, LoopControlOutput
 from src.core.experiment_logger import get_experiment_logger
+from src.core.orchestrator.timing import merge_stage_timing
 
 logger = logging.getLogger(__name__)
 
@@ -13,15 +14,24 @@ logger = logging.getLogger(__name__)
 def human_gate_node(state: AgentState) -> HumanGateOutput:
     """Human Gate: 通过 control plane 轮询人类决策，支持跨进程审批。"""
     from .. import control_plane as _control_plane
+    started_at = time.perf_counter()
 
     if not state.awaiting_human_approval:
         logger.info("[Human Gate] 当前状态未等待审批，直接结束当前 run")
-        return {"human_decision": "stop", "awaiting_human_approval": False}
+        return {
+            "human_decision": "stop",
+            "awaiting_human_approval": False,
+            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+        }
 
     run_id = _control_plane._ensure_run_record()
     if not run_id:
         logger.warning("[Human Gate] 缺少 run_id，默认批准继续")
-        return {"human_decision": "approve", "awaiting_human_approval": False}
+        return {
+            "human_decision": "approve",
+            "awaiting_human_approval": False,
+            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+        }
 
     store = _control_plane.get_state_store()
     poll_interval = float(os.getenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "1.0"))
@@ -59,6 +69,7 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
             return {
                 "human_decision": decision.action,
                 "awaiting_human_approval": False,
+                **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
             }
 
         if timeout_sec > 0 and (time.monotonic() - started_at) >= timeout_sec:
@@ -76,7 +87,11 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
                 "human_gate",
                 awaiting_human_approval=False,
             )
-            return {"human_decision": "stop", "awaiting_human_approval": False}
+            return {
+                "human_decision": "stop",
+                "awaiting_human_approval": False,
+                **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+            }
 
         time.sleep(poll_interval)
 
@@ -87,6 +102,7 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
     from src.schemas.hypothesis import ExplorationSubspace
     from .. import control_plane as _control_plane
     from .. import runtime as _runtime
+    started_at = time.perf_counter()
 
     scheduler = _runtime.get_scheduler()
 
@@ -157,11 +173,17 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
         sum(updated_sched_state.total_passed.values()),
     )
 
+    final_timing_update = merge_stage_timing(
+        state,
+        "loop_control",
+        round((time.perf_counter() - started_at) * 1000.0, 2),
+    )
+
     # 透明度层：在清除 state 之前写入本轮快照，失败不影响主链路
     try:
         get_experiment_logger().snapshot(
             round_n=state.current_round,
-            state=state,
+            state=state.model_copy(update=final_timing_update),
             scheduler=subspace_scheduler,
             scheduler_state_snapshot=updated_sched_state.model_dump(),
         )
@@ -190,4 +212,6 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
         "human_decision": None,
         "last_error": None,
         "error_stage": None,
+        "stage_timings": {},
+        "stage_step_timings": {},
     }

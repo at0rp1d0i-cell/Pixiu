@@ -2,10 +2,12 @@
 import asyncio
 import logging
 import uuid
+from time import perf_counter
 
 from src.schemas.state import AgentState
 from src.schemas.stage_io import ExplorationOutput, CoderOutput
 from src.core.orchestrator._context import NODE_CODER
+from src.core.orchestrator.timing import merge_stage_timing
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,13 @@ def exploration_node(state: AgentState) -> ExplorationOutput:
 
     if not notes_needing_exploration:
         logger.info("[Stage 4a] 无需探索，直接进入 note_refinement")
-        return {"exploration_results": []}
+        return {
+            "exploration_results": [],
+            **merge_stage_timing(state, "exploration", 0.0),
+        }
 
     logger.info("[Stage 4a] 探索 %d 个 Notes...", len(notes_needing_exploration))
+    started = perf_counter()
 
     async def _run_all():
         agent = ExplorationAgent()
@@ -38,7 +44,12 @@ def exploration_node(state: AgentState) -> ExplorationOutput:
         return results
 
     exploration_results = asyncio.run(_run_all())
-    return {"exploration_results": exploration_results}
+    elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+    logger.info("[Stage 4a] 探索完成，耗时 %.2f ms", elapsed_ms)
+    return {
+        "exploration_results": exploration_results,
+        **merge_stage_timing(state, "exploration", elapsed_ms),
+    }
 
 
 def coder_node(state: AgentState) -> CoderOutput:
@@ -54,9 +65,13 @@ def coder_node(state: AgentState) -> CoderOutput:
     notes = state.approved_notes
     if not notes:
         logger.warning("[Stage 4b] 无待回测 Note，跳过")
-        return {"backtest_reports": []}
+        return {
+            "backtest_reports": [],
+            **merge_stage_timing(state, "coder", 0.0),
+        }
 
     logger.info("[Stage 4b] 开始回测 %d 个因子...", len(notes))
+    started = perf_counter()
 
     async def _run_all():
         coder = Coder()
@@ -101,10 +116,12 @@ def coder_node(state: AgentState) -> CoderOutput:
 
     reports, updated_notes = asyncio.run(_run_all())
 
-    logger.info("[Stage 4b] 回测完成：%d/%d 成功", sum(1 for r in reports if r.passed), len(reports))
+    elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+    logger.info("[Stage 4b] 回测完成：%d/%d 成功，耗时 %.2f ms", sum(1 for r in reports if r.passed), len(reports), elapsed_ms)
     result = {
         "backtest_reports": list(state.backtest_reports) + reports,
         "approved_notes": updated_notes,
+        **merge_stage_timing(state, "coder", elapsed_ms),
     }
     _write_snapshot(state.model_copy(update=result), NODE_CODER)
     return result
