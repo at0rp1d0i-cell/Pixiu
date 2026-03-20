@@ -7,6 +7,7 @@ import pytest
 import src.core.orchestrator as orchestrator
 import src.core.orchestrator.graph as graph_mod
 from src.core.orchestrator._entrypoints import run_evolve, run_single
+from src.control_plane.state_store import StateStore
 
 pytestmark = pytest.mark.unit
 
@@ -16,95 +17,131 @@ class _FakeGraph:
         self.ainvoke = AsyncMock(return_value=result)
 
 
-async def _run_entrypoint(monkeypatch, orchestrator_state_guard, entrypoint, kwargs, result):
+async def _run_entrypoint(
+    monkeypatch,
+    orchestrator_state_guard,
+    tmp_path,
+    entrypoint,
+    kwargs,
+    result,
+):
     with orchestrator_state_guard():
+        store = StateStore(tmp_path / "state_store.sqlite")
         graph = _FakeGraph(result)
-        update_calls: list[tuple[str, dict]] = []
 
         monkeypatch.setattr(orchestrator, "get_graph", lambda: graph)
-        monkeypatch.setattr(orchestrator, "_ensure_run_record", lambda mode="adhoc": "run-123")
+        monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
         monkeypatch.setattr(orchestrator, "_current_run_id", None)
         monkeypatch.setattr(orchestrator, "MAX_ROUNDS", orchestrator.MAX_ROUNDS)
         monkeypatch.setattr(orchestrator, "ACTIVE_ISLANDS", list(orchestrator.ACTIVE_ISLANDS))
         monkeypatch.setattr(graph_mod, "_graph_config", None)
-        monkeypatch.setattr(
-            orchestrator,
-            "_update_run_record",
-            lambda stage, **fields: update_calls.append((stage, fields)),
-        )
+
+        update_calls: list[tuple[str, dict]] = []
+        original_update_run = store.update_run
+
+        def _spy_update_run(run_id: str, **fields):
+            update_calls.append((run_id, dict(fields)))
+            return original_update_run(run_id, **fields)
+
+        monkeypatch.setattr(store, "update_run", _spy_update_run)
 
         await entrypoint(**kwargs)
 
-        return graph, update_calls, orchestrator.MAX_ROUNDS, list(orchestrator.ACTIVE_ISLANDS)
+        return {
+            "graph": graph,
+            "store": store,
+            "update_calls": update_calls,
+            "max_rounds": orchestrator.MAX_ROUNDS,
+            "active_islands": list(orchestrator.ACTIVE_ISLANDS),
+            "graph_config": graph_mod._graph_config,
+        }
 
 
 @pytest.mark.asyncio
-async def test_run_evolve_records_completed_final_status(monkeypatch, orchestrator_state_guard):
-    graph, update_calls, max_rounds, active_islands = await _run_entrypoint(
+async def test_run_evolve_records_completed_final_status(monkeypatch, orchestrator_state_guard, tmp_path):
+    result = await _run_entrypoint(
         monkeypatch,
         orchestrator_state_guard,
+        tmp_path,
         run_evolve,
         {"rounds": 9, "islands": ["momentum", "valuation"]},
         {"current_round": 7},
     )
+    graph = result["graph"]
+    store = result["store"]
+    update_calls = result["update_calls"]
+    max_rounds = result["max_rounds"]
+    active_islands = result["active_islands"]
+    graph_config = result["graph_config"]
 
     assert max_rounds == 9
     assert active_islands == ["momentum", "valuation"]
     assert graph.ainvoke.await_count == 1
+    assert graph_config is not None
+    assert graph_config["configurable"]["thread_id"].startswith("pixiu_evolve_")
 
     initial_state = graph.ainvoke.await_args.args[0]
     assert initial_state["current_round"] == 0
-    assert update_calls[0] == (
-        orchestrator.NODE_MARKET_CONTEXT,
-        {"status": "running", "current_round": 0},
-    )
+    assert update_calls[0][1]["current_stage"] == orchestrator.NODE_MARKET_CONTEXT
+    assert update_calls[0][1]["status"] == "running"
+    assert update_calls[0][1]["current_round"] == 0
 
-    final_stage, final_fields = update_calls[-1]
-    assert final_stage == orchestrator.NODE_LOOP_CONTROL
-    assert final_fields["status"] == "completed"
-    assert final_fields["current_round"] == 7
-    assert final_fields["finished_at"] is not None
-    assert final_fields["last_error"] is None
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.mode == "evolve"
+    assert latest_run.status == "completed"
+    assert latest_run.current_stage == orchestrator.NODE_LOOP_CONTROL
+    assert latest_run.current_round == 7
+    assert latest_run.finished_at is not None
+    assert latest_run.last_error is None
 
 
 @pytest.mark.asyncio
-async def test_run_single_records_stopped_final_status(monkeypatch, orchestrator_state_guard):
-    graph, update_calls, max_rounds, _ = await _run_entrypoint(
+async def test_run_single_records_stopped_final_status(monkeypatch, orchestrator_state_guard, tmp_path):
+    result = await _run_entrypoint(
         monkeypatch,
         orchestrator_state_guard,
+        tmp_path,
         run_single,
         {"island": "sentiment"},
         {"current_round": 3, "human_decision": "stop"},
     )
+    graph = result["graph"]
+    store = result["store"]
+    max_rounds = result["max_rounds"]
+    graph_config = result["graph_config"]
 
     assert max_rounds == 1
     assert graph.ainvoke.await_count == 1
+    assert graph_config is not None
+    assert graph_config["configurable"]["thread_id"].startswith("pixiu_single_sentiment_")
 
     initial_state = graph.ainvoke.await_args.args[0]
     assert initial_state["current_round"] == 0
     assert initial_state["current_island"] == "sentiment"
-    assert update_calls[0] == (
-        orchestrator.NODE_MARKET_CONTEXT,
-        {"status": "running", "current_round": 0},
-    )
-
-    final_stage, final_fields = update_calls[-1]
-    assert final_stage == orchestrator.NODE_LOOP_CONTROL
-    assert final_fields["status"] == "stopped"
-    assert final_fields["current_round"] == 3
-    assert final_fields["finished_at"] is not None
-    assert final_fields["last_error"] is None
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.mode == "single"
+    assert latest_run.status == "stopped"
+    assert latest_run.current_stage == orchestrator.NODE_LOOP_CONTROL
+    assert latest_run.current_round == 3
+    assert latest_run.finished_at is not None
+    assert latest_run.last_error is None
 
 
 @pytest.mark.asyncio
-async def test_run_single_records_failed_final_status(monkeypatch, orchestrator_state_guard):
-    graph, update_calls, max_rounds, _ = await _run_entrypoint(
+async def test_run_single_records_failed_final_status(monkeypatch, orchestrator_state_guard, tmp_path):
+    result = await _run_entrypoint(
         monkeypatch,
         orchestrator_state_guard,
+        tmp_path,
         run_single,
         {"island": "momentum"},
         {"current_round": 2, "last_error": "boom", "error_stage": orchestrator.NODE_PORTFOLIO},
     )
+    graph = result["graph"]
+    store = result["store"]
+    max_rounds = result["max_rounds"]
 
     assert max_rounds == 1
     assert graph.ainvoke.await_count == 1
@@ -112,9 +149,11 @@ async def test_run_single_records_failed_final_status(monkeypatch, orchestrator_
     initial_state = graph.ainvoke.await_args.args[0]
     assert initial_state["current_island"] == "momentum"
 
-    final_stage, final_fields = update_calls[-1]
-    assert final_stage == orchestrator.NODE_PORTFOLIO
-    assert final_fields["status"] == "failed"
-    assert final_fields["current_round"] == 2
-    assert final_fields["finished_at"] is not None
-    assert final_fields["last_error"] == "boom"
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.mode == "single"
+    assert latest_run.status == "failed"
+    assert latest_run.current_stage == orchestrator.NODE_PORTFOLIO
+    assert latest_run.current_round == 2
+    assert latest_run.finished_at is not None
+    assert latest_run.last_error == "boom"

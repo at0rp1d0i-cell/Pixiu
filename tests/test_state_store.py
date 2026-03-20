@@ -10,6 +10,8 @@ import pytest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+from langgraph.graph import END
+
 from src.api import server
 from src.cli import main as cli_main
 from src.control_plane.state_store import StateStore
@@ -272,7 +274,21 @@ def test_api_approve_queues_decision_when_waiting(tmp_path, monkeypatch):
     assert latest.action == "approve"
 
 
-def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("action", "expected_route", "expected_status"),
+    [
+        ("approve", orchestrator.NODE_LOOP_CONTROL, "running"),
+        ("redirect:momentum", orchestrator.NODE_HYPOTHESIS_GEN, "running"),
+        ("stop", END, "stopped"),
+    ],
+)
+def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(
+    tmp_path,
+    monkeypatch,
+    action,
+    expected_route,
+    expected_status,
+):
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="evolve")
     store.write_snapshot(
@@ -289,14 +305,14 @@ def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(tmp_path, mo
     monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
     monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
 
-    payload = server.post_approve(server.ApproveRequest(action="approve"))
-    assert payload == {"ok": True, "action": "approve"}
+    payload = server.post_approve(server.ApproveRequest(action=action))
+    assert payload == {"ok": True, "action": action}
 
     human_result = orchestrator.human_gate_node(
         AgentState(current_round=3, awaiting_human_approval=True),
     )
 
-    assert human_result["human_decision"] == "approve"
+    assert human_result["human_decision"] == action
     assert human_result["awaiting_human_approval"] is False
     assert (
         orchestrator.route_after_human(
@@ -305,17 +321,21 @@ def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(tmp_path, mo
                 human_decision=human_result["human_decision"],
             )
         )
-        == orchestrator.NODE_LOOP_CONTROL
+        == expected_route
     )
 
     latest_run = store.get_latest_run()
     assert latest_run is not None
-    assert latest_run.status == "running"
+    assert latest_run.status == expected_status
     assert latest_run.current_stage == orchestrator.NODE_HUMAN_GATE
+    assert latest_run.current_round == 3
 
     snapshot = store.get_snapshot(run.run_id)
     assert snapshot is not None
     assert snapshot.awaiting_human_approval is False
+    status_payload = server.get_status()
+    assert status_payload["awaiting_human_approval"] is False
+    assert status_payload["status"] == expected_status
     assert store.pop_latest_human_decision(run.run_id) is None
 
 
