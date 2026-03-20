@@ -145,6 +145,125 @@ def test_daily_basic_download_retries_empty_response_on_next_run(tmp_path: Path,
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("filename", "module_name"),
+    [
+        ("download_moneyflow_data.py", "download_moneyflow_data_test"),
+        ("download_stk_limit_data.py", "download_stk_limit_data_test"),
+    ],
+)
+def test_tushare_scripts_round_trip_empty_retry_progress(
+    tmp_path: Path,
+    filename: str,
+    module_name: str,
+):
+    module = _load_script_module(filename, module_name)
+    progress_file = tmp_path / f"{module_name}.json"
+    setattr(module, "PROGRESS_FILE", progress_file)
+
+    progress = module.load_progress()
+    assert progress["done"] == []
+    assert progress["failed"] == {}
+    assert progress["empty_counts"] == {}
+    assert progress["empty_done"] == []
+
+    progress["done"] = ["000001.SZ"]
+    progress["failed"] = {"000002.SZ": "boom"}
+    progress["empty_counts"] = {"000003.SZ": 1}
+    progress["empty_done"] = ["000004.SZ"]
+    module.save_progress(progress)
+
+    reloaded = module.load_progress()
+    assert reloaded["done"] == ["000001.SZ"]
+    assert reloaded["failed"] == {"000002.SZ": "boom"}
+    assert reloaded["empty_counts"] == {"000003.SZ": 1}
+    assert reloaded["empty_done"] == ["000004.SZ"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("filename", "module_name", "fetch_attr", "staging_attr", "materialized_frame"),
+    [
+        (
+            "download_daily_basic_data.py",
+            "download_daily_basic_data_failure_test",
+            "fetch_daily_basic",
+            "DAILY_BASIC_STAGING_DIR",
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["20250317"],
+                    "turnover_rate": [1.2],
+                    "pe_ttm": [10.0],
+                    "pb": [1.1],
+                    "circ_mv": [100.0],
+                }
+            ),
+        ),
+        (
+            "download_moneyflow_data.py",
+            "download_moneyflow_data_failure_test",
+            "fetch_moneyflow",
+            "MONEYFLOW_STAGING_DIR",
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["20260318"],
+                    "buy_sm_vol": [10],
+                    "buy_sm_amount": [1.1],
+                    "net_mf_amount": [0.5],
+                }
+            ),
+        ),
+        (
+            "download_stk_limit_data.py",
+            "download_stk_limit_data_failure_test",
+            "fetch_stk_limit",
+            "STK_LIMIT_STAGING_DIR",
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["20260318"],
+                    "up_limit": [12.13],
+                    "down_limit": [9.93],
+                }
+            ),
+        ),
+    ],
+)
+def test_tushare_scripts_retry_failed_entry_and_clear_failed_pool(
+    tmp_path: Path,
+    filename: str,
+    module_name: str,
+    fetch_attr: str,
+    staging_attr: str,
+    materialized_frame: pd.DataFrame,
+):
+    module = _load_script_module(filename, module_name)
+    progress_file = tmp_path / f"{module_name}.json"
+    setattr(module, "PROGRESS_FILE", progress_file)
+    setattr(module, staging_attr, tmp_path / module_name)
+    module.CHECKPOINT_EVERY = 1
+    module.SLEEP_BETWEEN_STOCKS = 0
+
+    stock_code = "000001.SZ"
+    progress = module.load_progress()
+    setattr(module, fetch_attr, lambda ts_code: (_ for _ in ()).throw(RuntimeError("boom")))
+    module.download_all(progress, [stock_code])
+
+    assert stock_code not in progress["done"]
+    assert progress["failed"][stock_code] == "boom"
+
+    reloaded = module.load_progress()
+    setattr(module, fetch_attr, lambda ts_code: materialized_frame)
+    module.download_all(reloaded, [stock_code])
+
+    assert stock_code in reloaded["done"]
+    assert stock_code not in reloaded["failed"]
+    assert (getattr(module, staging_attr) / f"{stock_code}.parquet").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("filename", "module_name", "fetch_attr", "staging_attr", "empty_frame", "materialized_frame"),
     [
         (

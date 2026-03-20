@@ -27,6 +27,15 @@ def test_normalize_moneyflow_frame_sorts_dedupes_and_coerces_numeric():
     assert normalized["net_mf_amount"].tolist() == [-1.5, 2.5]
 
 
+def test_normalize_moneyflow_frame_returns_empty_copy_for_empty_input():
+    empty = pd.DataFrame()
+
+    normalized = normalize_moneyflow_frame(empty)
+
+    assert normalized.empty
+    assert normalized is not empty
+
+
 def test_normalize_moneyflow_frame_rejects_missing_identity_columns():
     df = pd.DataFrame({"trade_date": ["20260318"]})
 

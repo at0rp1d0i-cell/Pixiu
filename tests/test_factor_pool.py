@@ -352,3 +352,9 @@ class TestReads:
         assert meta["beats_baseline"] is True
         assert meta["subspace_origin"] == "factor_algebra"
         assert meta["tags"] == "[\"passed\", \"decision:promote\"]"
+        passed = pool.get_passed_factors(limit=10)
+        assert any(row["factor_id"] == "factor-v2" for row in passed)
+        top = pool.get_top_factors(limit=10)
+        top_row = next(row for row in top if row["factor_id"] == "factor-v2")
+        assert top_row["execution_succeeded"] is True
+        assert top_row["document"].startswith("公式: $close")

@@ -32,7 +32,17 @@ async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
 
     initial_state = AgentState(current_round=0)
     _orch._update_run_record(_orch.NODE_MARKET_CONTEXT, status="running", current_round=0)
-    result = await graph.ainvoke(initial_state.model_dump(), config=_graph_mod._graph_config)
+    try:
+        result = await graph.ainvoke(initial_state.model_dump(), config=_graph_mod._graph_config)
+    except Exception as exc:
+        _orch._update_run_record(
+            _orch.NODE_MARKET_CONTEXT,
+            status="failed",
+            current_round=0,
+            finished_at=datetime.now(UTC),
+            last_error=str(exc),
+        )
+        raise
     status = "stopped" if result.get("human_decision") == "stop" else "completed"
     _orch._update_run_record(
         result.get("error_stage") or _orch.NODE_LOOP_CONTROL,
@@ -62,7 +72,17 @@ async def run_single(island: str):
 
     initial_state = AgentState(current_round=0, current_island=island)
     _orch._update_run_record(_orch.NODE_MARKET_CONTEXT, status="running", current_round=0)
-    result = await graph.ainvoke(initial_state.model_dump(), config=_graph_mod._graph_config)
+    try:
+        result = await graph.ainvoke(initial_state.model_dump(), config=_graph_mod._graph_config)
+    except Exception as exc:
+        _orch._update_run_record(
+            _orch.NODE_MARKET_CONTEXT,
+            status="failed",
+            current_round=0,
+            finished_at=datetime.now(UTC),
+            last_error=str(exc),
+        )
+        raise
     status = "stopped" if result.get("human_decision") == "stop" else "completed"
     _orch._update_run_record(
         result.get("error_stage") or _orch.NODE_LOOP_CONTROL,

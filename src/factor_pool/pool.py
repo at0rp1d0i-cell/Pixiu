@@ -439,7 +439,7 @@ class FactorPool:
                 query_texts=[""],
                 n_results=min(limit * 3, max(self._collection.count(), 1)),
                 where={"passed": True},
-                include=["metadatas", "documents", "ids"],
+                include=["metadatas", "documents"],
             )
             if not results["ids"] or not results["ids"][0]:
                 return []
@@ -490,6 +490,8 @@ class FactorPool:
             "created_at": record.created_at.isoformat(),
             "tags": json.dumps(record.tags),
             "subspace_origin": record.subspace_origin or "",
+            "execution_succeeded": record.execution_succeeded,
+            "parse_success": record.execution_succeeded,
             # 向后兼容
             "passed": record.decision == "promote",
             "beats_baseline": record.decision == "promote",

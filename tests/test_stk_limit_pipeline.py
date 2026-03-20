@@ -25,6 +25,15 @@ def test_normalize_stk_limit_frame_sorts_dedupes_and_coerces_numeric():
     assert normalized["down_limit"].tolist() == [9.83, 10.03]
 
 
+def test_normalize_stk_limit_frame_returns_empty_copy_for_empty_input():
+    empty = pd.DataFrame()
+
+    normalized = normalize_stk_limit_frame(empty)
+
+    assert normalized.empty
+    assert normalized is not empty
+
+
 def test_normalize_stk_limit_frame_rejects_missing_identity_columns():
     df = pd.DataFrame({"trade_date": ["20260318"]})
 

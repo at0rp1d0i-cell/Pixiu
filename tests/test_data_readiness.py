@@ -8,6 +8,7 @@ import pytest
 import numpy as np
 
 from src.data_pipeline.datasets import DAILY_BASIC_DATASET
+from src.data_pipeline.datasets import QLIB_PRICE_VOLUME_DATASET
 from src.data_pipeline.readiness import (
     canonical_universe_dirs,
     get_dataset_readiness,
@@ -105,6 +106,43 @@ def test_dataset_readiness_ignores_all_nan_bins(tmp_path: Path):
     assert status.field_status["$pb"].instrument_count == 0
 
 
+def test_dataset_readiness_marks_price_volume_unstaged_and_unmaterialized_without_features_dir(
+    tmp_path: Path,
+):
+    readiness = get_dataset_readiness((QLIB_PRICE_VOLUME_DATASET,), provider_uri=tmp_path, min_coverage_ratio=0.95)
+    status = readiness["qlib_price_volume"]
+
+    assert status.staged is False
+    assert status.materialized is False
+    assert status.runtime_available is False
+    assert status.field_status["$close"].instrument_count == 0
+
+
+def test_dataset_readiness_keeps_materialized_and_runtime_ready_even_when_stage_is_empty(
+    tmp_path: Path,
+):
+    staging_dir = tmp_path / "fundamental_staging" / "daily_basic"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    features_dir = tmp_path / "features"
+    for i in range(20):
+        instrument = f"sh{i:06d}"
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "pb.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "pe_ttm.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "turnover_rate.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "float_mv.day.bin", [1.0])
+
+    dataset = replace(DAILY_BASIC_DATASET, staging_path=staging_dir)
+    readiness = get_dataset_readiness((dataset,), provider_uri=tmp_path, min_coverage_ratio=0.95)
+    status = readiness["daily_basic"]
+
+    assert status.staged is False
+    assert status.materialized is True
+    assert status.runtime_available is True
+    assert status.field_status["$pb"].coverage_ratio == pytest.approx(1.0)
+
+
 def test_read_min_coverage_ratio_clamps_and_falls_back(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", raising=False)
     assert read_min_coverage_ratio() == pytest.approx(0.95)
@@ -145,3 +183,7 @@ def test_canonical_universe_dirs_prefers_close_bins_when_present(tmp_path: Path)
     universe_dirs = canonical_universe_dirs([canonical, ignored])
 
     assert universe_dirs == [canonical]
+
+
+def test_canonical_universe_dirs_returns_empty_for_empty_input():
+    assert canonical_universe_dirs([]) == []

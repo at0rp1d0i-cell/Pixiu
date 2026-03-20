@@ -55,6 +55,25 @@ def test_runtime_formula_capabilities_expose_fields_by_coverage(tmp_path: Path):
     assert capabilities.total_instruments == 20
 
 
+def test_runtime_formula_capabilities_track_available_experimental_fields(tmp_path: Path):
+    features_dir = tmp_path / "features"
+    for i in range(20):
+        instrument = f"sh{i:06d}"
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "open.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "roe.day.bin", [1.0])
+        if i < 18:
+            _write_day_bin(features_dir, instrument, "pb.day.bin", [1.0])
+
+    capabilities = get_runtime_formula_capabilities(
+        provider_uri=tmp_path,
+        min_coverage_ratio=0.95,
+    )
+
+    assert capabilities.available_experimental_fields == ("$roe",)
+    assert "$pb" not in capabilities.available_experimental_fields
+
+
 def test_runtime_formula_capabilities_use_canonical_operator_manifest(tmp_path: Path):
     capabilities = get_runtime_formula_capabilities(
         provider_uri=tmp_path,

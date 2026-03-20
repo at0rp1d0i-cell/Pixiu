@@ -284,6 +284,7 @@ def test_judgment_node_passes_hypothesis_to_pool():
     assert call["hypothesis"] == "资金流持续推动短期趋势延续", (
         f"hypothesis 应从 note 中传入，实际: {call['hypothesis']!r}"
     )
+    assert call["note"] is note
 
 
 def test_judgment_node_calls_pool_when_register_to_pool_true():

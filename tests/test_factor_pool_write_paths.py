@@ -135,6 +135,7 @@ def _core_metadata(metadata: dict) -> dict:
         "coverage": metadata.get("coverage"),
         "passed": metadata.get("passed"),
         "beats_baseline": metadata.get("beats_baseline"),
+        "execution_succeeded": metadata.get("execution_succeeded"),
         "subspace_origin": metadata.get("subspace_origin"),
         "tags": json.loads(metadata["tags"]) if metadata.get("tags") else [],
     }
@@ -181,6 +182,7 @@ def test_register_factor_v1_and_v2_share_core_write_semantics():
         "coverage": 0.9,
         "passed": True,
         "beats_baseline": True,
+        "execution_succeeded": True,
         "subspace_origin": ExplorationSubspace.FACTOR_ALGEBRA.value,
         "tags": ["passed", "decision:promote"],
     }
@@ -201,9 +203,20 @@ def test_register_factor_v1_and_v2_share_core_write_semantics():
         "coverage": 0.92,
         "passed": True,
         "beats_baseline": True,
+        "execution_succeeded": True,
         "subspace_origin": ExplorationSubspace.FACTOR_ALGEBRA.value,
         "tags": ["passed", "decision:promote"],
     }
+
+    passed = pool_v2.get_passed_factors(limit=10)
+    assert len(passed) == 1
+    assert passed[0]["factor_id"] == "factor-002"
+    assert passed[0]["execution_succeeded"] is True
+
+    top = pool_v2.get_top_factors(limit=10)
+    assert len(top) == 1
+    assert top[0]["factor_id"] == "factor-002"
+    assert top[0]["document"].startswith("公式: Mean($close, 5) / Ref($close, 5)")
 
     assert pool_v1._collection.get(ids=["factor-001"], include=["documents"])[
         "documents"

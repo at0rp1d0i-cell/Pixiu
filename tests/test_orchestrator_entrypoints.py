@@ -17,6 +17,11 @@ class _FakeGraph:
         self.ainvoke = AsyncMock(return_value=result)
 
 
+class _FailingGraph:
+    def __init__(self, exc: Exception):
+        self.ainvoke = AsyncMock(side_effect=exc)
+
+
 async def _run_entrypoint(
     monkeypatch,
     orchestrator_state_guard,
@@ -55,6 +60,31 @@ async def _run_entrypoint(
             "active_islands": list(orchestrator.ACTIVE_ISLANDS),
             "graph_config": graph_mod._graph_config,
         }
+
+
+async def _run_failing_entrypoint(
+    monkeypatch,
+    orchestrator_state_guard,
+    tmp_path,
+    entrypoint,
+    kwargs,
+    exc: Exception,
+):
+    with orchestrator_state_guard():
+        store = StateStore(tmp_path / "state_store.sqlite")
+        graph = _FailingGraph(exc)
+
+        monkeypatch.setattr(orchestrator, "get_graph", lambda: graph)
+        monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
+        monkeypatch.setattr(orchestrator, "_current_run_id", None)
+        monkeypatch.setattr(orchestrator, "MAX_ROUNDS", orchestrator.MAX_ROUNDS)
+        monkeypatch.setattr(orchestrator, "ACTIVE_ISLANDS", list(orchestrator.ACTIVE_ISLANDS))
+        monkeypatch.setattr(graph_mod, "_graph_config", None)
+
+        with pytest.raises(type(exc), match=str(exc)):
+            await entrypoint(**kwargs)
+
+        return {"graph": graph, "store": store}
 
 
 @pytest.mark.asyncio
@@ -157,3 +187,28 @@ async def test_run_single_records_failed_final_status(monkeypatch, orchestrator_
     assert latest_run.current_round == 2
     assert latest_run.finished_at is not None
     assert latest_run.last_error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_records_failed_status_when_graph_raises(
+    monkeypatch,
+    orchestrator_state_guard,
+    tmp_path,
+):
+    result = await _run_failing_entrypoint(
+        monkeypatch,
+        orchestrator_state_guard,
+        tmp_path,
+        run_evolve,
+        {"rounds": 3, "islands": ["momentum"]},
+        RuntimeError("graph exploded"),
+    )
+
+    latest_run = result["store"].get_latest_run()
+    assert latest_run is not None
+    assert latest_run.mode == "evolve"
+    assert latest_run.status == "failed"
+    assert latest_run.current_stage == orchestrator.NODE_MARKET_CONTEXT
+    assert latest_run.current_round == 0
+    assert latest_run.finished_at is not None
+    assert latest_run.last_error == "graph exploded"
