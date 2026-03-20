@@ -68,8 +68,8 @@
 | 政策宽松期 | 弱（流动性驱动） |
 | 政策收紧期 | 强（估值杀） |
 
-建议 `applicable_regimes: [range_bound, bear_late]`
-建议 `invalid_regimes: [bull_late, liquidity_driven]`
+建议 `applicable_regimes: [range_bound, bear_trend]`
+建议 `invalid_regimes: [bull_trend, structural_break]`
 
 ---
 

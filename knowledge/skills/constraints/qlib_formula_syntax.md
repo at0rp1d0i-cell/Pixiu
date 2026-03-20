@@ -76,7 +76,7 @@ MovingAverage($close, 5)   # 应该用 Mean
 
 # ❌ 对数的参数可能为负
 Log($close - Ref($close, 1))   # 日收益率可能为负
-# 应改为：Log($close / Ref($close, 1))
+# 应改为：Log($close / Ref($close, 1)) 或 Log(Abs(expr) + 1e-8)
 ```
 
 ---

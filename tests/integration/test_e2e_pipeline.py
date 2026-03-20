@@ -42,7 +42,7 @@ def _make_memo():
         hot_themes=["AI"],
         historical_insights=[],
         suggested_islands=["momentum"],
-        market_regime="trending_up",
+        market_regime="bull_trend",
         raw_summary="北向资金流入，市场偏暖。",
     )
 
@@ -59,8 +59,8 @@ def _make_notes(n=2):
             proposed_formula=f"Div($close, Ref($close, {5 + i}))",
             risk_factors=["流动性冲击", "市场反转"],
             market_context_date=date.today().strftime("%Y-%m-%d"),
-            applicable_regimes=["trending_up"],
-            invalid_regimes=["volatile"],
+            applicable_regimes=["bull_trend"],
+            invalid_regimes=["high_volatility"],
         ))
     return notes
 

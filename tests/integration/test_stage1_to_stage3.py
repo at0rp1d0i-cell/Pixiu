@@ -53,7 +53,7 @@ def _make_market_context() -> MarketContextMemo:
             ),
         ],
         suggested_islands=["momentum", "volatility"],
-        market_regime="sideways",
+        market_regime="range_bound",
         raw_summary="市场横盘震荡，北向资金小幅净买入，AI算力主题活跃。",
     )
 
@@ -90,8 +90,8 @@ def _make_llm_batch_response(island: str, subspace: str) -> str:
             "proposed_formula": f,
             "risk_factors": ["市场风格切换"],
             "market_context_date": "2026-03-17",
-            "applicable_regimes": ["sideways"],
-            "invalid_regimes": ["crisis"],
+            "applicable_regimes": ["range_bound"],
+            "invalid_regimes": ["structural_break"],
             "exploration_subspace": subspace,
         })
     return json.dumps({

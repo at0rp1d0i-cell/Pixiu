@@ -41,7 +41,7 @@ Pixiu 的数据层要同时满足两件事：
 当前稳定字段：
 
 ```text
-$open, $high, $low, $close, $volume, $factor, $amount, $vwap, $roe, $pb, $pe_ttm, $turnover_rate, $float_mv
+$open, $high, $low, $close, $volume, $factor, $amount, $vwap, $roe, $pb, $turnover_rate, $float_mv
 ```
 
 ### Layer 2: Agent 上下文层
@@ -65,7 +65,8 @@ $open, $high, $low, $close, $volume, $factor, $amount, $vwap, $roe, $pb, $pe_ttm
 
 当前状态：
 
-- `fina_indicator` / `daily_basic` 已进入 Qlib bins 和 runtime capability
+- `fina_indicator` 已进入 Qlib bins 和 runtime capability
+- `daily_basic` 已进入 Qlib bins；其中 `$pb / $turnover_rate / $float_mv` 已进入 runtime capability，`$pe_ttm` 仍受覆盖率阈值约束
 - `moneyflow_hsgt` 已进入结构化 staging，优先服务 Stage 1 / northbound 上下文
 - `moneyflow` / `stk_limit` staging 下载链已就位，但尚未进入 runtime capability
 - 运行时字段可用性不再只看设计文档，而要看本地 `qlib_bin/features/**` 的真实覆盖率

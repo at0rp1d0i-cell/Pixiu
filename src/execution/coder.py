@@ -196,7 +196,7 @@ class Coder:
             ic_std=raw.get("ic_std", 0.0),
             icir=raw.get("icir", 0.0),
             turnover_rate=raw.get("turnover_rate", 0.0),
-            coverage=1.0 if error_message is None else 0.0,
+            coverage=raw.get("coverage", 1.0 if error_message is None else 0.0),
         )
 
         passed = (
@@ -204,6 +204,7 @@ class Coder:
             and metrics.ic_mean >= THRESHOLDS.min_ic_mean
             and metrics.icir >= THRESHOLDS.min_icir
             and metrics.turnover_rate <= THRESHOLDS.max_turnover_rate
+            and (metrics.coverage or 0.0) >= THRESHOLDS.min_coverage
             and error_message is None
         )
 

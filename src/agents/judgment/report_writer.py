@@ -24,11 +24,19 @@ class ReportWriter:
             notes="No allocation available.",
         )
 
-        passed_verdicts = [verdict for verdict in state.critic_verdicts if verdict.overall_passed]
-        failed_verdicts = [verdict for verdict in state.critic_verdicts if not verdict.overall_passed]
-        passed_factor_ids = {verdict.factor_id for verdict in passed_verdicts}
+        promoted_verdicts = [
+            verdict for verdict in state.critic_verdicts
+            if verdict.decision == "promote"
+        ]
+        passed_verdicts = [
+            verdict for verdict in state.critic_verdicts if verdict.overall_passed
+        ]
+        non_promoted_verdicts = [
+            verdict for verdict in state.critic_verdicts if verdict.decision != "promote"
+        ]
+        promoted_factor_ids = {verdict.factor_id for verdict in promoted_verdicts}
         best_report = max(
-            (report for report in state.backtest_reports if report.factor_id in passed_factor_ids),
+            (report for report in state.backtest_reports if report.factor_id in promoted_factor_ids),
             key=lambda report: report.metrics.sharpe,
             default=None,
         )
@@ -40,23 +48,37 @@ class ReportWriter:
             )
         if allocation.total_factors:
             highlights.append(f"Portfolio now tracks {allocation.total_factors} approved factor(s).")
+        archived_count = sum(1 for verdict in passed_verdicts if verdict.decision == "archive")
+        if archived_count:
+            highlights.append(
+                f"{archived_count} factor(s) passed deterministic checks but were archived instead of promoted."
+            )
 
         risks = []
-        for verdict in failed_verdicts[:3]:
+        for verdict in non_promoted_verdicts[:3]:
             if verdict.failure_mode:
                 risks.append(f"{verdict.factor_id}: {verdict.failure_mode}")
 
-        markdown = self._render_markdown(state, allocation, best_report, passed_verdicts, failed_verdicts)
+        markdown = self._render_markdown(
+            state,
+            allocation,
+            best_report,
+            promoted_verdicts,
+            passed_verdicts,
+            non_promoted_verdicts,
+        )
 
         return CIOReport(
             report_id=str(uuid.uuid4()),
             period=f"round-{state.current_round}",
             total_factors_tested=len(state.backtest_reports),
-            new_factors_approved=len(passed_verdicts),
+            new_factors_approved=len(promoted_verdicts),
             best_new_factor=best_report.factor_id if best_report is not None else None,
             best_new_sharpe=best_report.metrics.sharpe if best_report is not None else None,
             current_portfolio=allocation,
-            portfolio_change_summary=f"Approved {len(passed_verdicts)} new factor(s) in round {state.current_round}.",
+            portfolio_change_summary=(
+                f"Approved {len(promoted_verdicts)} new factor(s) in round {state.current_round}."
+            ),
             highlights=highlights,
             risks=risks,
             full_report_markdown=markdown,
@@ -69,8 +91,9 @@ class ReportWriter:
         state: AgentState,
         allocation: PortfolioAllocation,
         best_report: BacktestReport | None,
+        promoted_verdicts: list[CriticVerdict],
         passed_verdicts: list[CriticVerdict],
-        failed_verdicts: list[CriticVerdict],
+        non_promoted_verdicts: list[CriticVerdict],
     ) -> str:
         best_factor_id = best_report.factor_id if best_report is not None else "N/A"
         best_sharpe = f"{best_report.metrics.sharpe:.2f}" if best_report is not None else "N/A"
@@ -82,7 +105,8 @@ class ReportWriter:
             "",
             "## Summary",
             f"- Tested factors: {len(state.backtest_reports)}",
-            f"- Approved factors: {len(passed_verdicts)}",
+            f"- Promoted factors: {len(promoted_verdicts)}",
+            f"- Deterministic passes: {len(passed_verdicts)}",
             f"- Best factor: {best_factor_id}",
             f"- Best Sharpe: {best_sharpe}",
             "",
@@ -99,8 +123,8 @@ class ReportWriter:
             "## Failures",
         ]
 
-        if failed_verdicts:
-            for verdict in failed_verdicts:
+        if non_promoted_verdicts:
+            for verdict in non_promoted_verdicts:
                 lines.append(
                     f"- {verdict.factor_id}: {verdict.failure_mode or 'unknown'} "
                     f"(decision={verdict.decision or 'n/a'}, score={verdict.score:.2f})"
@@ -109,10 +133,12 @@ class ReportWriter:
             lines.append("- None")
 
         lines.extend(["", "## Decisions"])
-        for verdict in passed_verdicts[:5]:
+        for verdict in promoted_verdicts[:5]:
             lines.append(
                 f"- {verdict.factor_id}: decision={verdict.decision or 'n/a'}, "
                 f"score={verdict.score:.2f}, reason_codes={','.join(verdict.reason_codes)}"
             )
+        if not promoted_verdicts:
+            lines.append("- None")
 
         return "\n".join(lines)

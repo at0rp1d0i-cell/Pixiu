@@ -27,6 +27,7 @@ from src.factor_pool.pool import FactorPool
 from src.llm.openai_compat import build_researcher_llm
 from src.schemas.stage_io import PrefilterDiagnostics, PrefilterOutput
 from src.skills.loader import SkillLoader
+from src.schemas.market_context import MarketRegime
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,14 @@ _WINDOW_OPERATORS = {
     "Less",
 }
 _BOOLEAN_LITERALS = {"True", "False"}
+_LEGACY_REGIME_MAP = {
+    "trending_up": MarketRegime.BULL_TREND.value,
+    "trending_down": MarketRegime.BEAR_TREND.value,
+    "sideways": MarketRegime.RANGE_BOUND.value,
+    "volatile": MarketRegime.HIGH_VOLATILITY.value,
+    "unknown": MarketRegime.RANGE_BOUND.value,
+}
+_KNOWN_REGIMES = {regime.value for regime in MarketRegime}
 
 
 # ─────────────────────────────────────────────────────────
@@ -294,10 +303,34 @@ class Validator:
             if len(args) != 1:
                 return False, "Log() 需要 1 个参数"
             inner = args[0]
-            if "+" not in inner and "Abs" not in inner:
-                return False, f"Log() 参数未添加 +1 或 Abs 保护，可能导致 Log(0) 错误：{inner}"
+            if not self._has_safe_log_guard(inner):
+                return False, f"Log() 参数未添加正值保护或安全比例结构，可能导致 Log(0) 错误：{inner}"
 
         return True, "ok"
+
+    @staticmethod
+    def _has_safe_log_guard(inner: str) -> bool:
+        compact = re.sub(r"\s+", "", inner)
+        if "Abs(" in compact or "+" in compact:
+            return True
+        if "-" in compact or compact.count("/") != 1:
+            return False
+        numerator, denominator = compact.split("/", 1)
+        return (
+            Validator._is_positive_series_term(numerator)
+            and Validator._is_positive_series_term(denominator)
+        )
+
+    @staticmethod
+    def _is_positive_series_term(term: str) -> bool:
+        return bool(
+            re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", term)
+            or re.fullmatch(r"Ref\([^()]+\)", term)
+            or re.fullmatch(
+                r"(?:Mean|Max|Min|EMA|WMA|Ts_Mean|Ts_Max|Ts_Min|Ts_WMA)\([^()]+\)",
+                term,
+            )
+        )
 
     @staticmethod
     def _is_positive_int_literal(value: str) -> bool:
@@ -585,14 +618,43 @@ class RegimeFilter:
         """
         if not current_regime:
             return True, "无当前 regime 上下文，跳过 regime 过滤"
+        current = self._normalize_regime(current_regime)
+        if current is None:
+            return False, f"当前 regime 非法或未知：{current_regime}"
 
-        if not note.invalid_regimes:
-            return True, "该因子未声明 invalid_regimes，放行"
+        applicable_regimes, invalid_applicable = self._normalize_regime_list(note.applicable_regimes)
+        invalid_regimes, invalid_invalid = self._normalize_regime_list(note.invalid_regimes)
+        invalid_labels = sorted(set(invalid_applicable + invalid_invalid))
+        if invalid_labels:
+            return False, f"包含未知 regime 标签：{invalid_labels}"
 
-        if current_regime in note.invalid_regimes:
-            return False, f"Factor invalid in current regime: {current_regime}"
+        if not applicable_regimes and not invalid_regimes:
+            return False, "必须至少声明 applicable_regimes 或 invalid_regimes 之一"
 
-        return True, f"当前 regime {current_regime} 不在 invalid_regimes 中，放行"
+        if applicable_regimes and current not in applicable_regimes:
+            return False, f"当前 regime {current} 不在 applicable_regimes 中"
+
+        if current in invalid_regimes:
+            return False, f"Factor invalid in current regime: {current}"
+
+        return True, f"当前 regime {current} 通过适用性检查"
+
+    @staticmethod
+    def _normalize_regime(regime: str) -> str | None:
+        value = _LEGACY_REGIME_MAP.get(regime, regime)
+        return value if value in _KNOWN_REGIMES else None
+
+    def _normalize_regime_list(self, regimes: list[str]) -> tuple[list[str], list[str]]:
+        normalized: list[str] = []
+        invalid: list[str] = []
+        for regime in regimes:
+            value = self._normalize_regime(regime)
+            if value is None:
+                invalid.append(regime)
+                continue
+            if value not in normalized:
+                normalized.append(value)
+        return normalized, invalid
 
 
 # ─────────────────────────────────────────────────────────

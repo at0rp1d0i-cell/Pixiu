@@ -38,7 +38,7 @@ Last Reviewed: 2026-03-20
 | `24_stage-5-judgment.md` | implemented/partial | canonical runtime 收敛到 `src/agents/judgment/` 包，FailureMode enum 9 种完全对齐，CriticVerdict.regime_at_judgment 字段已添加；`execution_succeeded` 已进入 report/pool 语义层，但仍有旧 `passed` 兼容字段需要继续收口 |
 | `25_stage-45-golden-path.md` | active | 当前 Stage 4→5 收口入口 |
 | `14_factor-pool.md` | implemented/partial | richer metadata 写回已进入主干，FactorPoolRecord.subspace_origin 已加入，register_factor() 已支持 note 参数，Stage 5 judgment_node 已传入 note，subspace_origin 已进入主路径写回；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例；当前已抽出 `storage.py / factor_writer.py / queries.py / similarity.py / constraint_store.py`，`pool.py` 正在收口为 façade |
-| `15_data-sources.md` | implemented/partial | 价量 + `roe` + `daily_basic` 扩展字段已进入 runtime capability；其余数据源继续分层推进 |
+| `15_data-sources.md` | implemented/partial | 价量 + `roe` + `daily_basic` 部分扩展字段已进入 runtime capability；`$pe_ttm` 仍未达到覆盖率阈值 |
 | `../futures/terminal-dashboard.md` | planned/partial | 已移出 active design 层；CLI/API 最小实现已有，但更完整的 Dashboard 仍未开始 |
 | `30_agent-team.md` | active | Agent 角色与边界已拆出 |
 | `../futures/reflection-system.md` | planned | 已移出 active design 层；尚未进入主运行时 |

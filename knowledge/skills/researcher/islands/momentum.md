@@ -65,7 +65,7 @@ $close / Ref($close, 20) - 1
 ## 4. 注意事项
 
 - 动量因子在**趋势行情**中最有效，**震荡行情**中容易失效
-- 建议配合 regime 检测使用 `applicable_regimes: [trending_up, trending_down]`
+- 建议配合 regime 检测使用 `applicable_regimes: [bull_trend, bear_trend]`
 - 北向资金流入期间，动量因子 IC 通常提升
 - 财报季（4 月、10 月）动量信号受事件冲击，IC 不稳定
 

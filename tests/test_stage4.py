@@ -57,6 +57,7 @@ def test_coder_valid_formula(mock_note):
         "ic_std": 0.04,
         "icir": 0.75,
         "turnover_rate": 0.2,
+        "coverage": 0.95,
         "error": None
     })
 
@@ -85,7 +86,7 @@ def test_coder_valid_formula(mock_note):
     assert report.metrics.sharpe == 2.8
     assert report.metrics.annualized_return == 0.3
     assert report.metrics.turnover_rate == 0.2
-    assert report.metrics.coverage == 1.0
+    assert report.metrics.coverage == 0.95
 
 
 def test_coder_invalid_formula(mock_note):
@@ -100,6 +101,7 @@ def test_coder_invalid_formula(mock_note):
         "ic_std": 0.0,
         "icir": 0.0,
         "turnover_rate": 0.0,
+        "coverage": 0.0,
         "error": "SyntaxError: invalid syntax in formula"
     })
 

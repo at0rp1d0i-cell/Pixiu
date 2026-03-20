@@ -14,6 +14,10 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
     """Human Gate: 通过 control plane 轮询人类决策，支持跨进程审批。"""
     from .. import control_plane as _control_plane
 
+    if not state.awaiting_human_approval:
+        logger.info("[Human Gate] 当前状态未等待审批，直接结束当前 run")
+        return {"human_decision": "stop", "awaiting_human_approval": False}
+
     run_id = _control_plane._ensure_run_record()
     if not run_id:
         logger.warning("[Human Gate] 缺少 run_id，默认批准继续")

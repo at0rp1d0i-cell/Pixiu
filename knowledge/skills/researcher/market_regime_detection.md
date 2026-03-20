@@ -4,14 +4,15 @@
 
 ---
 
-## A 股四种市场状态
+## A 股当前运行时市场状态
 
 | 状态 | 特征 | 适合的因子方向 |
 |---|---|---|
-| `trending_up` | 沪深300近20日涨幅>3%，北向持续净流入，量能放大 | momentum、northbound |
-| `trending_down` | 近20日跌幅>3%，北向持续净流出，缩量 | valuation（低估值防御）、volatility（VIX类）|
-| `sideways` | 近20日涨跌幅在±2%内，成交量平稳 | volume（量价异常）、sentiment（情绪择时）|
-| `volatile` | 日间振幅>3%，日内反转频繁，量能极大 | volatility、反转类因子 |
+| `bull_trend` | 沪深300近20日涨幅>3%，北向持续净流入，量能放大 | momentum、northbound |
+| `bear_trend` | 近20日跌幅>3%，北向持续净流出，缩量 | valuation（低估值防御）、volatility |
+| `range_bound` | 近20日涨跌幅在窄区间内，成交量平稳 | volume、valuation |
+| `high_volatility` | 振幅放大、日内反转频繁、量能异常 | volatility、反转类因子 |
+| `structural_break` | 政策或制度冲击导致历史关系失效 | 先收缩探索，优先 regime / narrative |
 
 ---
 
@@ -54,9 +55,9 @@
 
 ## 输出规范（给 MarketAnalyst）
 
-`market_regime` 字段只能是以下四个值之一：
+`market_regime` 字段只能是以下五个值之一：
 ```
-"trending_up" | "trending_down" | "sideways" | "volatile"
+"bull_trend" | "bear_trend" | "range_bound" | "high_volatility" | "structural_break"
 ```
 
 `suggested_islands` 字段：基于上述分析，从 6 个 Island 中选 2-3 个最适合本轮深入探索的方向。不需要列全部。

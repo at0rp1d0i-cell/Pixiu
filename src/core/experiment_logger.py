@@ -67,6 +67,9 @@ class ExperimentLogger:
         verdicts_passed = sum(
             1 for v in state.critic_verdicts if v.overall_passed
         )
+        verdicts_promoted = sum(
+            1 for v in state.critic_verdicts if v.decision == "promote"
+        )
 
         # 提取 verdicts 摘要（含 factor_id + overall_passed + decision）
         verdicts_summary = [
@@ -83,7 +86,7 @@ class ExperimentLogger:
         sharpe_values = [
             r.metrics.sharpe
             for r in state.backtest_reports
-            if r.passed
+            if r.execution_succeeded
         ]
 
         # 获取 scheduler 权重：只记录可由持久化状态复原的真实分配权重
@@ -135,6 +138,19 @@ class ExperimentLogger:
             "execution_error_count": execution_error_count,
             "executed_factor_ids_sample": [
                 report.factor_id for report in state.backtest_reports[:5]
+            ],
+            "sample_reports": [
+                {
+                    "factor_id": report.factor_id,
+                    "status": report.status,
+                    "execution_succeeded": report.execution_succeeded,
+                    "sharpe": report.metrics.sharpe,
+                    "ic_mean": report.metrics.ic_mean,
+                    "icir": report.metrics.icir,
+                    "turnover_rate": report.metrics.turnover_rate,
+                    "coverage": report.metrics.coverage,
+                }
+                for report in state.backtest_reports[:5]
             ],
         }
 
@@ -188,6 +204,7 @@ class ExperimentLogger:
             "prefilter": prefilter_summary,
             "verdicts": verdicts_summary,
             "verdicts_passed": verdicts_passed,
+            "verdicts_promoted": verdicts_promoted,
             "verdicts_total": len(state.critic_verdicts),
             "execution": execution_summary,
             "judgment": judgment_summary,

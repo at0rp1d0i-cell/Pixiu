@@ -138,4 +138,8 @@ def report_node(state: AgentState) -> ReportOutput:
     except Exception as e:
         logger.error("[Stage 5c] 报告生成失败: %s", e)
         _update_run_record(NODE_REPORT, status="failed", last_error=str(e))
-        return {"last_error": str(e), "error_stage": "report", "awaiting_human_approval": True}
+        return {
+            "last_error": str(e),
+            "error_stage": "report",
+            "awaiting_human_approval": False,
+        }

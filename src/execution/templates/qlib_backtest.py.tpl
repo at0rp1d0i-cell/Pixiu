@@ -29,9 +29,9 @@ try:
     instruments = D.instruments(market=UNIVERSE)
     fields = [FORMULA]
     field_names = ["factor"]
-    df = D.features(instruments, fields, field_names,
-                    start_time=START_DATE, end_time=END_DATE)
-    df = df.dropna()
+    factor_df = D.features(instruments, fields, field_names,
+                           start_time=START_DATE, end_time=END_DATE)
+    df = factor_df.dropna()
 
     # 按日排名（截面）
     df["rank"] = df.groupby("datetime")["factor"].rank(ascending=False)
@@ -43,6 +43,11 @@ try:
     ret_df = D.features(instruments, ret_fields, ["ret"],
                         start_time=START_DATE, end_time=END_DATE)
     df = df.join(ret_df, how="left")
+    factor_coverage = (
+        factor_df["factor"].groupby("datetime").count()
+        / ret_df["ret"].groupby("datetime").count().replace(0, np.nan)
+    ).replace([np.inf, -np.inf], np.nan).dropna()
+    coverage = float(factor_coverage.mean()) if len(factor_coverage) > 0 else 0.0
 
     ic_series = df.groupby("datetime").apply(
         lambda x: x["factor"].corr(x["ret"])
@@ -84,6 +89,7 @@ try:
         "ic_std": round(ic_std, 4),
         "icir": round(icir, 4),
         "turnover_rate": round(turnover_rate, 4),
+        "coverage": round(coverage, 4),
         "error": None,
     }
 
@@ -96,6 +102,7 @@ except Exception as e:
         "ic_std": 0.0,
         "icir": 0.0,
         "turnover_rate": 0.0,
+        "coverage": 0.0,
         "error": str(e),
     }
 

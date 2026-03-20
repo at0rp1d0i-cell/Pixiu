@@ -19,7 +19,7 @@ class PortfolioManager:
         passed_ids = {
             verdict.factor_id
             for verdict in state.critic_verdicts
-            if verdict.overall_passed
+            if verdict.decision == "promote"
         }
         selected_reports = [
             report for report in state.backtest_reports

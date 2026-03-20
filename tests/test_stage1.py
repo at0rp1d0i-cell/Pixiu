@@ -455,6 +455,7 @@ def test_regime_filter_passes_when_not_in_invalid():
         proposed_formula="Mean($close, 5) / Mean($close, 20) - 1",
         risk_factors=["市场反转"],
         market_context_date="2026-03-17",
+        applicable_regimes=["bull_trend", "range_bound"],
         invalid_regimes=["bear_trend"],
     )
 
@@ -484,7 +485,7 @@ def test_regime_filter_passes_when_no_regime():
     assert passed
 
 
-def test_regime_filter_passes_empty_invalid_regimes():
+def test_regime_filter_rejects_when_no_regime_scope_declared():
     from src.agents.prefilter import RegimeFilter
     from src.schemas.research_note import FactorResearchNote
 
@@ -502,7 +503,30 @@ def test_regime_filter_passes_empty_invalid_regimes():
 
     rf = RegimeFilter()
     passed, reason = rf.check(note, current_regime="bull_trend")
-    assert passed
+    assert not passed
+    assert "至少声明" in reason
+
+
+def test_regime_filter_rejects_unknown_regime_labels():
+    from src.agents.prefilter import RegimeFilter
+    from src.schemas.research_note import FactorResearchNote
+
+    note = FactorResearchNote(
+        note_id="test_unknown_regime",
+        island="momentum",
+        iteration=1,
+        hypothesis="动量假设",
+        economic_intuition="趋势延续",
+        proposed_formula="Mean($close, 5) / Mean($close, 20) - 1",
+        risk_factors=["市场反转"],
+        market_context_date="2026-03-17",
+        applicable_regimes=["bull_late"],
+    )
+
+    rf = RegimeFilter()
+    passed, reason = rf.check(note, current_regime="bull_trend")
+    assert not passed
+    assert "未知 regime" in reason
 
 
 def test_prefilter_filter_batch_regime_param():
@@ -535,7 +559,7 @@ def test_prefilter_filter_batch_regime_param():
         proposed_formula="Corr($volume, $close, 20)",
         risk_factors=["流动性"],
         market_context_date="2026-03-17",
-        invalid_regimes=[],
+        applicable_regimes=["bull_trend"],
     )
 
     mock_response = MagicMock()

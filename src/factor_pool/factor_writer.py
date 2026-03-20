@@ -74,7 +74,8 @@ def write_factor(
             "economic_rationale": record.economic_rationale,
             "backtest_report_id": record.backtest_report_id,
             "verdict_id": record.verdict_id,
-            "passed": verdict.overall_passed,
+            "overall_passed": verdict.overall_passed,
+            "passed": record.decision == "promote",
             "decision": record.decision,
             "score": record.score,
             "sharpe": record.sharpe,
@@ -96,8 +97,8 @@ def write_factor(
         }],
     )
     logger.info(
-        "[FactorPool] register_factor: %s → passed=%s, exec_succeeded=%s, Sharpe=%.2f",
-        report.factor_id, verdict.overall_passed, record.execution_succeeded, report.metrics.sharpe,
+        "[FactorPool] register_factor: %s → decision=%s, overall_passed=%s, exec_succeeded=%s, Sharpe=%.2f",
+        report.factor_id, record.decision, verdict.overall_passed, record.execution_succeeded, report.metrics.sharpe,
     )
     return record
 

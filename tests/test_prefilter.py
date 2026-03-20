@@ -125,11 +125,19 @@ def test_validator_rejects_if_with_wrong_arity():
 
 def test_validator_log_without_protection():
     """Log() 参数未添加 +1 保护应被拒绝"""
-    note = _make_note(proposed_formula="Log($close / Ref($close, 5))")
+    note = _make_note(proposed_formula="Log($close - Ref($close, 5))")
     v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "Log" in reason
+
+
+def test_validator_accepts_positive_ratio_log():
+    """由正值字段构成的比例表达式应允许直接进入 Log()."""
+    note = _make_note(proposed_formula="Log($close / Ref($close, 5))")
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert passed, reason
 
 
 def test_validator_accepts_corr_with_window():

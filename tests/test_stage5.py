@@ -191,6 +191,30 @@ def test_report_writer_ignores_failed_verdicts_when_picking_best_factor():
     assert cio_report.best_new_sharpe == passed_report.metrics.sharpe
 
 
+def test_report_writer_only_counts_promoted_factors_as_approved():
+    report = _make_report(factor_id="momentum_archived", sharpe=2.9)
+    verdict = asyncio.run(Critic().evaluate(report)).model_copy(
+        update={
+            "decision": "archive",
+            "score": 0.6,
+        }
+    )
+    state = AgentState(
+        current_round=2,
+        backtest_reports=[report],
+        critic_verdicts=[verdict],
+    )
+
+    allocation = asyncio.run(PortfolioManager().rebalance(state))
+    cio_report = asyncio.run(ReportWriter().generate_cio_report(state.model_copy(update={
+        "portfolio_allocation": allocation,
+    })))
+
+    assert allocation.total_factors == 0
+    assert cio_report.new_factors_approved == 0
+    assert "Deterministic passes: 1" in cio_report.full_report_markdown
+
+
 # ─────────────────────────────────────────────────────────
 # From test_judgment_pool_writeback.py
 # ─────────────────────────────────────────────────────────
@@ -378,6 +402,21 @@ def test_judgment_node_empty_reports_returns_empty():
     assert result["risk_audit_reports"] == []
 
 
+def test_report_node_failure_does_not_request_human_approval():
+    from src.core.orchestrator import report_node
+
+    state = AgentState(current_round=1)
+
+    with patch("src.agents.judgment.ReportWriter.generate_cio_report", new=AsyncMock(side_effect=RuntimeError("boom"))), \
+         patch("src.core.orchestrator.control_plane._update_run_record"), \
+         patch("src.core.orchestrator.control_plane._persist_cio_report"), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
+        result = report_node(state)
+
+    assert result["error_stage"] == "report"
+    assert result["awaiting_human_approval"] is False
+
+
 # ─────────────────────────────────────────────────────────
 # From test_stage45_golden_path.py
 # ─────────────────────────────────────────────────────────
@@ -410,6 +449,7 @@ def _make_exec_result_golden() -> ExecutionResult:
             "ic_std": 0.03,
             "icir": 0.65,
             "turnover_rate": 0.18,
+            "coverage": 0.95,
             "error": None,
         }
     )

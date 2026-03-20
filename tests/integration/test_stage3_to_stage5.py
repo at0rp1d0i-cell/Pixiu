@@ -62,6 +62,7 @@ def _make_exec_result(sharpe: float = 3.1) -> ExecutionResult:
         "ic_std": 0.03,
         "icir": 0.65,
         "turnover_rate": 0.18,
+        "coverage": 0.95,
         "error": None,
     })
     return ExecutionResult(

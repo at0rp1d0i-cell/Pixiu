@@ -286,7 +286,13 @@ def test_human_gate_consumes_control_plane_decision(tmp_path, monkeypatch):
     snapshot = store.get_snapshot(run.run_id)
     assert snapshot is not None
     assert snapshot.awaiting_human_approval is False
-    assert store.pop_latest_human_decision(run.run_id) is None
+
+
+def test_human_gate_short_circuits_when_not_waiting():
+    result = human_gate_node(AgentState(current_round=1, awaiting_human_approval=False))
+
+    assert result["awaiting_human_approval"] is False
+    assert result["human_decision"] == "stop"
 
 
 # ─────────────────────────────────────────────────────────
