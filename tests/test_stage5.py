@@ -211,7 +211,12 @@ def _make_note_for_writeback(note_id: str, hypothesis: str = "测试假设") -> 
     )
 
 
-def _make_report_for_writeback(note_id: str, sharpe: float = 3.0, passed: bool = True) -> BacktestReport:
+def _make_report_for_writeback(
+    note_id: str,
+    sharpe: float = 3.0,
+    passed: bool = True,
+    error_message: str | None = None,
+) -> BacktestReport:
     return BacktestReport(
         report_id=f"report-{note_id}",
         note_id=note_id,
@@ -228,10 +233,10 @@ def _make_report_for_writeback(note_id: str, sharpe: float = 3.0, passed: bool =
             turnover_rate=0.2,
         ),
         passed=passed,
-        execution_succeeded=True,
+        execution_succeeded=error_message is None,
         execution_time_seconds=1.0,
         qlib_output_raw="BACKTEST_RESULT_JSON:{}",
-        error_message=None,
+        error_message=error_message,
     )
 
 
@@ -239,6 +244,7 @@ class _StubPoolWriteback:
     """记录所有 register_factor 调用。"""
     def __init__(self):
         self.calls: list[dict] = []
+        self.constraints: list[object] = []
 
     def get_passed_factors(self, island=None, limit=20):
         return []
@@ -251,6 +257,9 @@ class _StubPoolWriteback:
             "hypothesis": hypothesis,
             "note": note,
         })
+
+    def register_constraint(self, constraint):
+        self.constraints.append(constraint)
 
 
 def test_judgment_node_passes_hypothesis_to_pool():
@@ -318,6 +327,37 @@ def test_judgment_node_returns_verdicts_and_risk_reports():
     assert "risk_audit_reports" in result
     assert len(result["critic_verdicts"]) == 1
     assert len(result["risk_audit_reports"]) == 1
+
+
+def test_judgment_node_records_execution_error_constraint_as_warning():
+    from src.core.orchestrator import judgment_node
+    from src.schemas.failure_constraint import FailureMode
+
+    note = _make_note_for_writeback("factor_003", hypothesis="执行错误不应升级成硬约束")
+    report = _make_report_for_writeback(
+        "factor_003",
+        sharpe=0.0,
+        passed=False,
+        error_message="SyntaxError: bad formula",
+    )
+    state = AgentState(
+        current_round=1,
+        approved_notes=[note],
+        backtest_reports=[report],
+        critic_verdicts=[],
+    )
+    pool = _StubPoolWriteback()
+
+    with patch("src.core.orchestrator.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator._write_snapshot"):
+        judgment_node(state)
+
+    assert len(pool.calls) == 1
+    assert len(pool.constraints) == 1
+    constraint = pool.constraints[0]
+    assert constraint.failure_mode == FailureMode.EXECUTION_ERROR
+    assert constraint.severity == "warning"
+    assert "execution error" in constraint.constraint_rule.lower()
 
 
 def test_judgment_node_empty_reports_returns_empty():

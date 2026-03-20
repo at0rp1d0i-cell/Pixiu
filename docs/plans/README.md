@@ -14,6 +14,10 @@
   - 当前 MiroFish Go/No-Go 决策参考（更像决策备忘，不是实施计划）
 - `2026-03-19-refactor-roadmap.md`
   - 三个独立 architecture epic 的总路线图
+- `2026-03-20-test-pipeline-refactor-design.md`
+  - 测试体系重构设计
+- `2026-03-20-test-pipeline-refactor-implementation.md`
+  - 测试体系重构实施计划
 - `2026-03-19-data-capability-platform-refactor-design.md`
   - 数据能力平台化重构设计
 - `2026-03-19-data-capability-platform-refactor-implementation.md`

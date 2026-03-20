@@ -31,7 +31,7 @@ def test_approve_command_calls_inject_helper(monkeypatch):
     monkeypatch.setattr(
         cli_main,
         "_inject_human_decision",
-        lambda decision: called.append(decision),
+        lambda decision: called.append(decision) or True,
     )
 
     runner = CliRunner()
@@ -39,3 +39,15 @@ def test_approve_command_calls_inject_helper(monkeypatch):
 
     assert result.exit_code == 0
     assert called == ["approve"]
+    assert "已批准" in result.stdout
+
+
+def test_approve_command_stays_quiet_when_injection_fails(monkeypatch):
+    monkeypatch.setattr(cli_main, "_inject_human_decision", lambda decision: False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main.app, ["approve"])
+
+    assert result.exit_code == 0
+    assert "已批准" not in result.stdout
+    assert result.stdout.strip() == ""

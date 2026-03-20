@@ -2,7 +2,7 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-19
+Last Reviewed: 2026-03-20
 
 > 创建：2026-03-18
 > 阶段：Phase 4A（数据上线）→ Phase 4B（受控实验）→ Phase 4C（MiroFish 接入 Go/No-Go）
@@ -11,7 +11,7 @@ Last Reviewed: 2026-03-19
 
 ## 背景
 
-Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O TypedDicts、当前 smoke/unit 基线 511 passed, 26 deselected）。当前最大缺口是：
+Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O TypedDicts、当前 smoke/unit 基线 527 passed, 26 deselected）。当前最大缺口是：
 
 - `NARRATIVE_MINING` 子空间缺乏新闻/公告数据支撑
 - regime 特征层缺乏融资余额、市场宽度、涨停池等特征量（这些特征将通过 `FACTOR_ALGEBRA` 和 `NARRATIVE_MINING` 的 prompt context 注入，不作为独立子空间追踪）
@@ -48,7 +48,7 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 
 需要明确：
 
-- 当前运行时实际停轮由 `MAX_ROUNDS` 环境变量控制，不应把 CLI `--rounds` 当作唯一真值
+- 当前运行时会在 `_entrypoints.py` 中把 CLI `--rounds` 同步写入模块级 `MAX_ROUNDS`，因此实验脚本仍应把 `--rounds` 视为主入口参数；若额外设置同名环境变量，必须保持一致
 - `WARM_START_THRESHOLD=30` 表示需要累计约 30 个通过假设后，子空间调度器才真正进入自适应阶段
 
 推荐分期：
@@ -251,7 +251,7 @@ mkdir -p logs
 # Step 4：后台启动实验
 # 注意：关闭人工审批门
 # 实验期间设置环境变量 REPORT_EVERY_N_ROUNDS=999（大于总轮次），避免触发 CIOReport 生成和人工审批中断
-# 当前实际停轮由 MAX_ROUNDS 控制；--rounds 仅用于 CLI 参数对齐
+# `--rounds` 是当前主入口；如同时设置 MAX_ROUNDS，应与之保持一致
 MAX_ROUNDS=50 REPORT_EVERY_N_ROUNDS=999 uv run pixiu run --mode evolve --rounds 50 \
   > logs/phase4b_experiment.log 2>&1 &
 

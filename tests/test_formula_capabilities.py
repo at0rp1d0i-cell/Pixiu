@@ -148,3 +148,26 @@ def test_runtime_formula_capabilities_ignore_all_nan_bins(tmp_path: Path):
     assert "$pe_ttm" not in capabilities.available_fields
     assert "$turnover_rate" not in capabilities.available_fields
     assert "$float_mv" not in capabilities.available_fields
+
+
+def test_runtime_formula_capabilities_honor_env_min_coverage_ratio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    features_dir = tmp_path / "features"
+    for i in range(2):
+        instrument = f"sh{i:06d}"
+        _write_day_bin(features_dir, instrument, "close.day.bin", [1.0])
+        _write_day_bin(features_dir, instrument, "open.day.bin", [1.0])
+        if i == 0:
+            _write_day_bin(features_dir, instrument, "pb.day.bin", [1.0])
+
+    monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "0.5")
+    capabilities = get_runtime_formula_capabilities(provider_uri=tmp_path)
+    assert capabilities.min_coverage_ratio == pytest.approx(0.5)
+    assert "$pb" in capabilities.available_fields
+
+    monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "1.25")
+    clamped = get_runtime_formula_capabilities(provider_uri=tmp_path)
+    assert clamped.min_coverage_ratio == pytest.approx(1.0)
+    assert "$pb" not in clamped.available_fields

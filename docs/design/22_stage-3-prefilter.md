@@ -4,18 +4,18 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-20
 
 > 版本：2.0
 > 创建：2026-03-07
 > 前置依赖：`11_interface-contracts.md`
-> 文件位置：`src/agents/prefilter.py`（扩展现有 `validator.py`）
+> 文件位置：`src/agents/prefilter.py`
 
 ---
 
 ## 1. 职责
 
-在进入昂贵回测（Stage 4）之前，用五个串行过滤器筛选 `FactorResearchNote` 批次，只放行 Top K（默认 K=5）最有潜力的候选。
+在进入昂贵回测（Stage 4）之前，用五个串行过滤器筛选 `FactorResearchNote` 批次，只放行 Top K（当前默认 `K=10`）最有潜力的候选。
 
 **无回测，无 LLM（前两个过滤器），成本极低。**
 
@@ -23,31 +23,20 @@ Last Reviewed: 2026-03-18
 
 ## 2. 五个过滤器
 
-### Filter A：Validator（A 股硬约束，已有，扩展）
+### Filter A：Validator（A 股硬约束，active）
 
-**现有代码**：`src/agents/validator.py`（保留，迁移到新接口）
+**当前代码**：`src/agents/prefilter.py` 中的 `Validator`
 
-检查规则（从现有代码迁移，补充新规则）：
+检查规则（当前 runtime 口径）：
 ```
-1. Qlib 字段名合法性：只允许 $close, $open, $high, $low, $volume, $factor
+1. 字段名合法性：字段集合来自 runtime capability manifest，而不是文档硬编码
 2. Ref() 偏移符号：Ref($close, -N) 是未来数据，必须拒绝（只允许正整数）
 3. Log() 安全性：Log 参数必须保证 > 0（检查是否有 +1 保护）
 4. 括号匹配：所有 ([ 必须有对应 )]
-5. 算子白名单：表达式只能使用 approved_operators 列表中的算子
-6. 算子签名校验：至少校验常用算子的参数个数与基础类型
-   approved_operators = [
-       "Mean", "Std", "Var", "Max", "Min", "Sum",
-       "Ref", "Delta", "Slope", "Rsquare", "Resi",
-       "Rank", "Abs", "Sign",
-       "Log", "Power", "Sqrt",
-       "Corr", "Cov",
-       "If", "Gt", "Lt", "Ge", "Le", "Eq", "Ne",
-       "And", "Or", "Not",
-       "Add", "Sub", "Mul", "Div",
-       "IdxMax", "IdxMin", "Comb", "Count", "Mad",
-       "WMA", "EMA",
-   ]
-7. 公式非空且长度合理（5 < len < 500 字符）
+5. 算子白名单：集合来自 runtime capability manifest，而不是 skills 自己维护
+6. 裸标识符检查：除算子名、布尔字面量和 `$field` 外，不允许裸标识符
+7. 算子签名校验：当前至少校验常见算子的参数个数、窗口参数位置和基础类型
+8. 公式非空且长度合理（5 < len < 500 字符）
 ```
 
 **接口（更新为新 schema）**：
@@ -75,7 +64,7 @@ Stage 3 会输出一个结构化 `prefilter_diagnostics`，至少包含：
 
 ---
 
-### Filter B：NoveltyFilter（新颖性过滤，新增）
+### Filter B：NoveltyFilter（新颖性过滤，active）
 
 **目标**：防止重复探索已有因子，提高研究效率。
 
@@ -137,7 +126,7 @@ class NoveltyFilter:
 
 ---
 
-### Filter C：AlignmentChecker（语义一致性，新增）
+### Filter C：AlignmentChecker（语义一致性，active）
 
 **目标**：检验公式与经济直觉是否一致，拦截"公式看起来合法但与假设无关"的情况。
 
@@ -188,6 +177,26 @@ class AlignmentChecker:
 
 ---
 
+### Filter D：ConstraintChecker（失败约束过滤，active）
+
+目标：把历史失败沉淀成 prompt 可见和 hard gate 可执行的约束，优先拦截已知坏模式。
+
+当前实现：
+- 从 `FactorPool` 读取 `FailureConstraint`
+- 对 `severity=hard` 的已知模式直接拒绝
+- 对 `warning` 级别约束保留为上游 prompt 注入参考，不在此层一刀切拒绝
+
+### Filter E：RegimeFilter（regime 适配过滤，active）
+
+目标：若 note 明确声明 `applicable_regimes`，则只在当前 `MarketContextMemo.market_regime` 兼容时放行。
+
+当前实现：
+- 当前 regime 缺失时放行
+- note 未声明 regime 时放行
+- 仅在二者都存在且不兼容时拒绝
+
+---
+
 ## 3. 五维过滤器的组合执行
 
 ```python
@@ -206,10 +215,11 @@ class PreFilter:
         notes: list[FactorResearchNote],
     ) -> tuple[list[FactorResearchNote], int]:
         """
-        返回 (approved_notes, filtered_count)
-        approved_notes 数量 <= THRESHOLDS.stage3_top_k
+        返回 `(approved_notes, filtered_count, diagnostics)`
+        `approved_notes` 数量 <= `THRESHOLDS.stage3_top_k`
         """
         candidates = []
+        diagnostics = {...}
 
         for note in notes:
             formula = note.final_formula or note.proposed_formula
@@ -232,26 +242,37 @@ class PreFilter:
                 logger.info(f"[Filter C] 拒绝 {note.note_id}: {reason}")
                 continue
 
+            # Filter D（历史失败约束）
+            ...
+
+            # Filter E（regime 兼容）
+            ...
+
             candidates.append(note)
 
-        # 如果通过数量 > Top K，按优先级排序后截断
-        # 优先级规则：有 exploration_questions 的排后（先回测简单的）
+        # 如果通过数量 > Top K，按优先级排序后截断，并把 overflow 记到 diagnostics
         candidates.sort(key=lambda n: len(n.exploration_questions))
         approved = candidates[:THRESHOLDS.stage3_top_k]
+        overflow = candidates[THRESHOLDS.stage3_top_k:]
         filtered_count = len(notes) - len(approved)
 
         logger.info(
             f"[Stage 3] {len(notes)} 个候选 → "
             f"{len(approved)} 个通过（淘汰 {filtered_count} 个）"
         )
-        return approved, filtered_count
+        return approved, filtered_count, diagnostics
 ```
 
 ---
 
 ## 4. 测试要求
 
-扩展 `tests/test_validator.py`，新增：
+当前应主要映射到：
+
+- `tests/test_prefilter.py`
+- `tests/integration/test_stage3_to_stage5.py`
+
+其中至少覆盖：
 
 ```python
 # 现有测试保留，新增以下
@@ -272,7 +293,7 @@ def test_alignment_checker_failure_graceful():
     """AlignmentChecker LLM 调用失败时应放行（不阻塞流程）"""
 
 def test_prefilter_top_k_limit():
-    """通过的候选数量不超过 THRESHOLDS.stage3_top_k"""
+    """通过的候选数量不超过 THRESHOLDS.stage3_top_k，overflow 要进入 diagnostics"""
 
 def test_prefilter_empty_result():
     """全部被过滤时返回空列表，不报错"""
@@ -282,11 +303,11 @@ def test_prefilter_empty_result():
 
 ## 5. 与 v1 的差异
 
-| 对比项 | v1 Validator | v2 PreFilter |
+| 对比项 | v1 Validator | 当前 v2 PreFilter |
 |---|---|---|
-| 过滤维度 | 1（语法规则）| 3（语法 + 新颖性 + 语义对齐）|
+| 过滤维度 | 1（语法规则）| 5（语法 + 新颖性 + 语义对齐 + 失败约束 + regime）|
 | 输入 | `factor_hypothesis` dict | `FactorResearchNote` Pydantic 模型 |
-| 输出 | boolean | `(approved_notes, filtered_count)` |
+| 输出 | boolean | `PrefilterOutput` + `prefilter_diagnostics` |
 | Novelty | 无 | AST Jaccard 相似度 vs FactorPool |
 | 语义检查 | 无 | LLM 快速调用（可降级）|
-| Top K 限流 | 无 | 最多放行 K=5 个进回测 |
+| Top K 限流 | 无 | 最多放行 K=10 个进回测 |

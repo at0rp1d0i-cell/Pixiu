@@ -232,6 +232,16 @@ class TestConstraintExtractor:
         result = self.extractor.extract(verdict, note)
         assert result.failure_mode == FailureMode.EXECUTION_ERROR
 
+    def test_execution_error_is_warning_only(self):
+        verdict = _make_failed_verdict(failure_mode="execution_error")
+        note = _make_note()
+        result = self.extractor.extract(verdict, note)
+
+        assert result is not None
+        assert result.failure_mode == FailureMode.EXECUTION_ERROR
+        assert result.severity == "warning"
+        assert "execution error" in result.constraint_rule.lower()
+
     def test_failure_mode_classification_high_turnover(self):
         verdict = _make_failed_verdict(failure_mode="high_turnover")
         note = _make_note()

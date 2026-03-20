@@ -4,7 +4,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-20
 
 > 版本：2.0
 > 创建：2026-03-07
@@ -20,7 +20,7 @@ Orchestrator 是系统的中枢，负责：
 - 调用 `IslandScheduler` 选择本轮研究方向
 - 驱动五阶段漏斗顺序执行
 - 在 Stage 4 以 `Coder` 为主路径，并在需要时协调 `ExplorationAgent` 的条件分支
-- 触发 `interrupt()` 等待 CIO 审批
+- 通过 `report -> human_gate` 路径与 control plane 决策队列衔接人类审批
 - 管理错误恢复与重试逻辑
 
 ---
@@ -74,7 +74,7 @@ portfolio
   → report
 
 report
-  → human_gate（interrupt()）
+  → human_gate（轮询 control plane 中的最新人类决策）
 
 human_gate
   [human_decision = "approve"]   → loop_control
@@ -120,15 +120,12 @@ def build_graph() -> StateGraph:
     graph.add_edge(NODE_NOTE_REFINEMENT, NODE_CODER)
     graph.add_edge(NODE_CODER, NODE_JUDGMENT)
     graph.add_conditional_edges(NODE_JUDGMENT, route_after_judgment)
-    graph.add_edge(NODE_PORTFOLIO, NODE_REPORT)
-    graph.add_conditional_edges(NODE_REPORT, route_after_report)
+    graph.add_conditional_edges(NODE_PORTFOLIO, route_after_portfolio)
+    graph.add_edge(NODE_REPORT, NODE_HUMAN_GATE)
     graph.add_conditional_edges(NODE_HUMAN_GATE, route_after_human)
     graph.add_conditional_edges(NODE_LOOP_CONTROL, route_loop)
 
-    return graph.compile(
-        checkpointer=MemorySaver(),
-        interrupt_before=[NODE_HUMAN_GATE],  # LangGraph interrupt
-    )
+    return graph.compile(checkpointer=MemorySaver())
 ```
 
 ---
@@ -258,20 +255,18 @@ async def judgment_node(state: AgentState) -> AgentState:
 ### `human_gate_node`
 
 ```python
-def human_gate_node(state: AgentState) -> AgentState:
+def human_gate_node(state: AgentState) -> HumanGateOutput:
     """
-    此节点本身不执行任何逻辑。
-    LangGraph 在 interrupt_before=[NODE_HUMAN_GATE] 配置下，
-    会在进入此节点前暂停，等待外部 .update_state() 注入 human_decision。
+    当前 runtime 不再使用 LangGraph interrupt_before。
+    human_gate_node 会轮询 control plane 中针对当前 run_id 的
+    human_decision_records，直到拿到最新决策或超时。
 
-    外部（CLI）调用方式：
-        graph.update_state(
-            config,
-            {"human_decision": "approve"},
-            as_node=NODE_HUMAN_GATE
-        )
+    外部（CLI/API）调用方式：
+    1. 读取最新 run_id
+    2. 通过 StateStore.append_human_decision(...) 写入 approve/redirect/stop
+    3. human_gate_node 在下一次轮询中消费该决策并清空队列
     """
-    return state  # pass-through，路由在 route_after_human 中处理
+    ...
 ```
 
 ---
@@ -295,8 +290,12 @@ def route_after_judgment(state: AgentState) -> str:
         return NODE_PORTFOLIO
     return NODE_LOOP_CONTROL
 
-def route_after_report(state: AgentState) -> str:
-    return NODE_HUMAN_GATE  # 有报告则必须等待人类
+def route_after_portfolio(state: AgentState) -> str:
+    """
+    每 N 轮或出现突破型结果时生成报告；
+    否则直接回到 loop_control。
+    """
+    ...
 
 def route_after_human(state: AgentState) -> str:
     decision = state.human_decision or "approve"
@@ -317,42 +316,22 @@ def route_loop(state: AgentState) -> str:
 ## 5. Island Scheduler 集成
 
 ```python
-# IslandScheduler 在 Orchestrator 初始化时创建，全程复用
-scheduler = IslandScheduler(
-    islands=ACTIVE_ISLANDS,
-    t_init=1.0,
-    t_min=0.3,
-    decay_every_n_rounds=10,
-    decay_factor=0.85,
-    reset_threshold_sharpe=1.5,
-    reset_min_attempts=3,
-)
-
-# 在 loop_control_node 中更新调度器状态
 def loop_control_node(state: AgentState) -> AgentState:
-    # 更新本轮结果到 Scheduler
-    for verdict in state.critic_verdicts:
-        if verdict.overall_passed:
-            report = next(r for r in state.backtest_reports
-                         if r.factor_id == verdict.factor_id)
-            scheduler.update(
-                island=report.island,
-                sharpe=report.metrics.sharpe
-            )
-
-    # 温度退火
-    scheduler.maybe_anneal(state.current_round)
-
-    # 重置表现差的 Island
-    scheduler.maybe_reset()
-
-    # 清空本轮状态，准备下一轮
-    return AgentState(
-        current_round=state.current_round + 1,
-        current_island=scheduler.sample(),
-        market_context=state.market_context,  # 当天只生成一次
-    )
+    """
+    当前 runtime 在此处做三件事：
+    1. 调用 IslandScheduler.on_epoch_done(...) 更新 island 级 epoch
+    2. 使用 SubspaceScheduler.update_state(...) 更新子空间多臂老虎机状态
+    3. 在写 round snapshot 后清空本轮临时字段，递增 current_round
+    """
+    ...
 ```
+
+当前 scheduler 有两层：
+- island 级：`src/factor_pool/scheduler.py` 中的 `IslandScheduler`
+- subspace 级：`src/scheduling/subspace_scheduler.py` 中的 `SubspaceScheduler`
+
+两层状态都由 orchestrator 驱动，但 round snapshot 中对外暴露的主要是
+`scheduler_state`（subspace 级）。
 
 ---
 
@@ -376,10 +355,11 @@ def loop_control_node(state: AgentState) -> AgentState:
 
 async def run_evolve(rounds: int = 20, islands: List[str] = None):
     """进化模式：多 Island 轮换，持续运行"""
-    graph = build_graph()
-    config = {"configurable": {"thread_id": f"evoquant_{datetime.now().isoformat()}"}}
+    _orch.MAX_ROUNDS = rounds
+    graph = get_graph()
+    config = {"configurable": {"thread_id": f"pixiu_evolve_{datetime.now():%Y%m%d_%H%M%S}"}}
     initial_state = AgentState(current_round=0)
-    await graph.ainvoke(initial_state, config=config)
+    await graph.ainvoke(initial_state.model_dump(), config=config)
 
 async def run_single(island: str):
     """单次模式：指定 Island，单轮调试"""
@@ -408,7 +388,21 @@ async def run_single(island: str):
 
 ---
 
-## 9. 评估基准定义
+## 9. 审批链当前真相
+
+当前审批链的运行时真相是：
+
+1. `report_node` 生成 `CIOReport`
+2. `report_node` 把 `awaiting_human_approval=True` 写入 control plane snapshot
+3. CLI/API 通过 `StateStore.append_human_decision(...)` 入队决策
+4. `human_gate_node` 轮询 `pop_latest_human_decision(run_id)` 获取最新决策
+5. `route_after_human()` 根据 `approve / redirect:* / stop` 继续主图
+
+这与旧版 `graph.update_state(..., as_node=NODE_HUMAN_GATE)` 注入式审批不同。
+
+---
+
+## 10. 评估基准定义
 
 **旧基准（已废弃）**：`Alpha158 + LightGBM 训练集 Sharpe = 2.67`
 该数字为样本内（IS）估计，不适合作为 Agent 因子的超越目标。

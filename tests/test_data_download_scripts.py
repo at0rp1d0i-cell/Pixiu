@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import struct
 from pathlib import Path
 
@@ -23,6 +24,46 @@ def _read_day_bin(path: Path) -> np.ndarray:
     with open(path, "rb") as handle:
         _ = struct.unpack("<I", handle.read(4))[0]
         return np.fromfile(handle, dtype=np.float32)
+
+
+def _run_resume_contract(
+    *,
+    module,
+    progress_file: Path,
+    staging_dir: Path,
+    fetch_attr: str,
+    stock_code: str,
+    empty_frame: pd.DataFrame,
+    materialized_frame: pd.DataFrame,
+) -> None:
+    module.PROGRESS_FILE = progress_file
+    module.CHECKPOINT_EVERY = 1
+    module.SLEEP_BETWEEN_STOCKS = 0
+
+    progress = module.load_progress()
+    assert progress["done"] == []
+    assert progress["failed"] == {}
+
+    setattr(module, fetch_attr, lambda ts_code: empty_frame)
+    module.download_all(progress, [stock_code])
+
+    assert stock_code not in progress["done"]
+    assert progress["empty_counts"][stock_code] == 1
+    assert stock_code not in progress["empty_done"]
+    assert progress_file.exists()
+
+    with progress_file.open(encoding="utf-8") as handle:
+        saved = json.load(handle)
+    assert saved["empty_counts"][stock_code] == 1
+
+    reloaded = module.load_progress()
+    setattr(module, fetch_attr, lambda ts_code: materialized_frame)
+    module.download_all(reloaded, [stock_code])
+
+    assert stock_code in reloaded["done"]
+    assert stock_code not in reloaded["empty_counts"]
+    assert stock_code not in reloaded["empty_done"]
+    assert (staging_dir / f"{stock_code}.parquet").exists()
 
 
 @pytest.mark.unit
@@ -100,3 +141,65 @@ def test_daily_basic_download_retries_empty_response_on_next_run(tmp_path: Path,
     assert stock_code not in progress["empty_counts"]
     assert stock_code not in progress["empty_done"]
     assert (module.DAILY_BASIC_STAGING_DIR / f"{stock_code}.parquet").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("filename", "module_name", "fetch_attr", "staging_attr", "empty_frame", "materialized_frame"),
+    [
+        (
+            "download_moneyflow_data.py",
+            "download_moneyflow_data_test",
+            "fetch_moneyflow",
+            "MONEYFLOW_STAGING_DIR",
+            pd.DataFrame(),
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["20260318"],
+                    "buy_sm_vol": [10],
+                    "buy_sm_amount": [1.1],
+                    "net_mf_amount": [0.5],
+                }
+            ),
+        ),
+        (
+            "download_stk_limit_data.py",
+            "download_stk_limit_data_test",
+            "fetch_stk_limit",
+            "STK_LIMIT_STAGING_DIR",
+            pd.DataFrame(),
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["20260318"],
+                    "up_limit": [12.13],
+                    "down_limit": [9.93],
+                }
+            ),
+        ),
+    ],
+)
+def test_tushare_scripts_resume_from_empty_then_materialize(
+    tmp_path: Path,
+    filename: str,
+    module_name: str,
+    fetch_attr: str,
+    staging_attr: str,
+    empty_frame: pd.DataFrame,
+    materialized_frame: pd.DataFrame,
+):
+    module = _load_script_module(filename, module_name)
+    progress_file = tmp_path / f"{module_name}.json"
+    staging_dir = tmp_path / staging_attr.lower()
+    setattr(module, staging_attr, staging_dir)
+
+    _run_resume_contract(
+        module=module,
+        progress_file=progress_file,
+        staging_dir=staging_dir,
+        fetch_attr=fetch_attr,
+        stock_code="000001.SZ",
+        empty_frame=empty_frame,
+        materialized_frame=materialized_frame,
+    )

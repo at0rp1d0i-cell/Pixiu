@@ -8,7 +8,11 @@ import pytest
 import numpy as np
 
 from src.data_pipeline.datasets import DAILY_BASIC_DATASET
-from src.data_pipeline.readiness import get_dataset_readiness
+from src.data_pipeline.readiness import (
+    canonical_universe_dirs,
+    get_dataset_readiness,
+    read_min_coverage_ratio,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -99,3 +103,45 @@ def test_dataset_readiness_ignores_all_nan_bins(tmp_path: Path):
     assert status.materialized is False
     assert status.runtime_available is False
     assert status.field_status["$pb"].instrument_count == 0
+
+
+def test_read_min_coverage_ratio_clamps_and_falls_back(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", raising=False)
+    assert read_min_coverage_ratio() == pytest.approx(0.95)
+
+    monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "not-a-number")
+    assert read_min_coverage_ratio() == pytest.approx(0.95)
+
+    monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "-0.25")
+    assert read_min_coverage_ratio() == pytest.approx(0.0)
+
+    monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "1.25")
+    assert read_min_coverage_ratio() == pytest.approx(1.0)
+
+
+def test_canonical_universe_dirs_falls_back_when_close_bins_are_missing(tmp_path: Path):
+    features_dir = tmp_path / "features"
+    first = features_dir / "sh000001"
+    second = features_dir / "sh000002"
+    first.mkdir(parents=True, exist_ok=True)
+    second.mkdir(parents=True, exist_ok=True)
+    (first / "pb.day.bin").write_bytes(b"")
+    (second / "roe.day.bin").write_bytes(b"")
+
+    universe_dirs = canonical_universe_dirs([first, second])
+
+    assert universe_dirs == [first, second]
+
+
+def test_canonical_universe_dirs_prefers_close_bins_when_present(tmp_path: Path):
+    features_dir = tmp_path / "features"
+    canonical = features_dir / "sh000001"
+    ignored = features_dir / "sh000002"
+    canonical.mkdir(parents=True, exist_ok=True)
+    ignored.mkdir(parents=True, exist_ok=True)
+    (canonical / "close.day.bin").write_bytes(b"")
+    (ignored / "roe.day.bin").write_bytes(b"")
+
+    universe_dirs = canonical_universe_dirs([canonical, ignored])
+
+    assert universe_dirs == [canonical]

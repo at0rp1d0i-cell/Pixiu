@@ -4,7 +4,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-19
+Last Reviewed: 2026-03-20
 
 > 创建：2026-03-09
 > 前置依赖：`.../overview/03_architecture-overview.md`、`11_interface-contracts.md`
@@ -58,6 +58,10 @@ Last Reviewed: 2026-03-19
 ### Tier C: Local Integration
 
 目标：验证本地集成链路，但外部依赖必须被隔离或 mock。
+这层目前又分成两种现实形态：
+
+- contract-isolated pipeline tests：graph / node / pool / control-plane 用 stub 或临时目录联通
+- runtime-realistic local integration：依赖本地 filesystem / sqlite / chroma，但不访问互联网
 
 要求：
 - 可依赖本地 filesystem
@@ -80,6 +84,14 @@ Last Reviewed: 2026-03-19
 - 不纳入默认 merge gate
 - 失败优先视为环境或上游依赖问题，不直接阻塞普通开发
 
+当前状态说明：
+- 仓库仍保留一层过渡性的 `conftest.py` 文件名自动补 marker
+- `tests/integration/test_stage1_live.py`
+- `tests/integration/test_stage2_live.py`
+- `tests/integration/test_e2e_live.py`
+- `tests/integration/test_stage1_market_context.py`
+  目前仍部分依赖这层自动补标；目标状态是后续全部改成显式 `pytestmark`
+
 典型覆盖：
 - `tests/test_mcp_servers.py` 中的 AKShare / cross-market 段落
 - `tests/integration/test_stage1_live.py`
@@ -96,8 +108,11 @@ Last Reviewed: 2026-03-19
 - 只在专门时段或手动触发执行
 
 典型覆盖：
-- `tests/integration/test_e2e_pipeline.py`
 - `tests/integration/test_e2e_live.py`
+
+当前口径修正：
+- `tests/integration/test_e2e_pipeline.py` 目前是 `integration` 文件，不应继续被当作唯一 canonical `e2e`
+- 其中几条 `smoke` 用例承担的是“重型本地集成烟测”角色，而不是完整真实环境 e2e
 
 ---
 
@@ -121,11 +136,8 @@ Last Reviewed: 2026-03-19
 - 在 `pyproject.toml` 或 `pytest.ini` 中配置项目根路径
 - 运行 `pytest tests` 时可直接导入 `src.*`
 
-当前状态：
-
-```bash
-uv run pytest -q tests -m "smoke or unit"
-```
+当前状态：默认入口已经稳定，但少数 live/integration 文件仍保留过渡期的
+`sys.path.insert(...)`。这些不应继续扩散，并将在 Test Pipeline Refactor 中清理。
 
 ### Async 测试
 
@@ -152,6 +164,14 @@ uv run pytest -q tests -m "smoke or unit"
 
 如果测试没有 marker，不允许进入长期稳定 CI。
 
+当前过渡状态：
+- `tests/conftest.py` 仍会对一部分文件按文件名自动补 `live/e2e`
+- 没有主 marker 的测试当前仍会被自动补成 `unit`
+
+这两条都属于过渡兼容，而不是目标状态。Test Pipeline Refactor 的目标是：
+- live/e2e 全部显式标记
+- 不再依赖“无 marker 自动算 unit”
+
 ---
 
 ## 5. 规范化命令
@@ -159,25 +179,25 @@ uv run pytest -q tests -m "smoke or unit"
 ### 默认开发命令
 
 ```bash
-pytest -q tests -m "smoke or unit"
+uv run pytest -q tests -m "smoke or unit"
 ```
 
 ### 本地集成
 
 ```bash
-pytest -q tests -m "integration and not live and not e2e"
+uv run pytest -q tests -m "integration and not live and not e2e"
 ```
 
 ### Live 数据联通
 
 ```bash
-pytest -q tests -m live
+uv run pytest -q tests -m live
 ```
 
 ### 端到端闭环
 
 ```bash
-pytest -q tests -m e2e
+uv run pytest -q tests -m e2e
 ```
 
 当前仓库已经完成 pytest 路径和 marker 基础配置，可以把上述命令视为稳定入口；但 `live / e2e` 仍不属于默认 merge gate。
@@ -218,7 +238,9 @@ pytest -q tests -m e2e
 
 - `live / e2e` 仍缺少稳定环境说明和自动化触发策略，默认 merge gate 继续排除这两层
 - async 测试的长期方案尚未定稿，当前是同步包装与少量原生 async 并存
-- 默认 `smoke or unit` 基线当前为 `511 passed, 26 deselected`
+- 默认 `smoke or unit` 基线当前为 `527 passed, 26 deselected`
 - CLI / API 的最小联通 smoke 已补齐；后续重点是保持 approval / report / human-gate 路径与真实 graph 路由一致
+- `test_e2e_pipeline.py` 的层级定位与文档曾经漂移，现已明确按 `integration` 处理
+- 部分 unit 测试仍会读取真实 runtime capability 或依赖模块级全局状态；这正是 Test Pipeline Refactor 的首要清理目标
 
 本规格的目标，就是把这些问题从“口头约定”提升为明确的工程约束。

@@ -4,13 +4,9 @@ orchestrator 节点降级路径、以及 Stage 1→2 数据流衔接。
 """
 import asyncio
 import json
-import os
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -18,13 +14,12 @@ from src.agents.literature_miner import LiteratureMiner
 from src.agents.market_analyst import (
     MarketAnalyst,
     MCP_SERVER_PATH,
-    _empty_memo,
     market_context_node,
 )
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
-from src.schemas.market_context import HistoricalInsight, MarketContextMemo
+from src.schemas.market_context import MarketContextMemo, MarketRegime
 from src.schemas.state import AgentState
 
 
@@ -49,6 +44,8 @@ def mcp_tools(mcp_client):
 def real_pool(tmp_path):
     """用 tmp_path 创建真实 FactorPool（降级为 in-memory ChromaDB）。"""
     return FactorPool(db_path=str(tmp_path / "test_pool"))
+
+
 def _seed_pool(pool: FactorPool):
     """向 FactorPool 写入测试因子记录。"""
     factors = [
@@ -123,7 +120,7 @@ def _make_memo() -> MarketContextMemo:
         hot_themes=["AI算力"],
         historical_insights=[],
         suggested_islands=["momentum", "northbound"],
-        market_regime="trending_up",
+        market_regime=MarketRegime.BULL_TREND,
         raw_summary="测试用市场摘要",
     )
 
@@ -133,9 +130,8 @@ def _make_memo() -> MarketContextMemo:
 # ─────────────────────────────────────────────────────────
 
 def test_market_analyst_mcp_tools_available(mcp_tools):
-    """启动 AKShare MCP Server，验证能获取到 10 个工具。"""
+    """启动 AKShare MCP Server，验证核心工具仍可获取。"""
     tool_names = [t.name for t in mcp_tools]
-    assert len(mcp_tools) == 10, f"Expected 10 tools, got {len(mcp_tools)}: {tool_names}"
 
     expected = [
         "get_northbound_flow_today",
@@ -149,8 +145,8 @@ def test_market_analyst_mcp_tools_available(mcp_tools):
         "get_macro_indicators",
         "get_margin_trading_summary",
     ]
-    for name in expected:
-        assert name in tool_names, f"Missing tool: {name}"
+    assert len(mcp_tools) >= len(expected), f"Expected at least {len(expected)} tools, got {len(mcp_tools)}: {tool_names}"
+    assert set(expected).issubset(tool_names), f"Missing tool(s): {sorted(set(expected) - set(tool_names))}"
 
 
 # ─────────────────────────────────────────────────────────
@@ -201,7 +197,7 @@ def test_market_context_node_fallback():
     memo = result.get("market_context")
     assert memo is not None
     assert isinstance(memo, MarketContextMemo)
-    assert memo.market_regime == "unknown"
+    assert memo.market_regime == MarketRegime.RANGE_BOUND
     assert memo.date  # 非空日期
     assert "失败" in memo.raw_summary or "MCP server down" in memo.raw_summary
 
@@ -240,13 +236,13 @@ def test_market_context_node_with_mock_llm(mcp_tools):
     mock_llm.ainvoke = AsyncMock(return_value=mock_response)
     mock_llm.bind_tools = MagicMock(return_value=mock_llm)
 
-    with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
+    with patch("src.agents.market_analyst.build_researcher_llm", return_value=mock_llm):
         analyst = MarketAnalyst(mcp_tools=mcp_tools)
 
     memo = asyncio.run(analyst.analyze())
 
     assert isinstance(memo, MarketContextMemo)
-    assert memo.market_regime == "trending_up"
+    assert memo.market_regime == MarketRegime.BULL_TREND
     assert memo.date == "2026-03-16"
     assert memo.northbound is not None
     assert memo.northbound.net_buy_bn == 25.3
@@ -267,7 +263,7 @@ def test_stage1_output_feeds_stage2_input():
 
     # Stage 2 的 hypothesis_gen_node 读取 state.market_context
     assert state.market_context is not None
-    assert state.market_context.market_regime == "trending_up"
+    assert state.market_context.market_regime == MarketRegime.BULL_TREND
     assert "momentum" in state.market_context.suggested_islands
 
     # 验证序列化往返（LangGraph 节点间通过 dict 传递）
@@ -276,7 +272,7 @@ def test_stage1_output_feeds_stage2_input():
 
     # 重建 AgentState 验证反序列化
     restored = AgentState(**state_dict)
-    assert restored.market_context.market_regime == "trending_up"
+    assert restored.market_context.market_regime == MarketRegime.BULL_TREND
     assert restored.market_context.hot_themes == ["AI算力"]
     # Stage 2 字段初始为空
     assert restored.research_notes == []

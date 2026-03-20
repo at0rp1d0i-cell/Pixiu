@@ -10,23 +10,10 @@ Stage 4 (Docker/qlib) 不可用，用预构造的 BacktestReport 直接注入 St
 
 Tier: e2e
 """
-import asyncio
-import os
-import sys
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from src.llm.openai_compat import load_dotenv_if_available
-load_dotenv_if_available()
-
-pytestmark = pytest.mark.skipif(
-    not os.getenv("RESEARCHER_API_KEY"),
-    reason="RESEARCHER_API_KEY 未设置，跳过 e2e 真实场景测试",
-)
 
 from src.schemas.backtest import (
     BacktestMetrics,
@@ -38,14 +25,6 @@ from src.schemas.backtest import (
 from src.schemas.market_context import MarketContextMemo
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
-
-_PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-
-
-@pytest.fixture(autouse=True)
-def _clear_proxy(monkeypatch):
-    for var in _PROXY_VARS:
-        monkeypatch.delenv(var, raising=False)
 
 
 def _make_backtest_report(note: FactorResearchNote, sharpe: float = 3.1) -> BacktestReport:
@@ -100,7 +79,7 @@ def _make_mock_pool():
 # E2E Test: Stage 1 → 2 → 3 → 5
 # ─────────────────────────────────────────────────────────
 
-def test_e2e_stage1_to_stage5(tmp_path):
+def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
     """
     完整 e2e 流程（Stage 4 用预构造 BacktestReport 绕过）：
 
@@ -111,7 +90,6 @@ def test_e2e_stage1_to_stage5(tmp_path):
     5. Stage 5: judgment_node + portfolio_node + report_node（纯确定性）
     """
     from src.core.orchestrator import (
-        hypothesis_gen_node,
         judgment_node,
         market_context_node,
         portfolio_node,
@@ -186,7 +164,6 @@ def test_e2e_stage1_to_stage5(tmp_path):
         s5a_result = judgment_node(state)
 
     verdicts = s5a_result.get("critic_verdicts", [])
-    risk_reports = s5a_result.get("risk_audit_reports", [])
     assert len(verdicts) > 0, "Stage 5a 未产出 critic_verdicts"
     print(f"  verdicts={len(verdicts)}, passed={sum(1 for v in verdicts if v.overall_passed)}")
 
@@ -211,18 +188,12 @@ def test_e2e_stage1_to_stage5(tmp_path):
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="e2e_test")
 
-    orchestrator.get_state_store = lambda: store
-    orchestrator._current_run_id = run.run_id
-    orchestrator.REPORTS_DIR = tmp_path / "reports"
+    with orchestrator_state_guard(reports_dir=tmp_path / "reports"):
+        orchestrator.get_state_store = lambda: store
+        orchestrator._current_run_id = run.run_id
 
-    try:
         with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool):
             s5c_result = report_node(state)
-    finally:
-        # 恢复 orchestrator 模块级状态
-        from src.control_plane.state_store import get_state_store as _orig_get
-        orchestrator.get_state_store = _orig_get
-        orchestrator._current_run_id = None
 
     cio = s5c_result.get("cio_report")
     assert cio is not None, "Stage 5c 未产出 cio_report"

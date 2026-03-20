@@ -7,21 +7,8 @@ Stage 1 真实场景测试：使用真实 DeepSeek API + AKShare MCP Server
 """
 import asyncio
 import json
-import os
-import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from src.llm.openai_compat import load_dotenv_if_available
-load_dotenv_if_available()
-
-# 没有 API key 就跳过整个模块
-pytestmark = pytest.mark.skipif(
-    not os.getenv("RESEARCHER_API_KEY"),
-    reason="RESEARCHER_API_KEY 未设置，跳过真实场景测试",
-)
 
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -29,9 +16,6 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from src.agents.market_analyst import MarketAnalyst, MCP_SERVER_PATH, market_context_node
 from src.schemas.market_context import MarketContextMemo
 from src.schemas.state import AgentState
-
-# Proxy 变量名（socks proxy 会导致 ChatOpenAI httpx 初始化失败）
-_PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
 def _extract_text(result) -> str:
@@ -53,13 +37,6 @@ def mcp_tools():
         {"akshare": {"command": "python3", "args": [MCP_SERVER_PATH], "transport": "stdio"}}
     )
     return asyncio.run(client.get_tools())
-
-
-@pytest.fixture(autouse=True)
-def _clear_proxy(monkeypatch):
-    """临时清除 socks proxy 环境变量，避免 ChatOpenAI/httpx 初始化失败。"""
-    for var in _PROXY_VARS:
-        monkeypatch.delenv(var, raising=False)
 
 
 # ─────────────────────────────────────────────────────────
@@ -104,7 +81,7 @@ def test_market_analyst_live(mcp_tools):
     analyst = MarketAnalyst(mcp_tools=mcp_tools)
     memo = asyncio.run(analyst.analyze())
 
-    print(f"\n[MarketContextMemo]")
+    print("\n[MarketContextMemo]")
     print(f"  date:          {memo.date}")
     print(f"  market_regime: {memo.market_regime}")
     print(f"  hot_themes:    {memo.hot_themes}")
@@ -136,7 +113,7 @@ def test_market_context_node_live():
     assert memo is not None, "market_context 不能为 None"
     assert isinstance(memo, MarketContextMemo)
 
-    print(f"\n[market_context_node 输出]")
+    print("\n[market_context_node 输出]")
     print(f"  regime:   {memo.market_regime}")
     print(f"  insights: {len(memo.historical_insights)} 条历史洞察")
     for ins in memo.historical_insights:

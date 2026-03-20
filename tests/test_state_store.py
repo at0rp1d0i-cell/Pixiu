@@ -272,6 +272,53 @@ def test_api_approve_queues_decision_when_waiting(tmp_path, monkeypatch):
     assert latest.action == "approve"
 
 
+def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="evolve")
+    store.write_snapshot(
+        RunSnapshot(
+            run_id=run.run_id,
+            approved_notes_count=1,
+            backtest_reports_count=1,
+            verdicts_count=1,
+            awaiting_human_approval=True,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    monkeypatch.setattr(server, "_get_state_store", lambda: store)
+    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
+    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
+
+    payload = server.post_approve(server.ApproveRequest(action="approve"))
+    assert payload == {"ok": True, "action": "approve"}
+
+    human_result = orchestrator.human_gate_node(
+        AgentState(current_round=3, awaiting_human_approval=True),
+    )
+
+    assert human_result["human_decision"] == "approve"
+    assert human_result["awaiting_human_approval"] is False
+    assert (
+        orchestrator.route_after_human(
+            AgentState(
+                current_round=3,
+                human_decision=human_result["human_decision"],
+            )
+        )
+        == orchestrator.NODE_LOOP_CONTROL
+    )
+
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.status == "running"
+    assert latest_run.current_stage == orchestrator.NODE_HUMAN_GATE
+
+    snapshot = store.get_snapshot(run.run_id)
+    assert snapshot is not None
+    assert snapshot.awaiting_human_approval is False
+    assert store.pop_latest_human_decision(run.run_id) is None
+
+
 def test_cli_inject_human_decision_requires_waiting_snapshot(tmp_path, monkeypatch):
     store = StateStore(tmp_path / "state_store.sqlite")
     store.create_run(mode="single")
@@ -312,13 +359,21 @@ class _StubPoolOrch:
     def get_passed_factors(self, island: str | None = None, limit: int = 20):
         return []
 
-    def register_factor(self, report, verdict, risk_report, hypothesis: str = ""):
+    def register_factor(
+        self,
+        report,
+        verdict,
+        risk_report,
+        hypothesis: str = "",
+        note=None,
+    ):
         self.registered.append(
             {
                 "report": report,
                 "verdict": verdict,
                 "risk_report": risk_report,
                 "hypothesis": hypothesis,
+                "note": note,
             }
         )
 

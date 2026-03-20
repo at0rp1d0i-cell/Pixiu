@@ -78,6 +78,13 @@ Last Reviewed: 2026-03-19
 
 ### Phase H: 独立重构 Epic（进行中）
 
+- [ ] `Test Pipeline Refactor`
+  - 见 `docs/plans/2026-03-20-test-pipeline-refactor-design.md`
+  - 实施计划：`docs/plans/2026-03-20-test-pipeline-refactor-implementation.md`
+  - 这是 `FactorPool Boundary Refactor` 与 `Orchestrator Boundary Refactor` 的前置 gate
+  - [ ] Slice 1：canonical docs / marker truth 对齐
+  - [ ] Slice 2：test harness stabilization（fixture / env / globals）
+  - [ ] Slice 3：approval / entrypoint / FactorPool / readiness 高价值 contract tests
 - [ ] `Data Capability Platform Refactor`
   - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`
   - 第一批实施计划：`docs/plans/2026-03-19-data-capability-platform-refactor-implementation.md`
@@ -143,6 +150,7 @@ Last Reviewed: 2026-03-19
 - 最小 control-plane state_store 已经落地
 - richer contract 已开始进入主干，但仍处在新旧字段双轨期
 - 当前主任务已经转为三条主线
+- 测试体系已从“支持开发”升级为“后续 B/C 重构的前置 gate”
 - 数据能力收口与下载链稳定化
 - Researcher 技能/工具边界继续收口
 - richer contract、控制平面和产品层继续推进

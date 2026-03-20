@@ -5,6 +5,7 @@ import pytest
 
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport, FactorSpecSnapshot
+from src.schemas.factor_pool import FactorPoolRecord
 from src.schemas.judgment import CriticVerdict, RiskAuditReport
 
 pytestmark = pytest.mark.unit
@@ -247,3 +248,107 @@ class TestReads:
         assert meta["coverage"] == 1.0
         assert meta["execution_succeeded"] is True
         assert meta["economic_rationale"] == "资金流和惯性共同驱动。"
+
+    def test_register_factor_keeps_execution_succeeded_separate_from_quality(self, pool):
+        report = BacktestReport(
+            report_id="report-2",
+            note_id="note-2",
+            factor_id="factor-2",
+            island="momentum",
+            formula="$close",
+            metrics=BacktestMetrics(
+                sharpe=3.2,
+                annualized_return=0.2,
+                max_drawdown=0.1,
+                ic_mean=0.05,
+                ic_std=0.03,
+                icir=0.7,
+                turnover_rate=0.18,
+                coverage=0.9,
+            ),
+            passed=True,
+            execution_succeeded=False,
+            status="partial",
+            execution_time_seconds=1.0,
+            qlib_output_raw="{}",
+            error_message="execution failed after quality signal",
+        )
+        verdict = CriticVerdict(
+            report_id="report-2",
+            factor_id="factor-2",
+            note_id="note-2",
+            overall_passed=True,
+            decision="promote",
+            score=0.95,
+            checks=[],
+            register_to_pool=True,
+            pool_tags=["passed"],
+            reason_codes=[],
+        )
+        risk = RiskAuditReport(
+            factor_id="factor-2",
+            overfitting_score=0.1,
+            overfitting_flag=False,
+            correlation_flags=[],
+            recommendation="clear",
+            audit_notes="ok",
+        )
+
+        pool.register_factor(report=report, verdict=verdict, risk_report=risk)
+
+        rows = pool._collection.get(ids=["factor-2"], include=["metadatas"])
+        assert len(rows["metadatas"]) == 1
+        meta = rows["metadatas"][0]
+        assert meta["passed"] is True
+        assert meta["decision"] == "promote"
+        assert meta["execution_succeeded"] is False
+        assert meta["parse_success"] is False
+        assert meta["beats_baseline"] is True
+
+    def test_register_factor_v2_compatibility_seed_data(self, pool):
+        record = FactorPoolRecord(
+            factor_id="factor-v2",
+            note_id="note-v2",
+            formula="$close",
+            hypothesis="价格趋势会延续",
+            economic_rationale="动量效应会在短期持续。",
+            backtest_report_id="report-v2",
+            verdict_id="verdict-v2",
+            decision="promote",
+            score=0.9,
+            execution_succeeded=True,
+            sharpe=3.4,
+            ic_mean=0.05,
+            icir=0.72,
+            turnover=0.2,
+            max_drawdown=0.1,
+            coverage=0.95,
+            tags=["passed", "decision:promote"],
+            subspace_origin="factor_algebra",
+        )
+
+        pool.register_factor_v2(record)
+
+        rows = pool._collection.get(where={"factor_id": "factor-v2"}, include=["metadatas", "documents"])
+        assert len(rows["metadatas"]) == 1
+        meta = rows["metadatas"][0]
+        assert rows["documents"][0] == (
+            "公式: $close\n"
+            "假设: 价格趋势会延续\n"
+            "逻辑: 动量效应会在短期持续。"
+        )
+        assert meta["note_id"] == "note-v2"
+        assert meta["backtest_report_id"] == "report-v2"
+        assert meta["verdict_id"] == "verdict-v2"
+        assert meta["decision"] == "promote"
+        assert meta["score"] == 0.9
+        assert meta["sharpe"] == 3.4
+        assert meta["ic_mean"] == 0.05
+        assert meta["icir"] == 0.72
+        assert meta["turnover"] == 0.2
+        assert meta["max_drawdown"] == 0.1
+        assert meta["coverage"] == 0.95
+        assert meta["passed"] is True
+        assert meta["beats_baseline"] is True
+        assert meta["subspace_origin"] == "factor_algebra"
+        assert meta["tags"] == "[\"passed\", \"decision:promote\"]"

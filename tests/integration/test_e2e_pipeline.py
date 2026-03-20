@@ -9,18 +9,18 @@ import json
 import os
 import tempfile
 import uuid
-from datetime import date, UTC, datetime
-from unittest.mock import patch, AsyncMock
+from datetime import date
+from unittest.mock import patch
 
 import pytest
-
-pytestmark = pytest.mark.integration
 
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.state import AgentState
 from src.execution.docker_runner import ExecutionResult
+
+pytestmark = pytest.mark.integration
 
 
 # ─────────────────────────────────────────────
@@ -132,7 +132,7 @@ def _mock_hypothesis_gen_node(state_dict):
 # ─────────────────────────────────────────────
 
 @pytest.mark.smoke
-def test_e2e_pipeline_one_round_factors_fail():
+def test_e2e_pipeline_one_round_factors_fail(orchestrator_state_guard):
     """
     Full pipeline: 1 round, factors fail judgment → loop_control → END.
 
@@ -141,15 +141,8 @@ def test_e2e_pipeline_one_round_factors_fail():
     """
     import src.core.orchestrator as orch
 
-    # Save and reset global state
-    saved = (orch._graph, orch._scheduler, orch._current_run_id, orch.MAX_ROUNDS)
-    orch._graph = None
-    orch._scheduler = None
-    orch._current_run_id = None
-    orch.MAX_ROUNDS = 1
-
     # Use temp dirs for factor pool and state store
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, orchestrator_state_guard(max_rounds=1):
         db_path = os.path.join(tmpdir, "test_state.db")
         pool_path = os.path.join(tmpdir, "test_pool")
 
@@ -169,27 +162,24 @@ def test_e2e_pipeline_one_round_factors_fail():
              patch("src.factor_pool.pool._pool_instance", None), \
              patch("src.control_plane.state_store._state_store", None):
 
-            try:
-                graph = orch.build_graph()
-                config = {"configurable": {"thread_id": "test_e2e_fail"}}
-                initial = AgentState(current_round=0)
+            graph = orch.build_graph()
+            config = {"configurable": {"thread_id": "test_e2e_fail"}}
+            initial = AgentState(current_round=0)
 
-                result = asyncio.run(
-                    graph.ainvoke(initial.model_dump(), config=config)
-                )
+            result = asyncio.run(
+                graph.ainvoke(initial.model_dump(), config=config)
+            )
 
-                # Pipeline completed one round
-                assert result["current_round"] == 1
-                # All verdicts should be failures (no passed)
-                # After loop_control, temp state is cleared
-                assert result.get("research_notes") == []
-                assert result.get("approved_notes") == []
-            finally:
-                orch._graph, orch._scheduler, orch._current_run_id, orch.MAX_ROUNDS = saved
+            # Pipeline completed one round
+            assert result["current_round"] == 1
+            # All verdicts should be failures (no passed)
+            # After loop_control, temp state is cleared
+            assert result.get("research_notes") == []
+            assert result.get("approved_notes") == []
 
 
 @pytest.mark.smoke
-def test_e2e_pipeline_one_round_factors_pass():
+def test_e2e_pipeline_one_round_factors_pass(orchestrator_state_guard):
     """
     Full pipeline: 1 round, factors pass judgment → portfolio → loop_control → END.
 
@@ -198,15 +188,10 @@ def test_e2e_pipeline_one_round_factors_pass():
     """
     import src.core.orchestrator as orch
 
-    saved = (orch._graph, orch._scheduler, orch._current_run_id,
-             orch.MAX_ROUNDS, orch.REPORT_EVERY_N_ROUNDS)
-    orch._graph = None
-    orch._scheduler = None
-    orch._current_run_id = None
-    orch.MAX_ROUNDS = 1
-    orch.REPORT_EVERY_N_ROUNDS = 999  # Avoid triggering report → human gate
-
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, orchestrator_state_guard(
+        max_rounds=1,
+        report_every_n_rounds=999,
+    ):
         db_path = os.path.join(tmpdir, "test_state.db")
         pool_path = os.path.join(tmpdir, "test_pool")
 
@@ -226,27 +211,23 @@ def test_e2e_pipeline_one_round_factors_pass():
              patch("src.factor_pool.pool._pool_instance", None), \
              patch("src.control_plane.state_store._state_store", None):
 
-            try:
-                graph = orch.build_graph()
-                config = {"configurable": {"thread_id": "test_e2e_pass"}}
-                initial = AgentState(current_round=0)
+            graph = orch.build_graph()
+            config = {"configurable": {"thread_id": "test_e2e_pass"}}
+            initial = AgentState(current_round=0)
 
-                result = asyncio.run(
-                    graph.ainvoke(initial.model_dump(), config=config)
-                )
+            result = asyncio.run(
+                graph.ainvoke(initial.model_dump(), config=config)
+            )
 
-                # Pipeline completed one round and looped
-                assert result["current_round"] == 1
-                # After loop_control, temp state is cleared
-                assert result.get("backtest_reports") == []
-                assert result.get("critic_verdicts") == []
-            finally:
-                (orch._graph, orch._scheduler, orch._current_run_id,
-                 orch.MAX_ROUNDS, orch.REPORT_EVERY_N_ROUNDS) = saved
+            # Pipeline completed one round and looped
+            assert result["current_round"] == 1
+            # After loop_control, temp state is cleared
+            assert result.get("backtest_reports") == []
+            assert result.get("critic_verdicts") == []
 
 
 @pytest.mark.smoke
-def test_e2e_prefilter_rejects_all():
+def test_e2e_prefilter_rejects_all(orchestrator_state_guard):
     """
     Pipeline with all notes rejected by prefilter → skip Stage 4/5.
 
@@ -254,12 +235,6 @@ def test_e2e_prefilter_rejects_all():
           → loop_control → END (no approved notes)
     """
     import src.core.orchestrator as orch
-
-    saved = (orch._graph, orch._scheduler, orch._current_run_id, orch.MAX_ROUNDS)
-    orch._graph = None
-    orch._scheduler = None
-    orch._current_run_id = None
-    orch.MAX_ROUNDS = 1
 
     def mock_hypothesis_gen_bad(state_dict):
         """Generate notes with invalid formulas that Validator will reject."""
@@ -277,7 +252,7 @@ def test_e2e_prefilter_rejects_all():
         ]
         return {**state_dict, "research_notes": notes}
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, orchestrator_state_guard(max_rounds=1):
         db_path = os.path.join(tmpdir, "test_state.db")
         pool_path = os.path.join(tmpdir, "test_pool")
 
@@ -292,18 +267,15 @@ def test_e2e_prefilter_rejects_all():
              patch("src.factor_pool.pool._pool_instance", None), \
              patch("src.control_plane.state_store._state_store", None):
 
-            try:
-                graph = orch.build_graph()
-                config = {"configurable": {"thread_id": "test_e2e_reject"}}
-                initial = AgentState(current_round=0)
+            graph = orch.build_graph()
+            config = {"configurable": {"thread_id": "test_e2e_reject"}}
+            initial = AgentState(current_round=0)
 
-                result = asyncio.run(
-                    graph.ainvoke(initial.model_dump(), config=config)
-                )
+            result = asyncio.run(
+                graph.ainvoke(initial.model_dump(), config=config)
+            )
 
-                # Completed one round
-                assert result["current_round"] == 1
-                # No backtests ran (prefilter rejected all)
-                assert result.get("backtest_reports") == []
-            finally:
-                orch._graph, orch._scheduler, orch._current_run_id, orch.MAX_ROUNDS = saved
+            # Completed one round
+            assert result["current_round"] == 1
+            # No backtests ran (prefilter rejected all)
+            assert result.get("backtest_reports") == []

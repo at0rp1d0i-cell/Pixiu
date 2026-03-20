@@ -4,7 +4,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-20
 
 > 前置依赖：`11_interface-contracts.md`、`14_factor-pool.md`
 > 关联文档：`25_stage-45-golden-path.md`
@@ -55,6 +55,12 @@ Stage 5 的职责不是继续修改公式，也不是重试执行。它只做结
 - 记录 `regime_at_judgment`
 
 当前 `Critic` 的意义不是“让 LLM 评价因子”，而是把 Stage 4 的执行结果压缩成一个足够稳定、足够可下游消费的 judgment object。
+
+补充语义：
+
+- `BacktestReport.passed` 当前只是兼容旧调用点的“质量阈值通过”字段
+- `BacktestReport.execution_succeeded` 才是“执行/解析本身是否成功”的 runtime 真相
+- Stage 5、FactorPool 和 observability 相关逻辑应优先使用 `execution_succeeded`
 
 ## 4. `RiskAuditor`
 
@@ -110,6 +116,12 @@ Stage 5 的职责不是继续修改公式，也不是重试执行。它只做结
 - 通过与失败都要被沉淀
 - 失败沉淀优先进入结构化约束，而不是只留日志
 - 设计与实现的细微偏差统一记录到 `../overview/05_spec-execution-audit.md`
+
+当前补充规则：
+
+- `EXECUTION_ERROR` 仍会在 `RiskAuditor` 中体现为 execution-error penalty
+- 但 `ConstraintExtractor` 对 `FailureMode.EXECUTION_ERROR` 只生成 `warning` 级别约束，不再写成长期 `hard` 约束
+- 这条边界是为了避免把瞬时 Docker / 解析故障污染成长期研究记忆
 
 ## 8. 当前边界
 

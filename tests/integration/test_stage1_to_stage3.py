@@ -9,21 +9,20 @@ Tier: integration（mock LLM，不依赖网络）
 """
 import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-
-pytestmark = pytest.mark.integration
-
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.schemas.market_context import (
     MarketContextMemo, NorthboundFlow, MacroSignal, HistoricalInsight,
 )
 from src.schemas.research_note import FactorResearchNote, AlphaResearcherBatch
-from src.schemas.hypothesis import Hypothesis, StrategySpec, ExplorationSubspace
+from src.schemas.hypothesis import ExplorationSubspace
 from src.schemas.exploration import SubspaceRegistry
 from src.schemas.state import AgentState
 from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker
-from src.scheduling.subspace_context import build_subspace_context
+
+pytestmark = pytest.mark.integration
 
 
 # ─────────────────────────────────────────────────────────
@@ -76,7 +75,7 @@ def _make_llm_batch_response(island: str, subspace: str) -> str:
         ],
         "narrative_mining": [
             "($close - Min($close, 20)) / (Max($close, 20) - Min($close, 20))",
-            "Mean($turn, 5) / Mean($turn, 20) - 1",
+            "Mean($volume, 5) / Mean($volume, 20) - 1",
         ],
     }
     fs = formulas.get(subspace, formulas["factor_algebra"])
@@ -190,7 +189,7 @@ class TestE2EStage1ToStage3:
         mock_llm = MagicMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
         with patch("src.core.orchestrator.get_factor_pool", return_value=_make_mock_pool()):
-            with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
+            with patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm):
                 stage3_result = orch_prefilter(state_after_s2)
 
         state_after_s3 = state_after_s2.model_copy(update=stage3_result)
@@ -222,7 +221,7 @@ class TestE2EStage1ToStage3:
 
         mock_chat = MagicMock()
         mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
-        with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_chat):
+        with patch("src.agents.researcher.build_researcher_llm", return_value=mock_chat):
             with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
                 researcher = AlphaResearcher(island="momentum")
                 asyncio.run(researcher.generate_batch(
@@ -250,7 +249,7 @@ class TestE2EStage1ToStage3:
 
             mock_chat = MagicMock()
             mock_chat.ainvoke = AsyncMock(return_value=mock_resp)
-            with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_chat):
+            with patch("src.agents.researcher.build_researcher_llm", return_value=mock_chat):
                 with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
                     researcher = AlphaResearcher(island="momentum")
                     batch = asyncio.run(researcher.generate_batch(
@@ -427,7 +426,7 @@ def test_alignment_checker_with_strategy_spec():
     # mock LLM 初始化，验证 AlignmentChecker 的降级放行逻辑
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM 不可用"))
-    with patch("src.llm.openai_compat.build_researcher_llm", return_value=mock_llm):
+    with patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm):
         checker = AlignmentChecker()
         is_aligned, reason = asyncio.run(checker.check(note))
 
