@@ -23,20 +23,10 @@ def _is_live_like_item(item: pytest.Item) -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    from tests.helpers.live_env import researcher_api_key_available
-
-    live_like_items = [item for item in items if _is_live_like_item(item)]
-    live_api_key_available = True
-    if live_like_items:
-        live_api_key_available = researcher_api_key_available()
-
     missing_primary_markers: list[str] = []
     for item in items:
         if not _has_primary_tier_marker(item):
             missing_primary_markers.append(str(item.path.relative_to(PROJECT_ROOT)))
-
-        if _is_live_like_item(item) and not live_api_key_available:
-            item.add_marker(pytest.mark.skip(reason="RESEARCHER_API_KEY 未设置，跳过真实场景测试"))
 
     if missing_primary_markers:
         raise pytest.UsageError(
@@ -46,14 +36,15 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture(autouse=True)
-def _clear_live_proxy_env(request, monkeypatch):
+def _prepare_live_test_env(request, monkeypatch):
     if not _is_live_like_item(request.node):
         yield
         return
 
-    from tests.helpers.live_env import clear_proxy_env
+    from tests.helpers.live_env import clear_proxy_env, ensure_researcher_live_env_or_skip
 
     clear_proxy_env(monkeypatch)
+    ensure_researcher_live_env_or_skip()
     yield
 
 
