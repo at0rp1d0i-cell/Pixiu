@@ -89,6 +89,7 @@ Last Reviewed: 2026-03-20
 - `tests/conftest.py` 不再按文件名自动补 `live/e2e`
 - `tests/conftest.py` 不再自动补 `unit`；缺少主 tier marker 的测试会在 collection 阶段直接失败
 - `tests/conftest.py` 仍保留 live-like 测试的 `RESEARCHER_API_KEY` skip 逻辑与 proxy 清理
+- live/e2e 的 `.env` 读取与缺 key 跳过当前仍发生在 collection 阶段，下一步会收口到 runtime fixture/setup
 - `tests/integration/test_stage1_live.py`、`tests/integration/test_stage2_live.py`、`tests/integration/test_e2e_live.py`、`tests/integration/test_stage1_market_context.py`
   已经全部改成显式 `pytestmark`
 
@@ -232,9 +233,10 @@ uv run pytest -q tests -m e2e
 
 ## 8. 当前缺口
 
-截至 2026-03-19，仓库仍存在以下问题：
+截至 2026-03-20，仓库仍存在以下问题：
 
 - `live / e2e` 仍缺少稳定环境说明和自动化触发策略，默认 merge gate 继续排除这两层
+- live/e2e 的环境 gating 还在 collection 阶段完成，后续要继续收口到 runtime fixture/setup
 - async 测试的长期方案尚未定稿，当前是同步包装与少量原生 async 并存
 - 默认 `smoke or unit` 基线当前为 `527 passed, 26 deselected`
 - CLI / API 的最小联通 smoke 已补齐；后续重点是保持 approval / report / human-gate 路径与真实 graph 路由一致
