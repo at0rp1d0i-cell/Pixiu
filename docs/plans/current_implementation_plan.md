@@ -84,8 +84,8 @@ Last Reviewed: 2026-03-20
   - 实施计划：`docs/plans/2026-03-20-test-pipeline-refactor-implementation.md`
   - 这是 `FactorPool Boundary Refactor` 与 `Orchestrator Boundary Refactor` 的前置 gate
   - [x] Slice 1：canonical docs / marker truth 对齐
-  - [ ] Slice 2：test harness stabilization（explicit marker、`sys.path` 清理、重型 smoke 归类、live/e2e runtime env gating 已完成；剩余 fixture / globals adoption）
-  - [ ] Slice 3：approval / entrypoint / FactorPool / readiness 高价值 contract tests
+  - [x] Slice 2：test harness stabilization（explicit marker、`sys.path` 清理、重型 smoke 归类、live/e2e runtime env gating 已完成）
+  - [x] Slice 3：approval / entrypoint / FactorPool / readiness 高价值 contract tests
 - [ ] `Data Capability Platform Refactor`
   - 见 `docs/plans/2026-03-19-data-capability-platform-refactor-design.md`
   - 第一批实施计划：`docs/plans/2026-03-19-data-capability-platform-refactor-implementation.md`
@@ -94,8 +94,12 @@ Last Reviewed: 2026-03-20
   - [ ] Slice 3：扩展到 non-formula dataset readiness 与 Stage 1 / regime data reporting
 - [ ] `FactorPool Boundary Refactor`
   - 见 `docs/plans/2026-03-19-factor-pool-boundary-refactor-design.md`
+  - [x] Slice 1：storage/bootstrap wiring 已抽出到 `src/factor_pool/storage.py`
+  - [ ] Slice 2：write/query/constraint façade delegation 与文档收口
 - [ ] `Orchestrator Boundary Refactor`
   - 见 `docs/plans/2026-03-19-orchestrator-boundary-refactor-design.md`
+  - [x] Slice 1：`config.py / runtime.py / control_plane.py` 已进入主干，package root 保持 compatibility façade
+  - [ ] Slice 2：剩余 caller/doc seam 收口与 facade 进一步瘦身
 - [ ] 总顺序与依赖控制
   - 见 `docs/plans/2026-03-19-refactor-roadmap.md`
 

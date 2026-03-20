@@ -29,7 +29,7 @@ Last Reviewed: 2026-03-20
 | `03_architecture-overview.md` | active | 当前系统总览入口 |
 | `10_authority-model.md` | active | 权限边界主设计，明确“扩大 hypothesis space，不扩大 execution power” |
 | `11_interface-contracts.md` | implemented | 已明确 canonical objects 与 transitional objects，但代码主干仍主要消费兼容对象；Stage I/O TypedDicts 已建立（src/schemas/stage_io.py），12个节点返回类型全部收紧为 partial update，{**state} 扩散已消除 |
-| `12_orchestrator.md` | implemented/partial | 主图已存在，且已开始写入最小 control-plane state；主图已拆分为包（src/core/orchestrator/），graph.py/nodes/**/_context.py 分离；当前审批链已切到 `report -> human_gate` + control-plane 决策轮询 |
+| `12_orchestrator.md` | implemented/partial | 主图已存在，且已开始写入最小 control-plane state；主图已拆分为包（src/core/orchestrator/），当前已引入 `config.py / runtime.py / control_plane.py`，并保留 package-root compatibility facade；审批链已切到 `report -> human_gate` + control-plane 决策轮询 |
 | `13_control-plane.md` | implemented/partial | 最小 `state_store` 已落地，但稳定读模型和审计面仍未完全收口 |
 | `20_stage-1-market-context.md` | implemented/partial | Stage 1 已进入主干 |
 | `21_stage-2-hypothesis-expansion.md` | implemented/partial | 四个活跃子空间（FACTOR_ALGEBRA / SYMBOLIC_MUTATION / CROSS_MARKET / NARRATIVE_MINING）与 regime 基础设施层已进入主干；ConstraintChecker/RegimeFilter/SynthesisAgent/SymbolicMutator/RegimeDetector 已落地，SubspaceScheduler Thompson Sampling 完整；但 AlphaResearcher 仍为纯 LLM 调用，Stage 2 对 MCP/RSS 的主动消费路径尚未收口 |
@@ -37,7 +37,7 @@ Last Reviewed: 2026-03-20
 | `23_stage-4-execution.md` | implemented/partial | 已收敛到 `src/execution/` 主路径，report contract 仍未完全收口 |
 | `24_stage-5-judgment.md` | implemented/partial | canonical runtime 收敛到 `src/agents/judgment/` 包，FailureMode enum 9 种完全对齐，CriticVerdict.regime_at_judgment 字段已添加；`execution_succeeded` 已进入 report/pool 语义层，但仍有旧 `passed` 兼容字段需要继续收口 |
 | `25_stage-45-golden-path.md` | active | 当前 Stage 4→5 收口入口 |
-| `14_factor-pool.md` | implemented | richer metadata 写回已进入主干，FactorPoolRecord.subspace_origin 已加入，register_factor() 已支持 note 参数，Stage 5 judgment_node 已传入 note，subspace_origin 已进入主路径写回；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例 |
+| `14_factor-pool.md` | implemented/partial | richer metadata 写回已进入主干，FactorPoolRecord.subspace_origin 已加入，register_factor() 已支持 note 参数，Stage 5 judgment_node 已传入 note，subspace_origin 已进入主路径写回；register() 废弃方法已彻底删除（零调用者），硬编码阈值全部迁移到 THRESHOLDS 单例；当前已抽出 `storage.py / factor_writer.py / queries.py / similarity.py / constraint_store.py`，`pool.py` 正在收口为 façade |
 | `15_data-sources.md` | implemented/partial | 价量 + `roe` + `daily_basic` 扩展字段已进入 runtime capability；其余数据源继续分层推进 |
 | `../futures/terminal-dashboard.md` | planned/partial | 已移出 active design 层；CLI/API 最小实现已有，但更完整的 Dashboard 仍未开始 |
 | `30_agent-team.md` | active | Agent 角色与边界已拆出 |

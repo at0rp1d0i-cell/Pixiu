@@ -9,7 +9,12 @@ Last Reviewed: 2026-03-18
 > 版本：2.0
 > 创建：2026-03-07
 > 前置依赖：`11_interface-contracts.md`
-> 文件位置：`src/factor_pool/pool.py`（扩展）
+> 文件位置：`src/factor_pool/`（当前主干为 `pool.py + storage.py + factor_writer.py + queries.py + similarity.py + constraint_store.py`）
+
+当前实现备注：
+- `src/factor_pool/pool.py` 仍保留为 façade 与兼容入口
+- Chroma bootstrap / in-memory fallback / collection wiring 已抽到 `storage.py`
+- factor 写入、query、similarity、constraint 逻辑正在向独立模块收口
 
 ---
 

@@ -9,7 +9,13 @@ Last Reviewed: 2026-03-20
 > 版本：2.0
 > 创建：2026-03-07
 > 前置依赖：`../overview/03_architecture-overview.md`、`11_interface-contracts.md`
-> 文件位置：`src/core/orchestrator/`（`graph.py + nodes/ + _entrypoints.py`）
+> 文件位置：`src/core/orchestrator/`（当前主干为 `graph.py + nodes/ + _entrypoints.py + config.py + runtime.py + control_plane.py`）
+
+当前实现备注：
+- `src/core/orchestrator/__init__.py` 仍然保留为 compatibility façade / re-export 层
+- 运行时配置已开始收口到 `config.py`
+- 调度器、graph cache、当前 run 等可变运行时状态已开始收口到 `runtime.py`
+- run record / snapshot / CIO report 持久化辅助逻辑已开始收口到 `control_plane.py`
 
 ---
 
