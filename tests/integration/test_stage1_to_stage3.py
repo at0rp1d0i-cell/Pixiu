@@ -188,7 +188,7 @@ class TestE2EStage1ToStage3:
         # ── Stage 3: PreFilter ──
         mock_llm = MagicMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-        with patch("src.core.orchestrator.get_factor_pool", return_value=_make_mock_pool()):
+        with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=_make_mock_pool()):
             with patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm):
                 stage3_result = orch_prefilter(state_after_s2)
 

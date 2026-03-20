@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 import src.core.orchestrator as orchestrator
-import src.core.orchestrator.graph as graph_mod
+from src.core.orchestrator import config as orchestrator_config
+from src.core.orchestrator import control_plane as orchestrator_control_plane
+from src.core.orchestrator import runtime as orchestrator_runtime
 from src.core.orchestrator._entrypoints import run_evolve, run_single
 from src.control_plane.state_store import StateStore
 
@@ -34,12 +36,8 @@ async def _run_entrypoint(
         store = StateStore(tmp_path / "state_store.sqlite")
         graph = _FakeGraph(result)
 
-        monkeypatch.setattr(orchestrator, "get_graph", lambda: graph)
-        monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-        monkeypatch.setattr(orchestrator, "_current_run_id", None)
-        monkeypatch.setattr(orchestrator, "MAX_ROUNDS", orchestrator.MAX_ROUNDS)
-        monkeypatch.setattr(orchestrator, "ACTIVE_ISLANDS", list(orchestrator.ACTIVE_ISLANDS))
-        monkeypatch.setattr(graph_mod, "_graph_config", None)
+        monkeypatch.setattr(orchestrator_runtime, "get_graph", lambda: graph)
+        monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
 
         update_calls: list[tuple[str, dict]] = []
         original_update_run = store.update_run
@@ -56,9 +54,9 @@ async def _run_entrypoint(
             "graph": graph,
             "store": store,
             "update_calls": update_calls,
-            "max_rounds": orchestrator.MAX_ROUNDS,
-            "active_islands": list(orchestrator.ACTIVE_ISLANDS),
-            "graph_config": graph_mod._graph_config,
+            "max_rounds": orchestrator_config.MAX_ROUNDS,
+            "active_islands": list(orchestrator_config.ACTIVE_ISLANDS),
+            "graph_config": orchestrator_runtime.get_graph_config(),
         }
 
 
@@ -74,12 +72,8 @@ async def _run_failing_entrypoint(
         store = StateStore(tmp_path / "state_store.sqlite")
         graph = _FailingGraph(exc)
 
-        monkeypatch.setattr(orchestrator, "get_graph", lambda: graph)
-        monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-        monkeypatch.setattr(orchestrator, "_current_run_id", None)
-        monkeypatch.setattr(orchestrator, "MAX_ROUNDS", orchestrator.MAX_ROUNDS)
-        monkeypatch.setattr(orchestrator, "ACTIVE_ISLANDS", list(orchestrator.ACTIVE_ISLANDS))
-        monkeypatch.setattr(graph_mod, "_graph_config", None)
+        monkeypatch.setattr(orchestrator_runtime, "get_graph", lambda: graph)
+        monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
 
         with pytest.raises(type(exc), match=str(exc)):
             await entrypoint(**kwargs)

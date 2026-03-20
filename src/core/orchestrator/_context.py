@@ -1,16 +1,10 @@
 """
-Infrastructure helpers: singleton getters, run record management, snapshots.
-Also holds node-name constants (imported by both graph.py and node files).
+Node-name constants shared by graph.py and node files.
 
-Note: _ensure_run_record, _update_run_record, _write_snapshot, _persist_cio_report
-are defined in src.core.orchestrator (__init__.py) so that test monkeypatching
-targets the correct namespace. Node files and graph.py import those via
-`import src.core.orchestrator as _orch`.
+Runtime helpers and run-record management now live in dedicated modules:
+`config.py`, `runtime.py`, and `control_plane.py`.
 """
-import logging
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────
 # 节点名称常量

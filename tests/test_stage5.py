@@ -275,8 +275,8 @@ def test_judgment_node_passes_hypothesis_to_pool():
     )
     pool = _StubPoolWriteback()
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         judgment_node(state)
 
     assert len(pool.calls) == 1, "应有一次 register_factor 调用"
@@ -300,8 +300,8 @@ def test_judgment_node_calls_pool_when_register_to_pool_true():
     )
     pool = _StubPoolWriteback()
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         judgment_node(state)
 
     assert len(pool.calls) == 1
@@ -320,8 +320,8 @@ def test_judgment_node_returns_verdicts_and_risk_reports():
     )
     pool = _StubPoolWriteback()
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         result = judgment_node(state)
 
     assert "critic_verdicts" in result
@@ -349,8 +349,8 @@ def test_judgment_node_records_execution_error_constraint_as_warning():
     )
     pool = _StubPoolWriteback()
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         judgment_node(state)
 
     assert len(pool.calls) == 1
@@ -371,7 +371,7 @@ def test_judgment_node_empty_reports_returns_empty():
         critic_verdicts=[],
     )
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=_StubPoolWriteback()):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=_StubPoolWriteback()):
         result = judgment_node(state)
 
     assert result["critic_verdicts"] == []

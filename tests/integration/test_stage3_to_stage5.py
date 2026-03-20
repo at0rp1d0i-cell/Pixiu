@@ -106,8 +106,6 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
     - report_node 生成 CIOReport，设置 awaiting_human_approval=True
     """
     from src.control_plane.state_store import StateStore
-    import src.core.orchestrator as orchestrator
-
     # 准备 3 个 notes，其中 1 个使用无效公式（负偏移，Validator 应拒绝）
     valid_note_1 = _make_note("momentum_001", formula="Ref($close, 5) / $close - 1")
     valid_note_2 = _make_note("momentum_002", formula="Mean($volume, 10) / Mean($volume, 30) - 1")
@@ -155,8 +153,8 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
     stub_pool = _StubPool()
 
     with patch("src.execution.coder.DockerRunner.run_python", new=AsyncMock(return_value=exec_result)), \
-         patch("src.core.orchestrator.get_factor_pool", return_value=stub_pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+         patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=stub_pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         stage4_result = coder_node(state_after_prefilter)
 
     state_after_coder = state_after_prefilter.model_copy(update=stage4_result)
@@ -164,8 +162,8 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
     assert all(r.factor_id for r in state_after_coder.backtest_reports)
 
     # === Stage 5a: judgment_node ===
-    with patch("src.core.orchestrator.get_factor_pool", return_value=stub_pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=stub_pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         stage5a_result = judgment_node(state_after_coder)
 
     state_after_judgment = state_after_coder.model_copy(update=stage5a_result)
@@ -182,7 +180,7 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
         assert call["hypothesis"], f"hypothesis 不应为空，实际: {call['hypothesis']!r}"
 
     # === Stage 5b: portfolio_node ===
-    with patch("src.core.orchestrator.get_factor_pool", return_value=stub_pool):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=stub_pool):
         stage5b_result = portfolio_node(state_after_judgment)
 
     state_after_portfolio = state_after_judgment.model_copy(update=stage5b_result)
@@ -193,12 +191,15 @@ def test_prefilter_to_report_node_full_pipeline(tmp_path, monkeypatch):
     db_path = tmp_path / "state_store.sqlite"
     store = StateStore(db_path)
     run = store.create_run(mode="integration_test")
+    from src.core.orchestrator import control_plane as orchestrator_control_plane
+    from src.core.orchestrator import runtime as orchestrator_runtime
 
-    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
-    monkeypatch.setattr(orchestrator, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    orchestrator_runtime.set_current_run_id(run.run_id)
+    from src.core.orchestrator import config as orchestrator_config
+    monkeypatch.setattr(orchestrator_config, "REPORTS_DIR", tmp_path / "reports")
 
-    with patch("src.core.orchestrator.get_factor_pool", return_value=stub_pool):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=stub_pool):
         stage5c_result = report_node(state_after_portfolio)
 
     final_state = state_after_portfolio.model_copy(update=stage5c_result)
@@ -238,8 +239,8 @@ def test_coder_node_handles_multiple_notes_independently(tmp_path):
     exec_result = _make_exec_result(sharpe=2.5)
 
     with patch("src.execution.coder.DockerRunner.run_python", new=AsyncMock(return_value=exec_result)), \
-         patch("src.core.orchestrator.get_factor_pool", return_value=_StubPool()), \
-         patch("src.core.orchestrator._write_snapshot"):
+         patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=_StubPool()), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         result = coder_node(state)
 
     assert len(result["backtest_reports"]) == 2

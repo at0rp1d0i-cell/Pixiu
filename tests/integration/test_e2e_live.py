@@ -81,7 +81,7 @@ def _make_mock_pool():
 # E2E Test: Stage 1 → 2 → 3 → 5
 # ─────────────────────────────────────────────────────────
 
-def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
+def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard, monkeypatch):
     """
     完整 e2e 流程（Stage 4 用预构造 BacktestReport 绕过）：
 
@@ -103,7 +103,7 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
 
     # ── Stage 1: 真实 LLM + 真实 MCP ──
     print("\n[E2E] Stage 1: 生成市场上下文...")
-    with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=mock_pool):
         s1_result = market_context_node(AgentState(current_round=1))
 
     memo: MarketContextMemo = s1_result.get("market_context")
@@ -140,7 +140,7 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
     mock_llm = MagicMock()
     from unittest.mock import AsyncMock
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM not available"))
-    with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool), \
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=mock_pool), \
          patch("src.agents.prefilter.build_researcher_llm", return_value=mock_llm):
         s3_result = prefilter_node(state)
 
@@ -161,8 +161,8 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
 
     # ── Stage 5a: judgment_node（纯确定性）──
     print("\n[E2E] Stage 5a: judgment...")
-    with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool), \
-         patch("src.core.orchestrator._write_snapshot"):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=mock_pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"):
         s5a_result = judgment_node(state)
 
     verdicts = s5a_result.get("critic_verdicts", [])
@@ -173,7 +173,7 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
 
     # ── Stage 5b: portfolio_node ──
     print("\n[E2E] Stage 5b: portfolio...")
-    with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool):
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=mock_pool):
         s5b_result = portfolio_node(state)
 
     alloc = s5b_result.get("portfolio_allocation")
@@ -185,16 +185,17 @@ def test_e2e_stage1_to_stage5(tmp_path, orchestrator_state_guard):
     # ── Stage 5c: report_node ──
     print("\n[E2E] Stage 5c: report...")
     from src.control_plane.state_store import StateStore
-    import src.core.orchestrator as orchestrator
+    from src.core.orchestrator import control_plane as orchestrator_control_plane
+    from src.core.orchestrator import runtime as orchestrator_runtime
 
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="e2e_test")
 
     with orchestrator_state_guard(reports_dir=tmp_path / "reports"):
-        orchestrator.get_state_store = lambda: store
-        orchestrator._current_run_id = run.run_id
+        monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+        orchestrator_runtime.set_current_run_id(run.run_id)
 
-        with patch("src.core.orchestrator.get_factor_pool", return_value=mock_pool):
+        with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=mock_pool):
             s5c_result = report_node(state)
 
     cio = s5c_result.get("cio_report")

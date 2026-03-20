@@ -48,8 +48,8 @@ def coder_node(state: AgentState) -> CoderOutput:
     """
     from src.execution.coder import Coder
     from src.schemas.backtest import BacktestReport, BacktestMetrics
-    import src.core.orchestrator as _orch
-    _write_snapshot = _orch._write_snapshot
+    from .. import control_plane as _control_plane
+    _write_snapshot = _control_plane._write_snapshot
 
     notes = state.approved_notes
     if not notes:

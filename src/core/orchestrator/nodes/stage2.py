@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
     """Stage 2: 并行调用所有 Island 的 AlphaResearcher，展开 Batch。"""
     from src.agents.researcher import hypothesis_gen_node as _gen_node
-    import src.core.orchestrator as _orch_s2
-    get_scheduler = _orch_s2.get_scheduler
+    from .. import config as _config
+    from .. import runtime as _runtime
 
     logger.info("[Stage 2] 并行生成假设... (Round %d)", state.current_round)
 
-    scheduler = get_scheduler()
-    active = getattr(scheduler, "get_active_islands", lambda: _orch_s2.ACTIVE_ISLANDS)()
+    scheduler = _runtime.get_scheduler()
+    active = getattr(scheduler, "get_active_islands", lambda: _config.ACTIVE_ISLANDS)()
 
     enriched = dict(state)
     enriched["active_islands"] = active

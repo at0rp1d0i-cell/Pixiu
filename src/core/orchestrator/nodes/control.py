@@ -12,14 +12,14 @@ logger = logging.getLogger(__name__)
 
 def human_gate_node(state: AgentState) -> HumanGateOutput:
     """Human Gate: 通过 control plane 轮询人类决策，支持跨进程审批。"""
-    import src.core.orchestrator as _orch
+    from .. import control_plane as _control_plane
 
-    run_id = _orch._ensure_run_record()
+    run_id = _control_plane._ensure_run_record()
     if not run_id:
         logger.warning("[Human Gate] 缺少 run_id，默认批准继续")
         return {"human_decision": "approve", "awaiting_human_approval": False}
 
-    store = _orch.get_state_store()
+    store = _control_plane.get_state_store()
     poll_interval = float(os.getenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "1.0"))
     timeout_sec = float(os.getenv("PIXIU_HUMAN_GATE_TIMEOUT_SEC", "0"))
     started_at = time.monotonic()
@@ -36,20 +36,20 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
                 }
             )
             if decision.action == "stop":
-                _orch._update_run_record(
-                    _orch.NODE_HUMAN_GATE,
+                _control_plane._update_run_record(
+                    "human_gate",
                     status="stopped",
                     current_round=state.current_round,
                 )
             else:
-                _orch._update_run_record(
-                    _orch.NODE_HUMAN_GATE,
+                _control_plane._update_run_record(
+                    "human_gate",
                     status="running",
                     current_round=state.current_round,
                 )
-            _orch._write_snapshot(
+            _control_plane._write_snapshot(
                 next_state,
-                _orch.NODE_HUMAN_GATE,
+                "human_gate",
                 awaiting_human_approval=False,
             )
             return {
@@ -62,14 +62,14 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
             next_state = state.model_copy(
                 update={"human_decision": "stop", "awaiting_human_approval": False}
             )
-            _orch._update_run_record(
-                _orch.NODE_HUMAN_GATE,
+            _control_plane._update_run_record(
+                "human_gate",
                 status="stopped",
                 current_round=state.current_round,
             )
-            _orch._write_snapshot(
+            _control_plane._write_snapshot(
                 next_state,
-                _orch.NODE_HUMAN_GATE,
+                "human_gate",
                 awaiting_human_approval=False,
             )
             return {"human_decision": "stop", "awaiting_human_approval": False}
@@ -81,10 +81,10 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
     """轮次控制：更新调度器，清空本轮状态，递增 current_round。"""
     from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
     from src.schemas.hypothesis import ExplorationSubspace
-    import src.core.orchestrator as _orch
-    get_scheduler = _orch.get_scheduler
+    from .. import control_plane as _control_plane
+    from .. import runtime as _runtime
 
-    scheduler = get_scheduler()
+    scheduler = _runtime.get_scheduler()
 
     epoch_island = None
     for verdict in state.critic_verdicts:
@@ -164,8 +164,8 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
     except Exception as _snap_exc:
         logger.warning("[Loop Control] 快照写入异常: %s", _snap_exc)
 
-    _orch._update_run_record(
-        _orch.NODE_LOOP_CONTROL,
+    _control_plane._update_run_record(
+        "loop_control",
         status="running",
         current_round=next_round,
     )

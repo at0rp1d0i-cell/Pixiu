@@ -183,7 +183,7 @@ class TestLoopControlNode:
     def test_increments_round(self):
         """current_round 应递增。"""
         state = _make_state(current_round=3)
-        with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
             mock_get_sched.return_value = MagicMock()
             result = loop_control_node(state)
         assert result["current_round"] == 4
@@ -210,7 +210,7 @@ class TestLoopControlNode:
             "backtest_reports": [_make_report(2.0)],
             "critic_verdicts": [_make_verdict(True)],
         })
-        with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
             mock_get_sched.return_value = MagicMock()
             result = loop_control_node(state)
 
@@ -231,7 +231,7 @@ class TestLoopControlNode:
             backtest_reports=[_make_report(3.0, passed=True)],
             critic_verdicts=[_make_verdict(True)],
         )
-        with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
             mock_sched = MagicMock()
             mock_get_sched.return_value = mock_sched
             loop_control_node(state)
@@ -245,7 +245,7 @@ class TestLoopControlNode:
             backtest_reports=[_make_report(0.5, passed=False)],
             critic_verdicts=[_make_verdict(False)],
         )
-        with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
             mock_sched = MagicMock()
             mock_get_sched.return_value = mock_sched
             loop_control_node(state)
@@ -256,8 +256,11 @@ class TestLoopControlNode:
 def test_human_gate_consumes_control_plane_decision(tmp_path, monkeypatch):
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="evolve")
-    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
+    from src.core.orchestrator import control_plane as orchestrator_control_plane
+    from src.core.orchestrator import runtime as orchestrator_runtime
+
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    orchestrator_runtime.set_current_run_id(run.run_id)
 
     from src.schemas.control_plane import HumanDecisionRecord
 
@@ -345,7 +348,7 @@ class TestLoopControlSnapshotWritten:
                     ],
                 }
             })
-            with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+            with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
                 mock_get_sched.return_value = MagicMock()
                 with patch("src.factor_pool.pool.get_factor_pool") as mock_pool:
                     mock_pool.return_value = MagicMock(
@@ -424,7 +427,7 @@ class TestLoopControlSnapshotWritten:
                 critic_verdicts=[failed_verdict],
             )
 
-            with patch("src.core.orchestrator.get_scheduler") as mock_get_sched:
+            with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
                 mock_get_sched.return_value = MagicMock()
                 with patch("src.factor_pool.pool.get_factor_pool") as mock_pool:
                     mock_pool.return_value = MagicMock(

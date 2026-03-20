@@ -6,6 +6,8 @@ import logging
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from . import config as _config
+from . import runtime as _runtime
 from src.schemas.state import AgentState
 from src.core.orchestrator._context import (
     NODE_MARKET_CONTEXT,
@@ -37,10 +39,6 @@ from src.core.orchestrator.nodes import (
 )
 
 logger = logging.getLogger(__name__)
-# REPORT_EVERY_N_ROUNDS and MAX_ROUNDS are read dynamically from src.core.orchestrator.__init__
-# to support test monkeypatching
-
-
 # ─────────────────────────────────────────────────────────
 # 条件路由函数
 # ─────────────────────────────────────────────────────────
@@ -70,8 +68,7 @@ def route_after_judgment(state: AgentState) -> str:
 
 def route_after_portfolio(state: AgentState) -> str:
     """每 N 轮或有重大新发现时生成报告。"""
-    import src.core.orchestrator as _orch_mod
-    report_every = _orch_mod.REPORT_EVERY_N_ROUNDS
+    report_every = _config.REPORT_EVERY_N_ROUNDS
     if state.current_round > 0 and state.current_round % report_every == 0:
         return NODE_REPORT
     from src.schemas.thresholds import THRESHOLDS
@@ -98,8 +95,7 @@ def route_after_human(state: AgentState) -> str:
 
 
 def route_loop(state: AgentState) -> str:
-    import src.core.orchestrator as _orch_mod
-    max_rounds = _orch_mod.MAX_ROUNDS
+    max_rounds = _config.MAX_ROUNDS
     if state.current_round >= max_rounds:
         logger.info("[Route] loop_control → END（达到最大轮次 %d）", max_rounds)
         return END
@@ -109,10 +105,6 @@ def route_loop(state: AgentState) -> str:
 # ─────────────────────────────────────────────────────────
 # 图构建
 # ─────────────────────────────────────────────────────────
-_graph = None
-_graph_config = None
-
-
 def build_graph():
     """构建完整 v2 LangGraph 图。"""
     graph = StateGraph(AgentState)
@@ -167,13 +159,13 @@ def build_graph():
 
 def get_graph():
     """获取编译好的图单例（供 CLI 的 approve/redirect/stop 注入状态）。"""
-    import src.core.orchestrator as _orch_mod
-    if _orch_mod._graph is None:
-        _orch_mod._graph = build_graph()
-    return _orch_mod._graph
+    graph = _runtime.get_graph()
+    if graph is None:
+        graph = build_graph()
+        _runtime.set_graph(graph)
+    return graph
 
 
 def get_latest_config() -> dict:
     """获取最近一次 run 的 LangGraph config（供 CLI 注入 human_decision）。"""
-    global _graph_config
-    return _graph_config or {}
+    return _runtime.get_graph_config()

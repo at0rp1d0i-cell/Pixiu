@@ -16,6 +16,8 @@ from src.api import server
 from src.cli import main as cli_main
 from src.control_plane.state_store import StateStore
 from src.core import orchestrator
+from src.core.orchestrator import control_plane as orchestrator_control_plane
+from src.core.orchestrator import runtime as orchestrator_runtime
 from src.core.orchestrator import coder_node, judgment_node, portfolio_node, report_node
 from src.schemas.backtest import BacktestMetrics, BacktestReport
 from src.schemas.control_plane import ArtifactRecord, HumanDecisionRecord, RunSnapshot
@@ -302,8 +304,8 @@ def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(
         )
     )
     monkeypatch.setattr(server, "_get_state_store", lambda: store)
-    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    orchestrator_runtime.set_current_run_id(run.run_id)
 
     payload = server.post_approve(server.ApproveRequest(action=action))
     assert payload == {"ok": True, "action": action}
@@ -447,12 +449,13 @@ def test_orchestrator_writes_state_store_snapshot_and_report_artifact(tmp_path, 
     expected_report = _make_orch_report(note)
     pool = _StubPoolOrch()
 
-    monkeypatch.setattr(orchestrator, "get_state_store", lambda: store)
-    monkeypatch.setattr(orchestrator, "_current_run_id", run.run_id)
-    monkeypatch.setattr(orchestrator, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    orchestrator_runtime.set_current_run_id(run.run_id)
+    from src.core.orchestrator import config as orchestrator_config
+    monkeypatch.setattr(orchestrator_config, "REPORTS_DIR", tmp_path / "reports")
 
     with patch("src.execution.coder.Coder") as mock_coder_cls, patch(
-        "src.core.orchestrator.get_factor_pool", return_value=pool
+        "src.core.orchestrator.control_plane.get_factor_pool", return_value=pool
     ):
         mock_coder = mock_coder_cls.return_value
         mock_coder.run_backtest = AsyncMock(return_value=expected_report)

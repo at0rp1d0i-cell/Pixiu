@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 def judgment_node(state: AgentState) -> JudgmentOutput:
     """Stage 5: Critic + RiskAuditor + FactorPool 写入。"""
     from src.agents.judgment import Critic, RiskAuditor, ConstraintExtractor
-    import src.core.orchestrator as _orch
-    get_factor_pool = _orch.get_factor_pool
-    _write_snapshot = _orch._write_snapshot
+    from .. import control_plane as _control_plane
+    get_factor_pool = _control_plane.get_factor_pool
+    _write_snapshot = _control_plane._write_snapshot
 
     if not state.backtest_reports:
         logger.warning("[Stage 5] 无回测报告，跳过 Judgment")
@@ -89,8 +89,8 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
 def portfolio_node(state: AgentState) -> PortfolioOutput:
     """Stage 5b: PortfolioManager 更新组合权重。"""
     from src.agents.judgment import PortfolioManager
-    import src.core.orchestrator as _orch
-    get_factor_pool = _orch.get_factor_pool
+    from .. import control_plane as _control_plane
+    get_factor_pool = _control_plane.get_factor_pool
 
     logger.info("[Stage 5b] 更新组合权重...")
 
@@ -111,10 +111,10 @@ def portfolio_node(state: AgentState) -> PortfolioOutput:
 def report_node(state: AgentState) -> ReportOutput:
     """Stage 5c: ReportWriter 生成 CIOReport，标记等待人类审批。"""
     from src.agents.judgment import ReportWriter
-    import src.core.orchestrator as _orch
-    _persist_cio_report = _orch._persist_cio_report
-    _update_run_record = _orch._update_run_record
-    _write_snapshot = _orch._write_snapshot
+    from .. import control_plane as _control_plane
+    _persist_cio_report = _control_plane._persist_cio_report
+    _update_run_record = _control_plane._update_run_record
+    _write_snapshot = _control_plane._write_snapshot
 
     logger.info("[Stage 5c] 生成 CIO 报告 (Round %d)...", state.current_round)
 
