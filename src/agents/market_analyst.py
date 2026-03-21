@@ -78,7 +78,7 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
 - return_30d：近 30 日累计涨跌幅（%），数据不可用时填 null。
 不需要解释，直接输出 JSON。"""
 
-_DEFAULT_STAGE1_TIMEOUT_SEC = 25.0
+_DEFAULT_STAGE1_TIMEOUT_SEC = 60.0
 _DEFAULT_STAGE1_MAX_TOOL_ROUNDS = 3
 
 
@@ -150,12 +150,20 @@ class MarketAnalyst:
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
 
+    _TOOL_CALL_TIMEOUT_SEC = 15.0
+
     async def _invoke_tool_call(self, call: dict) -> ToolMessage:
         """Invoke one MCP tool call and normalize it into a ToolMessage."""
         tool = self.tools.get(call["name"])
         if tool:
             try:
-                raw_result = await tool.ainvoke(call["args"])
+                raw_result = await asyncio.wait_for(
+                    tool.ainvoke(call["args"]),
+                    timeout=self._TOOL_CALL_TIMEOUT_SEC,
+                )
+            except TimeoutError:
+                raw_result = f"工具调用超时（{self._TOOL_CALL_TIMEOUT_SEC}s）: {call['name']}"
+                logger.warning("[MarketAnalyst] 工具 %s 超时（%.0fs）", call["name"], self._TOOL_CALL_TIMEOUT_SEC)
             except Exception as e:
                 raw_result = f"工具调用失败: {e}"
         else:

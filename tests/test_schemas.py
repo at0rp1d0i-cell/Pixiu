@@ -644,7 +644,7 @@ class TestEvaluation:
         assert "通过" in reason
 
     def test_sharpe_too_low(self):
-        m = BacktestMetricsLegacy(sharpe=2.0, ic=0.05, icir=0.6, turnover=20.0, parse_success=True)
+        m = BacktestMetricsLegacy(sharpe=0.2, ic=0.05, icir=0.6, turnover=20.0, parse_success=True)
         route, _ = _evaluate_legacy(m, False)
         assert route == "loop"
 
@@ -655,7 +655,7 @@ class TestEvaluation:
         assert "换手率" in reason
 
     def test_low_ic(self):
-        m = BacktestMetricsLegacy(sharpe=3.5, ic=0.005, icir=0.6, turnover=20.0, parse_success=True)
+        m = BacktestMetricsLegacy(sharpe=3.5, ic=0.001, icir=0.6, turnover=20.0, parse_success=True)
         route, reason = _evaluate_legacy(m, False)
         assert route == "loop"
         assert "IC" in reason

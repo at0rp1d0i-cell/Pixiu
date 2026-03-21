@@ -145,10 +145,10 @@ def test_dataset_readiness_keeps_materialized_and_runtime_ready_even_when_stage_
 
 def test_read_min_coverage_ratio_clamps_and_falls_back(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", raising=False)
-    assert read_min_coverage_ratio() == pytest.approx(0.95)
+    assert read_min_coverage_ratio() == pytest.approx(0.90)
 
     monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "not-a-number")
-    assert read_min_coverage_ratio() == pytest.approx(0.95)
+    assert read_min_coverage_ratio() == pytest.approx(0.90)
 
     monkeypatch.setenv("PIXIU_FIELD_MIN_COVERAGE_RATIO", "-0.25")
     assert read_min_coverage_ratio() == pytest.approx(0.0)

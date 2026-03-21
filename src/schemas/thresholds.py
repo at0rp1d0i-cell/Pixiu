@@ -2,9 +2,9 @@ from src.schemas import PixiuBase
 
 class CriticThresholds(PixiuBase):
     """可通过环境变量覆盖的阈值配置"""
-    min_sharpe: float = 2.67          # 基线 Sharpe
-    min_ic_mean: float = 0.02
-    min_icir: float = 0.30
+    min_sharpe: float = 0.50          # T+1 简单 Top-K 等权回测基线
+    min_ic_mean: float = 0.003        # 日频截面 IC，T+1 forward return
+    min_icir: float = 0.03            # IC / IC_std，日频真实范围
     max_turnover_rate: float = 0.50
     max_turnover: float = 0.50        # 兼容旧 critic / 测试命名
     max_drawdown: float = 0.25
