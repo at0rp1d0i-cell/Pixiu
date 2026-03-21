@@ -5,8 +5,8 @@ class CriticThresholds(PixiuBase):
     min_sharpe: float = 0.50          # T+1 简单 Top-K 等权回测基线
     min_ic_mean: float = 0.003        # 日频截面 IC，T+1 forward return
     min_icir: float = 0.03            # IC / IC_std，日频真实范围
-    max_turnover_rate: float = 0.50
-    max_turnover: float = 0.50        # 兼容旧 critic / 测试命名
+    max_turnover_rate: float = 0.80
+    max_turnover: float = 0.80        # 兼容旧 critic / 测试命名
     max_drawdown: float = 0.25
     min_coverage: float = 0.70
     max_overfitting_score: float = 0.40

@@ -298,24 +298,26 @@ async def get_macro_indicators() -> str:
     try:
         result = {}
 
-        # 制造业PMI
+        # 制造业PMI（数据源：国家统计局，非 jin10）
         try:
-            pmi_df = ak.macro_china_pmi_yearly()
+            pmi_df = ak.macro_china_pmi()
             result["pmi_manufacturing"] = pmi_df.tail(6).to_dict(orient="records")
         except Exception as e:
             result["pmi_manufacturing"] = {"error": str(e)}
 
-        # M2
+        # M2（数据源：央行货币供应量）
         try:
-            m2_df = ak.macro_china_m2_yearly()
-            result["m2_yoy"] = m2_df.tail(3).to_dict(orient="records")
+            m2_df = ak.macro_china_supply_of_money()
+            m2_cols = [c for c in ["统计时间", "货币和准货币（广义货币M2）同比增长"] if c in m2_df.columns]
+            result["m2_yoy"] = m2_df[m2_cols].tail(3).to_dict(orient="records") if m2_cols else m2_df.tail(3).to_dict(orient="records")
         except Exception as e:
             result["m2_yoy"] = {"error": str(e)}
 
-        # CPI
+        # CPI（数据源：国家统计局）
         try:
-            cpi_df = ak.macro_china_cpi_yearly()
-            result["cpi_yoy"] = cpi_df.tail(3).to_dict(orient="records")
+            cpi_df = ak.macro_china_cpi()
+            cpi_cols = [c for c in ["月份", "全国-当月", "全国-同比增长"] if c in cpi_df.columns]
+            result["cpi_yoy"] = cpi_df[cpi_cols].tail(3).to_dict(orient="records") if cpi_cols else cpi_df.tail(3).to_dict(orient="records")
         except Exception as e:
             result["cpi_yoy"] = {"error": str(e)}
 
@@ -781,36 +783,17 @@ async def get_sector_rotation_speed(top_n: int = 20, lookback_days: int = 5) -> 
     """
     try:
         top_n = min(max(top_n, 5), 50)
-        lookback_days = min(max(lookback_days, 1), 20)
 
-        # 获取概念板块即时行情（排名基准）
-        df_current = ak.stock_board_concept_name_em()
-        if df_current is None or df_current.empty:
-            return json.dumps({"error": "No concept board data"}, ensure_ascii=False)
+        # 使用行业资金流排行替代 push2 概念板块接口
+        df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        if df is None or df.empty:
+            return json.dumps({"error": "No sector fund flow data"}, ensure_ascii=False)
 
-        # 按涨跌幅降序排名
-        chg_col = next((c for c in ["涨跌幅", "涨跌额"] if c in df_current.columns), None)
-        name_col = next((c for c in ["板块名称", "名称"] if c in df_current.columns), None)
-        if not chg_col or not name_col:
-            return json.dumps({
-                "error": "Unexpected column layout",
-                "columns": list(df_current.columns),
-            }, ensure_ascii=False)
-
-        df_current = df_current.sort_values(chg_col, ascending=False).reset_index(drop=True)
-        df_current["current_rank"] = df_current.index + 1
-        df_top = df_current.head(top_n).copy()
-
-        # 尝试获取 N 日前历史涨跌幅用于对比排名
-        # stock_board_concept_hist_em 单次只能查一个板块，批量调用成本高
-        # 简化处理：返回当前排名 + 提示用历史接口单独查询
+        df = df.head(top_n)
         result = {
-            "lookback_days": lookback_days,
-            "note": (
-                "当前返回即时排名；历史排名对比需逐板块调用 stock_board_concept_hist_em，"
-                "建议在 researcher 端按需拉取单板块历史数据后自行计算 delta_rank。"
-            ),
-            "current_ranking": df_top[[name_col, chg_col, "current_rank"]].to_dict(orient="records"),
+            "data_source": "行业资金流排行（stock_sector_fund_flow_rank）",
+            "count": len(df),
+            "sectors": df.to_dict(orient="records"),
         }
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
@@ -835,12 +818,12 @@ async def get_north_bound_flow(days: int = 20) -> str:
     """
     try:
         days = min(max(days, 1), 60)
-        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向资金")
+        df = ak.stock_hsgt_hist_em(symbol="沪股通")
         if df is None or df.empty:
             return json.dumps({"error": "No north-bound flow data"}, ensure_ascii=False)
         df = df.tail(days)
         result = {
-            "data_source": "北向资金净流入（stock_hsgt_north_net_flow_in_em）",
+            "data_source": "北向资金净流入（stock_hsgt_hist_em 沪股通）",
             "days": days,
             "records": df.to_dict(orient="records"),
         }
@@ -868,14 +851,20 @@ async def get_volatility_index(days: int = 20) -> str:
     """
     try:
         days = min(max(days, 1), 60)
-        df = ak.stock_a_vix_em()
+        # 用上证指数日 K 线计算已实现波动率（替代不存在的 stock_a_vix_em）
+        fetch_days = days + 30  # 多取一些用于计算滚动波动率
+        df = ak.stock_zh_index_daily(symbol="sh000001")
         if df is None or df.empty:
-            return json.dumps({"error": "No volatility index data available"}, ensure_ascii=False)
+            return json.dumps({"error": "No index data for volatility calc"}, ensure_ascii=False)
+        df = df.tail(fetch_days).copy()
+        df["daily_return"] = df["close"].pct_change()
+        df["vol_20d"] = df["daily_return"].rolling(20).std() * (252 ** 0.5) * 100  # 年化 %
         df = df.tail(days)
+        cols = ["date", "close", "daily_return", "vol_20d"]
         result = {
-            "data_source": "A 股情绪波动指数（stock_a_vix_em）",
+            "data_source": "上证指数已实现波动率（20 日滚动年化）",
             "days": days,
-            "records": df.to_dict(orient="records"),
+            "records": df[cols].to_dict(orient="records"),
         }
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
