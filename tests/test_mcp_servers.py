@@ -257,7 +257,7 @@ def tools(mcp_client):
 
 @pytest.mark.integration
 def test_tools_loaded(tools):
-    """应加载 25 个工具（Phase 4A 扩展后）。"""
+    """应加载 27 个工具（Phase 4A 扩展后）。"""
     tool_names = [t.name for t in tools]
     # 原始 7 个工具
     original_tools = [
@@ -292,7 +292,7 @@ def test_tools_loaded(tools):
     ]
     for name in original_tools + phase4a_tools:
         assert name in tool_names, f"Missing tool: {name}"
-    assert len(tool_names) == 25, f"Expected 25 tools, got {len(tool_names)}: {tool_names}"
+    assert len(tool_names) == 27, f"Expected 27 tools, got {len(tool_names)}: {tool_names}"
 
 
 @pytest.mark.integration

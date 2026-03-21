@@ -915,6 +915,70 @@ async def get_top_list(query_date: str = "", top_n: int = 20) -> str:
 
 
 # ─────────────────────────────────────────────
+# 工具 26：全市场快讯电报（NARRATIVE_MINING 宏观与突发）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_market_telegraph(limit: int = 20) -> str:
+    """获取财联社即时电报/快讯，捕捉全市场突发新闻和宏观/行业叙事。
+
+    Args:
+        limit: 返回最近几条快讯，默认 20，最大 50。
+
+    返回字段：时间、标题、内容。
+    用途：NARRATIVE_MINING 宏观与行业突发事件信号；补充个股新闻无法覆盖的市场级宏大叙事。
+    """
+    try:
+        limit = min(max(limit, 1), 50)
+        df = ak.stock_telegraph_cls()
+        if df is None or df.empty:
+            return json.dumps({"error": "No telegraph data available"}, ensure_ascii=False)
+        cols = [c for c in ["发布时间", "标题", "内容"] if c in df.columns]
+        result_df = df[cols].head(limit) if cols else df.head(limit)
+        result = {
+            "count": len(result_df),
+            "telegraphs": result_df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_market_telegraph failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 27：国内股指期货实时基差（CROSS_MARKET 大盘情绪）
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_futures_basis() -> str:
+    """获取国内主要股指期货（IF/IH/IC/IM）实时行情，含基差/升贴水率。
+
+    返回字段：symbol（合约代码）、name（合约名称）、trade（最新价）、
+    changepercent（涨跌幅）、settlement（结算价）、pre_settlement（昨结）等。
+    用途：CROSS_MARKET 子空间情绪前瞻；深度贴水 = 极度悲观防守；升水 = 情绪狂热。
+    备注：基差需自行根据对应的现货指数（沪深300/上证50/中证500/中证1000）换算评估。
+    """
+    try:
+        df = ak.futures_zh_spot(symbol="CFFEX", market="FF", adjust="0")
+        if df is None or df.empty:
+            return json.dumps({"error": "No index futures data available"}, ensure_ascii=False)
+        
+        # 过滤出主流股指期货品种
+        df_filtered = df[df["symbol"].str.contains(r"^(IF|IH|IC|IM)\d{4}$", regex=True, na=False)]
+        result_df = df_filtered if not df_filtered.empty else df.head(20)
+        
+        cols = [c for c in ["symbol", "name", "trade", "changepercent", "settlement", "pre_settlement", "volume", "open_interest"] if c in result_df.columns]
+        final_df = result_df[cols] if cols else result_df
+        
+        result = {
+            "count": len(final_df),
+            "futures": final_df.to_dict(orient="records"),
+        }
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error("get_futures_basis failed: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
 # Server 启动入口
 # ─────────────────────────────────────────────
 if __name__ == "__main__":

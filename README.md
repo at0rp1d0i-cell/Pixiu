@@ -2,7 +2,7 @@
 
 **An LLM-native Alpha mining platform for quantitative research — not a simulated quant team, but a system designed around what LLMs actually do better than humans.**
 
-> 一个为 Agent 而设计的量化研究平台，不是让 AI 替代人类研究员，而是重新设计研究流程本身。
+> 一个为 Agent 设计的量化研究平台，不是让 AI 替代人类研究员，而是重新设计研究流程本身。
 
 ---
 

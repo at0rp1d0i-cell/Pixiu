@@ -242,7 +242,7 @@ class Validator:
                 continue
 
             if ch.isdigit():
-                number = re.match(r"\d+(?:\.\d+)?", expr[i:])
+                number = re.match(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", expr[i:])
                 if not number:
                     return False, f"数字字面量格式不合法：{expr[i: i + 8]}"
                 i += len(number.group())
@@ -362,7 +362,7 @@ class Validator:
         value = value.strip()
         if not value:
             return False
-        if re.fullmatch(r"\d+(?:\.\d+)?", value):
+        if re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", value):
             return False
         return any(ch in value for ch in ("$", "(", ")", "+", "-", "*", "/", "_"))
 
