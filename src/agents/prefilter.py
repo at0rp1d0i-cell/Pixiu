@@ -151,9 +151,29 @@ class Validator:
         self.allowed_fields = allowed_fields or set(capabilities.available_fields)
         self.approved_operators = approved_operators or set(capabilities.approved_operators)
 
+    # 数学常数 → 数值替换（LLM 常生成裸 e / pi，qlib 不识别）
+    _MATH_CONSTANTS = {"e": "2.71828", "pi": "3.14159"}
+
+    @staticmethod
+    def _normalize_formula(formula: str) -> str:
+        """将公式中的数学常数替换为数值字面量。"""
+        for name, value in Validator._MATH_CONSTANTS.items():
+            formula = re.sub(rf'(?<!\$)\b{name}\b(?!\w|\()', value, formula)
+        return formula
+
     def validate(self, note: FactorResearchNote) -> tuple[bool, str]:
         """返回 (passed: bool, reason: str)"""
         formula = note.final_formula or note.proposed_formula
+
+        # 规则 0：数学常数归一化
+        if formula:
+            normalized = self._normalize_formula(formula)
+            if normalized != formula:
+                if note.final_formula:
+                    note.final_formula = normalized
+                else:
+                    note.proposed_formula = normalized
+                formula = normalized
 
         # 规则 1：公式非空且长度合理
         if not formula or not (5 < len(formula) < 500):
