@@ -291,7 +291,9 @@ def test_alpha_researcher_composed_prompt_avoids_legacy_skill_contracts():
     system_message = captured_messages[0]
     assert "$roe" in system_message.content
     assert "FUNDAMENTAL_FIELDS_ENABLED" not in system_message.content
-    assert "CSRank" not in system_message.content
+    # CSRank 可以出现在 "不要使用" 的上下文中（skill 文件里的禁用提示）
+    # 但不应作为可用算子推荐
+    assert "CSRank(" not in system_message.content
     assert "get_island_best_factors" not in system_message.content
     assert "AKShare 工具" not in system_message.content
 

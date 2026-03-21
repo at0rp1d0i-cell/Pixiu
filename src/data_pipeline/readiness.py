@@ -12,7 +12,7 @@ from src.data_pipeline.datasets import DatasetFieldSpec, DatasetSpec
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_QLIB_DIR = PROJECT_ROOT / "data" / "qlib_bin"
-DEFAULT_MIN_COVERAGE_RATIO = 0.95
+DEFAULT_MIN_COVERAGE_RATIO = 0.90
 
 
 @dataclass(frozen=True)

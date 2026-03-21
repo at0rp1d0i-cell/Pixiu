@@ -117,7 +117,7 @@ def test_coder_invalid_formula(mock_note):
         report = asyncio.run(coder.run_backtest(mock_note))
 
     assert report.passed is False
-    assert report.execution_succeeded is True
+    assert report.execution_succeeded is False
     assert report.status == "failed"
     assert report.failure_stage == "run"
     assert "SyntaxError" in report.error_message

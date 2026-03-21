@@ -70,6 +70,17 @@ FINA_INDICATOR_DATASET = DatasetSpec(
     ),
     formula_fields=(
         DatasetFieldSpec("$roe", "roe", "fina_indicator", "roe", "净资产收益率", "fundamental", "experimental"),
+        DatasetFieldSpec("$roe_waa", "roe_waa", "fina_indicator", "roe_waa", "加权平均净资产收益率", "fundamental", "experimental"),
+        DatasetFieldSpec("$roe_dt", "roe_dt", "fina_indicator", "roe_dt", "扣非净资产收益率", "fundamental", "experimental"),
+        DatasetFieldSpec("$roa", "roa", "fina_indicator", "roa", "总资产报酬率", "fundamental", "experimental"),
+        DatasetFieldSpec("$eps", "eps", "fina_indicator", "eps", "每股收益", "fundamental", "experimental"),
+        DatasetFieldSpec("$dt_eps", "dt_eps", "fina_indicator", "dt_eps", "扣非每股收益", "fundamental", "experimental"),
+        DatasetFieldSpec("$netprofit_margin", "netprofit_margin", "fina_indicator", "netprofit_margin", "净利润率", "fundamental", "experimental"),
+        DatasetFieldSpec("$gross_margin", "gross_margin", "fina_indicator", "gross_margin", "毛利率", "fundamental", "experimental"),
+        DatasetFieldSpec("$current_ratio", "current_ratio", "fina_indicator", "current_ratio", "流动比率", "fundamental", "experimental"),
+        DatasetFieldSpec("$quick_ratio", "quick_ratio", "fina_indicator", "quick_ratio", "速动比率", "fundamental", "experimental"),
+        DatasetFieldSpec("$debt_to_assets", "debt_to_assets", "fina_indicator", "debt_to_assets", "资产负债率", "fundamental", "experimental"),
+        DatasetFieldSpec("$assets_turn", "assets_turn", "fina_indicator", "assets_turn", "总资产周转率", "fundamental", "experimental"),
     ),
     runtime_group="experimental",
 )

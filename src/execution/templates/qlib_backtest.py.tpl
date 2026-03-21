@@ -39,9 +39,8 @@ try:
     # 按日排名（截面）
     df["rank"] = df.groupby("datetime")["factor"].rank(ascending=False)
 
-    # IC 计算
-    df["ret_1d"] = df.groupby("instrument")["factor"].shift(-1)  # 用真实收益率替代
-    # 加载真实收益率
+    # 加载当日收益率，然后前移一天得到 T+1 收益率
+    # 因子用 T 日数据计算，收益用 T+1 日衡量，避免同日循环测量
     ret_fields = ["$close/Ref($close,1)-1"]
     ret_df = D.features(
         instruments,
@@ -50,24 +49,30 @@ try:
         end_time=END_DATE,
     ).reset_index().rename(columns={ret_fields[0]: "ret"})
     df = df.merge(ret_df, on=["instrument", "datetime"], how="left")
+
+    # T+1 前移：用次日收益率评估今日因子信号
+    df["fwd_ret"] = df.groupby("instrument")["ret"].shift(-1)
+    df = df.dropna(subset=["fwd_ret"])
+
     factor_coverage = (
         factor_df.groupby("datetime")["factor"].count()
         / ret_df.groupby("datetime")["ret"].count().replace(0, np.nan)
     ).replace([np.inf, -np.inf], np.nan).dropna()
     coverage = float(factor_coverage.mean()) if len(factor_coverage) > 0 else 0.0
 
+    # IC 计算：因子值 vs 次日收益率
     ic_series = df.groupby("datetime").apply(
-        lambda x: x["factor"].corr(x["ret"])
+        lambda x: x["factor"].corr(x["fwd_ret"])
     ).dropna()
 
     ic_mean = float(ic_series.mean())
     ic_std = float(ic_series.std())
     icir = float(ic_mean / ic_std) if ic_std > 0 else 0.0
 
-    # 简化回测：Top K 等权
+    # 简化回测：Top K 等权，使用次日收益率
     daily_returns = []
     for dt, group in df.groupby("datetime"):
-        top = group.nsmallest(TOPK, "rank")["ret"]
+        top = group.nsmallest(TOPK, "rank")["fwd_ret"]
         daily_returns.append(top.mean())
 
     daily_ret = pd.Series(daily_returns).dropna()

@@ -142,7 +142,7 @@ def test_formula_operator_specs_use_canonical_non_future_examples(tmp_path: Path
     operator_block = format_available_operators_for_prompt(capabilities)
 
     assert OPERATOR_SPECS_BY_NAME["Ref"].qlib_syntax == "Ref($field, N)"
-    assert OPERATOR_SPECS_BY_NAME["Rank"].qlib_syntax == "Rank($field)"
+    assert OPERATOR_SPECS_BY_NAME["Rank"].qlib_syntax == "Rank($field, N)"
     assert "Ref($field, -N)" not in operator_block
     assert "Ref($field, N)" in operator_block
 

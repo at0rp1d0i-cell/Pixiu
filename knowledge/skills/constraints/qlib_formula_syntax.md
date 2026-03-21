@@ -8,15 +8,29 @@
 
 当前可用字段**以运行时注入的可用字段列表为准**，不要假设某个字段一定存在。
 
-常见稳定基础字段通常包括：
+当前可用字段**以运行时注入的可用字段列表为准**，不要假设某个字段一定存在。
+
+常见稳定基础字段：
 
 ```text
 $open    $high    $low    $close    $volume    $vwap    $amount    $factor
 ```
 
+基本面扩展字段（运行时可能可用）：
+
+```text
+# 盈利能力
+$roe  $roe_waa  $roe_dt  $roa  $eps  $dt_eps  $netprofit_margin  $gross_margin
+# 偿债与效率
+$current_ratio  $quick_ratio  $debt_to_assets  $assets_turn
+# 估值与市场
+$pe_ttm  $pb  $turnover_rate  $float_mv
+```
+
 - 前缀 `$` 是必须的
 - 字段名区分大小写，全部小写
 - 如果当前运行时没有显式列出某个可选字段，就不要在公式里使用它
+- 基本面字段为日频（每日更新），可以直接和行情字段组合使用
 
 ---
 
@@ -40,13 +54,16 @@ $open    $high    $low    $close    $volume    $vwap    $amount    $factor
 | `Resi(expr, N)` | N 日线性回归残差 | `Resi($close, 20)` |
 | `WMA(expr, N)` | N 日加权移动均值 | `WMA($close, 10)` |
 | `EMA(expr, N)` | N 日指数移动均值 | `EMA($close, 12)` |
-| `Corr(e1, e2, N)` | N 日相关系数 | `Corr($close/Ref($close,1), $volume/Ref($volume,1), 20)` |
-| `Cov(e1, e2, N)` | N 日协方差 | `Cov($close, $volume, 10)` |
+| `Corr(expr1, expr2, N)` | N 日相关系数 | `Corr($close/Ref($close,1), $volume/Ref($volume,1), 20)` |
+| `Cov(expr1, expr2, N)` | N 日协方差 | `Cov($close, $volume, 10)` |
+| `Rank(expr, N)` | N 日时序排名（归一化到 [0,1]） | `Rank($close/Ref($close,1)-1, 20)` |
+| `Kurt(expr, N)` | N 日峰度（尾部风险） | `Kurt($close/Ref($close,1)-1, 20)` |
+| `Skew(expr, N)` | N 日偏度（收益分布不对称性） | `Skew($close/Ref($close,1)-1, 20)` |
+| `Med(expr, N)` | N 日中位数（比 Mean 更鲁棒） | `Med($volume, 20)` |
+| `Quantile(expr, N, q)` | N 日分位数（q 为 0~1） | `Quantile($close/Ref($close,1)-1, 20, 0.9)` |
 
 ### 截面算子
-| 算子 | 含义 |
-|---|---|
-| 以运行时 allowlist 为准 | 不要假设某个截面算子一定可用 |
+**当前没有可用的截面算子**。`Rank` 是时序算子，不是截面算子。不要使用 `CSRank`、`CSMean`、`CSZScore` 等截面算子。
 
 ### 数学算子
 | 算子 | 含义 |
@@ -73,6 +90,16 @@ Corr($close, $volume, 20
 
 # ❌ 不存在的算子
 MovingAverage($close, 5)   # 应该用 Mean
+Ts_Corr($close, $volume, 20)   # Ts_* 系列算子在当前 qlib 版本未注册，全部禁止
+Ts_Mean($close, 20)            # 同上，用 Mean 代替
+
+# ❌ Rank 缺少窗口参数
+Rank($close)   # 错误！Rank 是时序算子，需要 N：Rank($close, 20)
+
+# ❌ 裸数学常数 e（Validator 拦截：未知标识符）
+e * $close     # 错误！e 不是合法标识符
+Exp($close)    # 错误！Exp 算子未注册
+# 正确：直接用数字 2.71828，或用 Log/Power 等已有算子组合
 
 # ❌ 对数的参数可能为负
 Log($close - Ref($close, 1))   # 日收益率可能为负
@@ -126,7 +153,7 @@ Mean(Abs($close/Ref($close,1)-1) / ($volume * $close), 20)
 
 # 2. 量价背离因子（资金撤退信号）
 # 负相关 = 放量下跌 or 缩量上涨，均为弱势
-Corr(Rank($volume), Rank($close), 20)
+Corr(Rank($volume, 20), Rank($close, 20), 20)
 
 # 3. 波动率期限结构斜率（短期 vs 长期波动）
 # 短波 > 长波 = 近期异动，反转或趋势加速

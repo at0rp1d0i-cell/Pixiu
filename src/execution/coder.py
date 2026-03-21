@@ -218,7 +218,7 @@ class Coder:
             formula=formula,
             metrics=metrics,
             passed=passed,
-            execution_succeeded=True,
+            execution_succeeded=error_message is None,
             status="success" if error_message is None else "failed",
             failure_stage=None if error_message is None else "run",
             failure_reason=None if error_message is None else "backtest_error",
