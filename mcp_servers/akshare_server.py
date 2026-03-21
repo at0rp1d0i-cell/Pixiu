@@ -217,6 +217,9 @@ async def get_industry_pe(
 
         result = df.to_dict(orient="records")
         return json.dumps(result, ensure_ascii=False, default=str)
+    except (ValueError, KeyError) as e:
+        logger.warning("get_industry_pe upstream format issue (cninfo API may have changed): %s", e)
+        return json.dumps({"error": f"cninfo行业PE接口返回格式异常（上游问题），请稍后重试: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.error("get_industry_pe failed: %s", e)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -745,7 +748,7 @@ async def get_limit_down_pool(query_date: str = "") -> str:
     try:
         if not query_date:
             query_date = date.today().strftime("%Y%m%d")
-        df = ak.stock_dt_pool_em(date=query_date)
+        df = ak.stock_zt_pool_dtgc_em(date=query_date)
         if df is None or df.empty:
             return json.dumps({
                 "query_date": query_date,
@@ -894,7 +897,7 @@ async def get_top_list(query_date: str = "", top_n: int = 20) -> str:
             query_date = date.today().strftime("%Y%m%d")
         top_n = min(max(top_n, 1), 50)
 
-        df = ak.stock_lhb_detail_em(date=query_date)
+        df = ak.stock_lhb_detail_em(start_date=query_date, end_date=query_date)
         if df is None or df.empty:
             return json.dumps({
                 "query_date": query_date,
@@ -929,10 +932,10 @@ async def get_market_telegraph(limit: int = 20) -> str:
     """
     try:
         limit = min(max(limit, 1), 50)
-        df = ak.stock_telegraph_cls()
+        df = ak.stock_info_global_cls()
         if df is None or df.empty:
             return json.dumps({"error": "No telegraph data available"}, ensure_ascii=False)
-        cols = [c for c in ["发布时间", "标题", "内容"] if c in df.columns]
+        cols = [c for c in ["发布时间", "发布日期", "标题", "内容"] if c in df.columns]
         result_df = df[cols].head(limit) if cols else df.head(limit)
         result = {
             "count": len(result_df),
@@ -957,12 +960,12 @@ async def get_futures_basis() -> str:
     备注：基差需自行根据对应的现货指数（沪深300/上证50/中证500/中证1000）换算评估。
     """
     try:
-        df = ak.futures_zh_spot(symbol="CFFEX", market="FF", adjust="0")
+        df = ak.futures_zh_realtime()
         if df is None or df.empty:
             return json.dumps({"error": "No index futures data available"}, ensure_ascii=False)
         
         # 过滤出主流股指期货品种
-        df_filtered = df[df["symbol"].str.contains(r"^(IF|IH|IC|IM)\d{4}$", regex=True, na=False)]
+        df_filtered = df[df["symbol"].str.contains(r"^(IF|IH|IC|IM)", regex=True, na=False)]
         result_df = df_filtered if not df_filtered.empty else df.head(20)
         
         cols = [c for c in ["symbol", "name", "trade", "changepercent", "settlement", "pre_settlement", "volume", "open_interest"] if c in result_df.columns]
