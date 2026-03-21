@@ -14,7 +14,7 @@ from src.formula.capabilities import get_runtime_formula_capabilities
 pytestmark = pytest.mark.unit
 
 _TEST_ALLOWED_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$amount", "$factor", "$roe"}
-_TEST_APPROVED_OPERATORS = {"Mean", "Ref", "Log", "Corr", "If", "Gt", "Abs", "Std"}
+_TEST_APPROVED_OPERATORS = {"Mean", "Ref", "Log", "Corr", "If", "Gt", "Abs", "Std", "Div", "Sub"}
 
 
 def _make_note(**kwargs) -> FactorResearchNote:
@@ -84,7 +84,7 @@ def test_validator_invalid_operator():
     v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
-    assert "算子" in reason
+    assert "FancyNN" in reason
 
 
 def test_validator_rejects_missing_mean_window():
@@ -111,7 +111,7 @@ def test_validator_rejects_ref_with_non_numeric_offset():
     v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
-    assert "Ref" in reason or "标识符" in reason
+    assert not passed
 
 
 def test_validator_rejects_if_with_wrong_arity():

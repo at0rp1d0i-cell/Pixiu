@@ -196,219 +196,24 @@ class Validator:
             except ValueError:
                 pass
 
-        # 规则 4：字段名合法性
-        used_fields = set(re.findall(r'\$\w+', formula))
-        invalid_fields = used_fields - self.allowed_fields
-        if invalid_fields:
-            return False, f"使用了未注册字段：{invalid_fields}"
-
-        # 规则 5：算子白名单
-        used_operators = set(re.findall(r'\b([A-Za-z][A-Za-z0-9_]*)\s*\(', formula))
-        invalid_ops = used_operators - self.approved_operators
-        if invalid_ops:
-            return False, f"使用了未批准的算子：{invalid_ops}"
-
-        # 规则 6：裸标识符检查（必须是算子名，或被 $ 前缀包裹的字段）
-        bare_identifiers = {
-            ident
-            for ident in re.findall(r'(?<!\$)\b[A-Za-z][A-Za-z0-9_]*\b', formula)
-            if ident not in used_operators and ident not in _BOOLEAN_LITERALS
-        }
-        if bare_identifiers:
-            return False, f"使用了未知标识符：{bare_identifiers}"
-
-        # 规则 7：算子参数个数与基础类型校验
-        ok, reason = self._validate_expression(formula)
-        if not ok:
-            return False, reason
+        # 规则 4 - 7：基于 Qlib 原生 AST 的深度解析与语义校验
+        from src.formula.semantic import parse_and_check_ast, MathSafetyError
+        try:
+            invalid_ops, invalid_fields, bare_identifiers = parse_and_check_ast(
+                formula, self.approved_operators, self.allowed_fields
+            )
+            if invalid_fields:
+                return False, f"使用了未注册字段：{invalid_fields}"
+            if invalid_ops:
+                return False, f"使用了未批准的算子：{invalid_ops}"
+            if bare_identifiers:
+                return False, f"使用了未知标识符：{bare_identifiers}"
+        except ValueError as e:
+            return False, f"语法或参数错误 (Syntax/Arity Error)：{e}"
+        except MathSafetyError as e:
+            return False, f"数学安全约束不通过 (Math Safety Domain)：{e}"
 
         return True, "通过语法硬约束"
-
-    def _validate_expression(self, expr: str) -> tuple[bool, str]:
-        """递归验证表达式中的函数调用和分组括号。"""
-        i = 0
-        while i < len(expr):
-            ch = expr[i]
-
-            if ch.isspace() or ch in "+-*/%^<>=!&,|:.":
-                i += 1
-                continue
-
-            if ch == "$":
-                field = re.match(r"\$\w+", expr[i:])
-                if not field:
-                    return False, f"字段名格式不合法：{expr[i: i + 8]}"
-                i += len(field.group())
-                continue
-
-            if ch.isdigit():
-                number = re.match(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", expr[i:])
-                if not number:
-                    return False, f"数字字面量格式不合法：{expr[i: i + 8]}"
-                i += len(number.group())
-                continue
-
-            if ch == "(":
-                close_idx = self._find_matching_paren(expr, i)
-                if close_idx == -1:
-                    return False, "括号不匹配（嵌套分组未闭合）"
-                inner = expr[i + 1 : close_idx].strip()
-                if inner:
-                    ok, reason = self._validate_expression(inner)
-                    if not ok:
-                        return False, reason
-                i = close_idx + 1
-                continue
-
-            if ch == ")":
-                return False, "括号不匹配（出现多余的右括号）"
-
-            if ch.isalpha() or ch == "_":
-                ident = re.match(r"[A-Za-z][A-Za-z0-9_]*", expr[i:])
-                if not ident:
-                    return False, f"标识符格式不合法：{expr[i: i + 8]}"
-                name = ident.group()
-                j = i + len(name)
-                while j < len(expr) and expr[j].isspace():
-                    j += 1
-                if j < len(expr) and expr[j] == "(":
-                    close_idx = self._find_matching_paren(expr, j)
-                    if close_idx == -1:
-                        return False, f"{name}() 括号不匹配"
-                    args_text = expr[j + 1 : close_idx]
-                    args = self._split_args(args_text)
-                    if args is None:
-                        return False, f"{name}() 参数列表格式不合法"
-                    ok, reason = self._validate_function_call(name, args)
-                    if not ok:
-                        return False, reason
-                    for arg in args:
-                        ok, reason = self._validate_expression(arg)
-                        if not ok:
-                            return False, reason
-                    i = close_idx + 1
-                    continue
-                if name not in _BOOLEAN_LITERALS:
-                    return False, f"使用了未知标识符：{name}"
-                i = j
-                continue
-
-            return False, f"公式包含不支持的字符：{ch}"
-
-        return True, "ok"
-
-    def _validate_function_call(self, name: str, args: list[str]) -> tuple[bool, str]:
-        expected_arity = _STRICT_ARITY_BY_NAME.get(name)
-        if expected_arity is not None and len(args) != expected_arity:
-            return False, f"{name}() 参数数量不正确，期望 {expected_arity} 个，当前 {len(args)} 个"
-
-        if name == "Ref":
-            if len(args) != 2:
-                return False, "Ref() 需要 2 个参数：Ref($field, N)"
-            if not self._is_positive_int_literal(args[1]):
-                return False, f"Ref() 偏移量必须为正整数，当前值={args[1].strip()}"
-
-        if name in {"Corr", "Cov", "Ts_Corr", "Ts_Cov"}:
-            if len(args) != 3:
-                return False, f"{name}() 需要 3 个参数：{name}($x, $y, N)"
-            if not self._is_series_like_expression(args[0]) or not self._is_series_like_expression(args[1]):
-                return False, f"{name}() 前两个参数必须是表达式或字段，不能是纯数字：{args[0].strip()}, {args[1].strip()}"
-            if not self._is_positive_int_literal(args[2]):
-                return False, f"{name}() 第三个参数必须是正整数窗口，当前值={args[2].strip()}"
-
-        if name == "If" and len(args) != 3:
-            return False, "If() 需要 3 个参数：If(cond, t, f)"
-
-        if name == "Log":
-            if len(args) != 1:
-                return False, "Log() 需要 1 个参数"
-            inner = args[0]
-            if not self._has_safe_log_guard(inner):
-                return False, f"Log() 参数未添加正值保护或安全比例结构，可能导致 Log(0) 错误：{inner}"
-
-        return True, "ok"
-
-    @staticmethod
-    def _has_safe_log_guard(inner: str) -> bool:
-        compact = re.sub(r"\s+", "", inner)
-        if "Abs(" in compact or "+" in compact:
-            return True
-        if "-" in compact or compact.count("/") != 1:
-            return False
-        numerator, denominator = compact.split("/", 1)
-        return (
-            Validator._is_positive_series_term(numerator)
-            and Validator._is_positive_series_term(denominator)
-        )
-
-    @staticmethod
-    def _is_positive_series_term(term: str) -> bool:
-        return bool(
-            re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", term)
-            or re.fullmatch(r"Ref\([^()]+\)", term)
-            or re.fullmatch(
-                r"(?:Mean|Max|Min|EMA|WMA|Ts_Mean|Ts_Max|Ts_Min|Ts_WMA)\([^()]+\)",
-                term,
-            )
-        )
-
-    @staticmethod
-    def _is_positive_int_literal(value: str) -> bool:
-        value = value.strip()
-        return bool(re.fullmatch(r"[1-9]\d*", value))
-
-    @staticmethod
-    def _is_series_like_expression(value: str) -> bool:
-        value = value.strip()
-        if not value:
-            return False
-        if re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", value):
-            return False
-        return any(ch in value for ch in ("$", "(", ")", "+", "-", "*", "/", "_"))
-
-    @staticmethod
-    def _find_matching_paren(expr: str, open_idx: int) -> int:
-        depth = 0
-        for idx in range(open_idx, len(expr)):
-            if expr[idx] == "(":
-                depth += 1
-            elif expr[idx] == ")":
-                depth -= 1
-                if depth == 0:
-                    return idx
-            if depth < 0:
-                return -1
-        return -1
-
-    @staticmethod
-    def _split_args(args_text: str) -> list[str] | None:
-        args_text = args_text.strip()
-        if not args_text:
-            return []
-
-        args: list[str] = []
-        depth = 0
-        start = 0
-        for idx, ch in enumerate(args_text):
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth < 0:
-                    return None
-            elif ch == "," and depth == 0:
-                part = args_text[start:idx].strip()
-                if not part:
-                    return None
-                args.append(part)
-                start = idx + 1
-        if depth != 0:
-            return None
-        tail = args_text[start:].strip()
-        if not tail:
-            return None
-        args.append(tail)
-        return args
 
 
 # ─────────────────────────────────────────────────────────
