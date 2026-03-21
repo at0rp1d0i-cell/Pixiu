@@ -47,15 +47,15 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
             if state.market_context is not None
             else None
         )
-        for report in state.backtest_reports:
+        
+        async def _process_report(report):
             verdict = await critic.evaluate(report, regime=regime)
-            verdicts.append(verdict)
             logger.info(
                 "[Stage 5] %s → passed=%s, failure=%s",
                 report.factor_id, verdict.overall_passed, verdict.failure_mode or "—",
             )
             risk_report = await auditor.audit(report)
-            risk_reports.append(risk_report)
+            
             if verdict.register_to_pool:
                 note = note_map.get(report.note_id)
                 hypothesis = note.hypothesis if note else ""
@@ -69,6 +69,7 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
                     )
                 except Exception as e:
                     logger.warning("[Stage 5] FactorPool 写入失败: %s", e)
+            
             if not verdict.overall_passed:
                 note = note_map.get(report.note_id)
                 if note is not None:
@@ -83,6 +84,15 @@ def judgment_node(state: AgentState) -> JudgmentOutput:
                             )
                     except Exception as e:
                         logger.warning("[Stage 5] ConstraintExtractor 失败，静默降级: %s", e)
+            
+            return verdict, risk_report
+
+        tasks = [_process_report(report) for report in state.backtest_reports]
+        results = await asyncio.gather(*tasks)
+        
+        for v, r in results:
+            verdicts.append(v)
+            risk_reports.append(r)
 
     asyncio.run(_run_judgment())
 

@@ -547,52 +547,52 @@ class PreFilter:
         """
         五重过滤（Filter A/B/C/D/E），返回 (approved_notes, filtered_count)。
         approved_notes 数量 <= THRESHOLDS.stage3_top_k
-
-        Args:
-            notes: 候选研究笔记列表
-            current_regime: 当前市场 regime 的字符串值（如 "bull_trend"）。
-                            为 None 时跳过 Filter E（Regime 过滤）。
         """
         self._reset_diagnostics(len(notes))
-        candidates = []
-
-        for note in notes:
-            # Filter A（同步，最快，无 LLM）
+        
+        async def _check_note(note: FactorResearchNote) -> tuple[FactorResearchNote, str, str]:
+            # Filter A (同步)
             passed, reason = self.validator.validate(note)
-            if not passed:
-                logger.info("[Filter A] 拒绝 %s: %s", note.note_id, reason)
-                self._record_rejection(note, "validator", reason)
-                continue
+            if not passed: return note, "validator", reason
 
-            # Filter B（同步，无 LLM）
+            # Filter B (同步)
             passed, reason = self.novelty.check(note)
-            if not passed:
-                logger.info("[Filter B] 拒绝 %s: %s", note.note_id, reason)
-                self._record_rejection(note, "novelty", reason)
-                continue
+            if not passed: return note, "novelty", reason
 
-            # Filter C（异步，LLM 快速调用，失败放行）
+            # Filter C (异步 LLM)
             passed, reason = await self.alignment.check(note)
-            if not passed:
-                logger.info("[Filter C] 拒绝 %s: %s", note.note_id, reason)
-                self._record_rejection(note, "alignment", reason)
-                continue
+            if not passed: return note, "alignment", reason
 
-            # Filter D（同步，结构化失败约束检查，失败时降级放行）
+            # Filter D (同步)
             passed, reason = self.constraint_checker.check(note)
-            if not passed:
-                logger.info("[Filter D] 拒绝 %s: %s", note.note_id, reason)
-                self._record_rejection(note, "constraint_checker", reason)
-                continue
+            if not passed: return note, "constraint_checker", reason
 
-            # Filter E（同步，regime 适用性过滤）
+            # Filter E (同步)
             passed, reason = self.regime_filter.check(note, current_regime)
-            if not passed:
-                logger.info("[Filter E] 拒绝 %s: %s", note.note_id, reason)
-                self._record_rejection(note, "regime_filter", reason)
-                continue
+            if not passed: return note, "regime_filter", reason
 
-            candidates.append(note)
+            return note, "passed", ""
+
+        # 并行执行所有 note 的检查
+        tasks = [_check_note(note) for note in notes]
+        results = await asyncio.gather(*tasks)
+
+        candidates = []
+        for note, status, reason in results:
+            if status == "passed":
+                candidates.append(note)
+            else:
+                # 按照原先的 log 风格: [Filter A] 拒绝 ...
+                filter_num_map = {
+                    "validator": "Filter A",
+                    "novelty": "Filter B",
+                    "alignment": "Filter C",
+                    "constraint_checker": "Filter D",
+                    "regime_filter": "Filter E"
+                }
+                filter_label = filter_num_map.get(status, status)
+                logger.info("[%s] 拒绝 %s: %s", filter_label, note.note_id, reason)
+                self._record_rejection(note, status, reason)
 
         # 通过数量 > Top K 时，按探索需求排序（有 exploration_questions 的排后，先回测简单的）
         candidates.sort(key=lambda n: len(n.exploration_questions))
