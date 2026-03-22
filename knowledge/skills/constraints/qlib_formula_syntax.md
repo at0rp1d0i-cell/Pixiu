@@ -4,9 +4,8 @@
 
 ---
 
+<available-fields>
 ## 合法字段（数据源）
-
-当前可用字段**以运行时注入的可用字段列表为准**，不要假设某个字段一定存在。
 
 当前可用字段**以运行时注入的可用字段列表为准**，不要假设某个字段一定存在。
 
@@ -31,9 +30,11 @@ $pe_ttm  $pb  $turnover_rate  $float_mv
 - 字段名区分大小写，全部小写
 - 如果当前运行时没有显式列出某个可选字段，就不要在公式里使用它
 - 基本面字段为日频（每日更新），可以直接和行情字段组合使用
+</available-fields>
 
 ---
 
+<approved-operators>
 ## 合法算子（运行时真相优先）
 
 算子以运行时 allowlist 为准。不要因为某个 skill 或历史文档提到了某个算子，就默认它当前可用。
@@ -73,9 +74,11 @@ $pe_ttm  $pb  $turnover_rate  $float_mv
 | `Log(expr)` | 自然对数（expr 必须 > 0） |
 | `Power(expr, n)` | 幂次 |
 | `If(cond, t, f)` | 条件表达式 |
+</approved-operators>
 
 ---
 
+<forbidden-patterns>
 ## 常见语法错误（Validator 会拦截）
 
 ```python
@@ -105,9 +108,26 @@ Exp($close)    # 错误！Exp 算子未注册
 Log($close - Ref($close, 1))   # 日收益率可能为负
 # 应改为：Log($close / Ref($close, 1)) 或 Log(Abs(expr) + 1e-8)
 ```
+</forbidden-patterns>
 
 ---
 
+<ref-sign-rule>
+## ⚠️ Ref 符号规则（极高频错误，LLM 必看）
+
+```
+Ref($close, 1)   = 昨天的收盘价  ✅ 正确
+Ref($close, 5)   = 5日前的收盘价 ✅ 正确
+Ref($close, -1)  = 明天的收盘价  ❌ 未来数据！Validator 必拦截
+Ref($close, 0)   = 今天的收盘价  ⚠️ 等同于 $close，无意义
+```
+
+**记忆口诀**：正数 = 过去，负数 = 未来。只用正数。
+</ref-sign-rule>
+
+---
+
+<formula-templates>
 ## 推荐的常用模板
 
 ```python
@@ -126,22 +146,11 @@ $volume / Mean($volume, 20)
 # 波动率
 Std($close / Ref($close, 1) - 1, 20)
 ```
+</formula-templates>
 
 ---
 
-## ⚠️ Ref 符号规则（极高频错误，LLM 必看）
-
-```
-Ref($close, 1)   = 昨天的收盘价  ✅ 正确
-Ref($close, 5)   = 5日前的收盘价 ✅ 正确
-Ref($close, -1)  = 明天的收盘价  ❌ 未来数据！Validator 必拦截
-Ref($close, 0)   = 今天的收盘价  ⚠️ 等同于 $close，无意义
-```
-
-**记忆口诀**：正数 = 过去，负数 = 未来。只用正数。
-
----
-
+<verified-factors>
 ## 经过 A 股回测验证的有效因子模板
 
 以下公式已在 CSI300 数据集验证，IC 统计显著，可直接用于 proposed_formula 或作为变体出发点：
@@ -171,7 +180,8 @@ Mean(If(Gt($close,Ref($close,1)),$close/Ref($close,1)-1,0),14) / (Mean(Abs($clos
 **使用注意**：
 - 除法分母加 `1e-8` 防止零除（Validator 不检查，但 Qlib 执行时可能产生 NaN）
 - 以上模板为出发点，结合当前 Island 上下文和市场状态做变体，不要直接照搬
+</verified-factors>
 
 ---
 
-*最后更新：2026-03-07*
+*最后更新：2026-03-22*
