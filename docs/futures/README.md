@@ -26,6 +26,8 @@ Last Reviewed: 2026-03-18
 当前已迁入的文档：
 
 - `terminal-dashboard.md`
+- `35_cli-and-dashboard.md`
+- `36_product-interface-topology.md`
 - `reflection-system.md`
 - `oos-and-generalization.md`
 - `system-bootstrap.md`
