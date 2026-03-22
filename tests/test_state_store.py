@@ -216,6 +216,19 @@ def test_api_status_reads_latest_run_and_snapshot(tmp_path, monkeypatch):
     assert payload["awaiting_human_approval"] is True
 
 
+def test_api_status_returns_idle_with_error_when_store_read_fails(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_state_store",
+        lambda: (_ for _ in ()).throw(RuntimeError("store boom")),
+    )
+
+    payload = server.get_status()
+
+    assert payload["status"] == "idle"
+    assert payload["error"] == "store boom"
+
+
 def test_api_reports_reads_control_plane_artifacts(tmp_path, monkeypatch):
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="evolve")
@@ -240,6 +253,20 @@ def test_api_reports_reads_control_plane_artifacts(tmp_path, monkeypatch):
     assert payload[0]["id"] == "report-001"
     assert payload[0]["run_id"] == run.run_id
     assert payload[0]["path"] == str(report_path)
+
+
+def test_api_reports_raises_500_when_store_read_fails(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_state_store",
+        lambda: (_ for _ in ()).throw(RuntimeError("report store boom")),
+    )
+
+    with pytest.raises(server.HTTPException) as exc:
+        server.get_reports()
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "report store boom"
 
 
 def test_api_approve_requires_waiting_snapshot(tmp_path, monkeypatch):

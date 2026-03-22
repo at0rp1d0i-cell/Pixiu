@@ -238,6 +238,41 @@ class TestLoopControlNode:
 
         mock_sched.on_epoch_done.assert_called()
 
+    def test_uses_current_island_when_no_passed_verdict(self):
+        """没有通过因子时，应回退到 state.current_island 作为 epoch island。"""
+        state = _make_state(
+            current_round=2,
+            backtest_reports=[_make_report(0.5, passed=False)],
+            critic_verdicts=[_make_verdict(False)],
+        ).model_copy(update={"current_island": "value"})
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched:
+            mock_sched = MagicMock()
+            mock_get_sched.return_value = mock_sched
+            loop_control_node(state)
+
+        mock_sched.on_epoch_done.assert_called_once_with("value", 2)
+
+    def test_snapshot_failure_does_not_block_loop_control(self):
+        """ExperimentLogger 快照失败时，不应阻塞轮次推进。"""
+        state = _make_state(current_round=4)
+        mock_logger = MagicMock()
+        mock_logger.snapshot.side_effect = RuntimeError("snapshot boom")
+
+        with patch("src.core.orchestrator.runtime.get_scheduler") as mock_get_sched, \
+             patch("src.core.orchestrator.nodes.control.get_experiment_logger", return_value=mock_logger), \
+             patch("src.core.orchestrator.control_plane._update_run_record") as mock_update_run:
+            mock_sched = MagicMock()
+            mock_get_sched.return_value = mock_sched
+            result = loop_control_node(state)
+
+        assert result["current_round"] == 5
+        mock_logger.snapshot.assert_called_once()
+        mock_update_run.assert_called_once_with(
+            "loop_control",
+            status="running",
+            current_round=5,
+        )
+
     def test_calls_on_epoch_done_even_when_no_verdict_passes(self):
         """即使没有通过因子，on_epoch_done 也应被调用（修复 Bug 3）。"""
         state = _make_state(
