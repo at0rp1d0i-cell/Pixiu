@@ -575,10 +575,14 @@ class PreFilter:
 
         # 并行执行所有 note 的检查
         tasks = [_check_note(note) for note in notes]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         candidates = []
-        for note, status, reason in results:
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error("[Prefilter] 并行检查异常: %s", result)
+                continue
+            note, status, reason = result
             if status == "passed":
                 candidates.append(note)
             else:

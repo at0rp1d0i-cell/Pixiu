@@ -3,6 +3,9 @@ from typing import Set, Tuple, Any
 class MathSafetyError(Exception):
     pass
 
+# Qlib 价量字段，物理含义保证非负：
+# - 价格 (close, open, high, low, vwap) >= 0
+# - 成交量 (volume) >= 0，成交额 (amount) >= 0
 POSITIVE_FIELDS = {"close", "open", "high", "low", "vwap", "amount", "volume"}
 
 class MathSafetyVisitor:

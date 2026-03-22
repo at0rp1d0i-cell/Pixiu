@@ -965,7 +965,7 @@ async def get_futures_basis() -> str:
             return json.dumps({"error": "No index futures data available"}, ensure_ascii=False)
         
         # 过滤出主流股指期货品种
-        df_filtered = df[df["symbol"].str.contains(r"^(IF|IH|IC|IM)", regex=True, na=False)]
+        df_filtered = df[df["symbol"].str.contains(r"^(IF|IH|IC|IM)\d", regex=True, na=False)]
         result_df = df_filtered if not df_filtered.empty else df.head(20)
         
         cols = [c for c in ["symbol", "name", "trade", "changepercent", "settlement", "pre_settlement", "volume", "open_interest"] if c in result_df.columns]
