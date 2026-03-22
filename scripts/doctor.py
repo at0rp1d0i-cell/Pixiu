@@ -22,13 +22,29 @@ def check_data_layer():
         from src.formula.capabilities import get_runtime_formula_capabilities
         caps = get_runtime_formula_capabilities()
         fields_count = len(caps.available_fields)
-        
-        qlib_path = os.path.expanduser("~/.qlib/qlib_data/cn_data/features")
+
+        # 项目内 qlib_bin 目录
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        qlib_path = os.path.join(project_root, "data", "qlib_bin")
         if not os.path.exists(qlib_path):
-            return False, f"Qlib features dir not found: {qlib_path}"
-        
-        files = os.listdir(qlib_path)
-        return True, f"Qlib 可用，检测到 {fields_count} 个能力集字段，底层 Bin 数量: {len(files)}"
+            return False, f"Qlib bin dir not found: {qlib_path}"
+
+        # 检查数据时效性：读取 calendars 最后日期
+        cal_file = os.path.join(qlib_path, "calendars", "day.txt")
+        freshness_msg = ""
+        if os.path.exists(cal_file):
+            with open(cal_file) as f:
+                lines = f.read().strip().splitlines()
+                if lines:
+                    last_date = lines[-1].strip()
+                    freshness_msg = f"，数据截止: {last_date}"
+
+        instruments_path = os.path.join(qlib_path, "instruments")
+        stock_count = len(os.listdir(instruments_path)) if os.path.exists(instruments_path) else 0
+        features_path = os.path.join(qlib_path, "features")
+        feature_dirs = len(os.listdir(features_path)) if os.path.exists(features_path) else 0
+
+        return True, f"能力集 {fields_count} 字段，{feature_dirs} 只股票 Bin{freshness_msg}"
     except Exception as e:
         return False, str(e)
 
@@ -38,23 +54,22 @@ async def check_llm_layer():
     try:
         from src.llm.openai_compat import build_researcher_llm
         from langchain_core.messages import HumanMessage
-        llm = build_researcher_llm(profile="doctor")
-        
+        llm = build_researcher_llm(profile="alignment_checker")
+
         start = perf_counter()
-        # 1 token prompt
         resp = await asyncio.wait_for(
             llm.ainvoke([HumanMessage(content="Reply 'OK' only.")]),
             timeout=10.0
         )
         elapsed = perf_counter() - start
-        
+
         model_name = getattr(llm, "model_name", "unknown")
         status = True
         warn = ""
         if elapsed > 3.0:
             warn = " (Latency High!)"
             status = "WARN"
-            
+
         return status, f"延时 {elapsed:.2f}s{warn} | Model: {model_name} | Response: {resp.content.strip()}"
     except Exception as e:
         return False, str(e)
@@ -65,12 +80,15 @@ def check_env_apis():
     messages = []
     status = True
     
-    # 1. OpenAI
-    if not os.getenv("OPENAI_API_KEY"):
-        messages.append("缺少 OPENAI_API_KEY")
+    # 1. LLM API Key（优先 RESEARCHER_API_KEY，fallback OPENAI_API_KEY）
+    api_key = os.getenv("RESEARCHER_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        messages.append("缺少 RESEARCHER_API_KEY / OPENAI_API_KEY")
         status = False
     else:
-        messages.append(f"LLM Token 存在 ({os.getenv('OPENAI_API_BASE', 'Default')})")
+        base = os.getenv("OPENAI_API_BASE", "default")
+        key_source = "RESEARCHER_API_KEY" if os.getenv("RESEARCHER_API_KEY") else "OPENAI_API_KEY"
+        messages.append(f"LLM API Key 存在 ({key_source}, base: {base})")
         
     # 2. Tushare
     ts_token = os.getenv("TUSHARE_TOKEN")
@@ -105,41 +123,16 @@ def check_pool_knowledge():
     try:
         from src.factor_pool.pool import get_factor_pool
         pool = get_factor_pool()
-        
-        # We access sqlite cursor directly for quick broad stats
-        cursor = getattr(pool, "cursor", None)
-        if hasattr(pool, "_conn"):
-            cursor = getattr(pool._conn, "cursor", lambda: None)()
-        
-        if not cursor:
-            # Fallback to public methods
-            factors = pool.get_top_factors(limit=1000)
-            return True, {
-                "knowledge": "无法直接访问 SQLite Cursor",
-                "pool": f"已读出 {len(factors)} 个服役因子"
-            }
-        
-        cursor.execute("SELECT COUNT(*) FROM failure_constraints")
-        constraints_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM factor_pool WHERE passed=1")
-        passed_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT island, MAX(sharpe), AVG(ic_mean) FROM factor_pool WHERE passed=1 GROUP BY island")
-        islands = cursor.fetchall()
-        
-        knowledge_msg = f"已积累 {constraints_count} 条避坑约束规则"
-        
-        pool_details = [f"服役因子: {passed_count} 个"]
-        for row in islands:
-            island_name = row[0]
-            max_sr = row[1]
-            avg_ic = row[2]
-            pool_details.append(f"[{island_name}] Max Sharpe={max_sr:.2f}, AvgIC={avg_ic:.4f}")
-            
-        pool_msg = " | ".join(pool_details)
-        
+
+        factors = pool.get_top_factors(limit=1000)
+        constraints = pool.get_active_constraints() if hasattr(pool, "get_active_constraints") else []
+
+        knowledge_msg = f"已积累 {len(constraints)} 条避坑约束规则"
+        pool_msg = f"服役因子: {len(factors)} 个"
+
         return True, {"knowledge": knowledge_msg, "pool": pool_msg}
+    except Exception as e:
+        return False, str(e)
     except Exception as e:
         return False, {"knowledge": str(e), "pool": str(e)}
 
@@ -188,15 +181,16 @@ async def main():
     console.print(table)
     
     if not all(x is True for x in [data_pass, llm_pass, k_pass]) or env_pass is False:
-        console.print("[bold red]⚠️ 发现红灯错误，请在运行 evoquant 之前修复。[/bold red]")
+        console.print("[bold red]⚠️ 发现红灯错误，请在运行 Pixiu 之前修复。[/bold red]")
     else:
         console.print("[bold green]✓ 全系统自检通过。可以启动。[/bold green]")
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    # Load environment variables
-    load_dotenv(override=True)
+    # 确保从项目根目录加载 .env
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(os.path.join(project_root, ".env"), override=True)
     
     try:
         asyncio.run(main())
