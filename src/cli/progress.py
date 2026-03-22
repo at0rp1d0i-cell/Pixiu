@@ -33,6 +33,9 @@ class RunProgressView:
     latest_round_total_ms: float | None
     slowest_stage: str | None
     slowest_stage_ms: float | None
+    approved_notes_count: int
+    backtest_reports_count: int
+    verdicts_count: int
     last_error: str | None
 
 
@@ -83,6 +86,9 @@ class RunProgressTracker:
             latest_round_total_ms=latest_snapshot.round_total_ms if latest_snapshot else None,
             slowest_stage=latest_snapshot.slowest_stage if latest_snapshot else None,
             slowest_stage_ms=latest_snapshot.slowest_stage_ms if latest_snapshot else None,
+            approved_notes_count=snapshot.approved_notes_count if snapshot else 0,
+            backtest_reports_count=snapshot.backtest_reports_count if snapshot else 0,
+            verdicts_count=snapshot.verdicts_count if snapshot else 0,
             last_error=run.last_error,
         )
 
@@ -183,6 +189,13 @@ def build_run_progress_panel(
     )
     table.add_row("Last Error", view.last_error or "—")
 
+    counters = Table.grid(expand=True)
+    counters.add_column(style="bold green", ratio=1)
+    counters.add_column(ratio=1)
+    counters.add_row("Approved Notes", str(view.approved_notes_count))
+    counters.add_row("Backtest Reports", str(view.backtest_reports_count))
+    counters.add_row("Verdicts", str(view.verdicts_count))
+
     progress = None
     if view.total_rounds and view.total_rounds > 0:
         progress = Progress(
@@ -198,7 +211,18 @@ def build_run_progress_panel(
             completed=min(view.current_round, view.total_rounds),
         )
 
-    body = Group(table, progress) if progress is not None else table
+    renderables: list[object] = [table, counters]
+    if progress is not None:
+        renderables.append(progress)
+    if view.awaiting_human_approval:
+        renderables.append(
+            Panel(
+                "Use `pixiu approve`, `pixiu redirect <island>`, or `pixiu stop` to continue.",
+                title="Human Gate",
+                border_style="yellow",
+            )
+        )
+    body = Group(*renderables)
     return Panel(body, title="Pixiu Run Progress", border_style="cyan")
 
 

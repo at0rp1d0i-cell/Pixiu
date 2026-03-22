@@ -16,16 +16,18 @@ import logging
 import os
 import sys
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Awaitable, TypeVar
 
 import typer
-from rich.console import Console
+from rich.columns import Columns
+from rich.console import Console, Group
 from rich.live import Live
-from rich.table import Table
-from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from src.cli.progress import (
     RunProgressTracker,
@@ -41,6 +43,165 @@ app = typer.Typer(
 console = Console()
 T = TypeVar("T")
 _LIVE_LOG_FILE: Path | None = None
+
+
+def _build_key_value_panel(
+    title: str,
+    rows: list[tuple[str, str]],
+    *,
+    border_style: str = "cyan",
+) -> Panel:
+    table = Table.grid(expand=True)
+    table.add_column(style="bold cyan", ratio=1)
+    table.add_column(ratio=3)
+    for label, value in rows:
+        table.add_row(label, value or "—")
+    return Panel(table, title=title, border_style=border_style)
+
+
+def _format_timestamp(value: datetime | None) -> str:
+    if value is None:
+        return "—"
+    if value.tzinfo is None:
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _short_id(value: str | None, *, prefix: int = 10, suffix: int = 6) -> str:
+    if not value:
+        return "—"
+    if len(value) <= prefix + suffix + 3:
+        return value
+    return f"{value[:prefix]}...{value[-suffix:]}"
+
+
+def _build_command_hint_panel() -> Panel:
+    return Panel(
+        "Use `pixiu approve` to continue, `pixiu redirect <island>` to redirect focus, "
+        "or `pixiu stop` to stop after the current round.",
+        title="Human Gate",
+        border_style="yellow",
+    )
+
+
+def _build_run_launch_panel(
+    *,
+    mode: str,
+    rounds: int,
+    island: str | None,
+    islands: list[str] | None,
+    verbose: bool,
+) -> Panel:
+    target = island if mode == "single" else ", ".join(islands or ["scheduler default"])
+    subtitle = (
+        f"Mode: {mode}\n"
+        f"Rounds: {rounds}\n"
+        f"Target: {target}\n"
+        f"Verbose: {'yes' if verbose else 'no'}"
+    )
+    return Panel(subtitle, title="Pixiu CLI", border_style="cyan")
+
+
+def _render_status_view(run, snapshot, latest_report) -> Group:
+    run_panel = _build_key_value_panel(
+        "Run",
+        [
+            ("Run ID", run.run_id),
+            ("Mode", run.mode),
+            ("Status", run.status),
+            ("Stage", run.current_stage),
+            ("Round", str(run.current_round)),
+            ("Started", _format_timestamp(run.started_at)),
+            ("Finished", _format_timestamp(run.finished_at)),
+            ("Last Error", run.last_error or "—"),
+        ],
+        border_style="cyan",
+    )
+
+    snapshot_panel = _build_key_value_panel(
+        "Snapshot",
+        [
+            ("Awaiting Approval", "yes" if snapshot and snapshot.awaiting_human_approval else "no"),
+            ("Approved Notes", str(snapshot.approved_notes_count if snapshot else 0)),
+            ("Backtest Reports", str(snapshot.backtest_reports_count if snapshot else 0)),
+            ("Verdicts", str(snapshot.verdicts_count if snapshot else 0)),
+            ("Updated", _format_timestamp(snapshot.updated_at if snapshot else None)),
+        ],
+        border_style="green",
+    )
+
+    if latest_report is None:
+        report_panel = Panel("No CIO report found.", title="Latest Report", border_style="magenta")
+    else:
+        report_panel = _build_key_value_panel(
+            "Latest Report",
+            [
+                ("Report ID", latest_report.ref_id),
+                ("Run ID", latest_report.run_id),
+                ("Created", _format_timestamp(latest_report.created_at)),
+                ("Path", latest_report.path),
+            ],
+            border_style="magenta",
+        )
+
+    renderables: list[object] = [
+        Panel(
+            Text("Pixiu Runtime Status", style="bold cyan"),
+            subtitle=f"Latest run {_short_id(run.run_id)}",
+            border_style="cyan",
+        ),
+        Columns([run_panel, snapshot_panel, report_panel], expand=True, equal=True),
+    ]
+    if snapshot and snapshot.awaiting_human_approval:
+        renderables.append(_build_command_hint_panel())
+    return Group(*renderables)
+
+
+def _render_factor_table(results: list[dict], *, top: int, island: str | None) -> Group:
+    title = f"Top {len(results)} factors"
+    if island:
+        title += f" in island={island}"
+
+    table = Table(title=title, border_style="green")
+    table.add_column("#", justify="right")
+    table.add_column("Factor ID", no_wrap=True)
+    table.add_column("Island")
+    table.add_column("Sharpe", justify="right")
+    table.add_column("IC", justify="right")
+    table.add_column("ICIR", justify="right")
+    table.add_column("Formula", overflow="fold")
+
+    for index, factor in enumerate(results, start=1):
+        table.add_row(
+            str(index),
+            _short_id(factor.get("factor_id")),
+            factor.get("island", "—"),
+            f"{factor.get('sharpe', 0):.2f}",
+            f"{factor.get('ic_mean', factor.get('ic', 0)):.4f}",
+            f"{factor.get('icir', 0):.2f}",
+            factor.get("formula", "")[:72] or "—",
+        )
+
+    summary = Panel(
+        f"Requested top={top} | Source=FactorPool | Filter={'all islands' if island is None else island}",
+        title="Factor Leaderboard",
+        border_style="green",
+    )
+    return Group(summary, table)
+
+
+def _render_report_view(report_record, markdown_text: str) -> Group:
+    metadata = _build_key_value_panel(
+        "CIO Report",
+        [
+            ("Report ID", report_record.ref_id),
+            ("Run ID", report_record.run_id),
+            ("Created", _format_timestamp(report_record.created_at)),
+            ("Path", report_record.path),
+        ],
+        border_style="magenta",
+    )
+    return Group(metadata, Markdown(markdown_text))
 
 
 def _get_state_store():
@@ -89,23 +250,34 @@ def run(
 ):
     """启动 Pixiu 研究循环。"""
     import logging
+
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
 
     from src.core.orchestrator import run_evolve, run_single
 
+    if mode not in {"evolve", "single"}:
+        raise typer.BadParameter("mode must be one of: evolve, single")
+
+    if mode == "single" and islands:
+        raise typer.BadParameter("--islands is only supported in evolve mode")
+
+    island_list = [item.strip() for item in islands.split(",") if item.strip()] if islands else None
+
     if not sys.stdout.isatty():
-        console.print(Panel(
-            f"[bold cyan]Pixiu v2 启动[/bold cyan]\n"
-            f"模式：[yellow]{mode}[/yellow]  |  轮次：[yellow]{rounds}[/yellow]  |  Island：[yellow]{island}[/yellow]",
-            title="🦅 Pixiu Quantitative Research",
-            border_style="cyan",
-        ))
+        console.print(
+            _build_run_launch_panel(
+                mode=mode,
+                rounds=rounds,
+                island=island,
+                islands=island_list,
+                verbose=verbose,
+            )
+        )
 
     if mode == "single":
         _run_with_progress(run_single(island=island), total_rounds=1)
     else:
-        island_list = islands.split(",") if islands else None
         _run_with_progress(run_evolve(rounds=rounds, islands=island_list), total_rounds=rounds)
 
 
@@ -116,69 +288,46 @@ def status():
         store = _get_state_store()
         run = store.get_latest_run()
         snapshot = store.get_snapshot(run.run_id) if run else None
+        reports = store.list_reports(limit=1)
     except Exception as e:
         console.print(f"[red]读取状态失败: {e}[/red]")
         return
 
     if run is None:
-        console.print("[yellow]暂无运行中的实验记录[/yellow]")
+        console.print(
+            Panel("No run record found in the control plane.", title="Pixiu Runtime Status", border_style="yellow")
+        )
         return
 
-    table = Table(title="Pixiu 运行状态", border_style="cyan")
-    table.add_column("项目", style="bold")
-    table.add_column("值", style="green")
-
-    table.add_row("Run ID", run.run_id)
-    table.add_row("模式", run.mode)
-    table.add_row("状态", run.status)
-    table.add_row("当前阶段", run.current_stage)
-    table.add_row("当前轮次", str(run.current_round))
-    table.add_row("等待审批", "是" if snapshot and snapshot.awaiting_human_approval else "否")
-    table.add_row("已批准 Notes", str(snapshot.approved_notes_count if snapshot else 0))
-    table.add_row("回测报告数", str(snapshot.backtest_reports_count if snapshot else 0))
-    table.add_row("Verdict 数", str(snapshot.verdicts_count if snapshot else 0))
-    table.add_row("最后错误", run.last_error or "—")
-
-    console.print(table)
+    console.print(_render_status_view(run, snapshot, reports[0] if reports else None))
 
 
 @app.command()
 def factors(
-    top: int = typer.Option(10, "--top", "-n", help="显示前 N 个"),
+    top: int = typer.Option(10, "--top", "-n", min=1, help="显示前 N 个"),
     island: str = typer.Option(None, "--island", "-i", help="按 Island 过滤"),
 ):
     """查看因子排行榜（按 Sharpe 降序）。"""
     from src.factor_pool.pool import get_factor_pool
 
     pool = get_factor_pool()
-    results = pool.get_top_factors(limit=top * 3)  # 多取再过滤
+    results = pool.get_top_factors(limit=max(top * 3, top))
     if island:
         results = [r for r in results if r.get("island") == island]
     results = results[:top]
 
     if not results:
-        console.print("[yellow]暂无已注册因子[/yellow]")
+        label = island or "all islands"
+        console.print(
+            Panel(
+                f"No promoted factors found for filter={label}.",
+                title="Factor Leaderboard",
+                border_style="yellow",
+            )
+        )
         return
 
-    table = Table(title=f"Top {top} 因子排行榜", border_style="green")
-    table.add_column("Island")
-    table.add_column("Sharpe", justify="right")
-    table.add_column("IC", justify="right")
-    table.add_column("ICIR", justify="right")
-    table.add_column("通过", justify="center")
-    table.add_column("公式（前 60 字符）")
-
-    for f in results:
-        passed_emoji = "✅" if f.get("passed") else "❌"
-        table.add_row(
-            f.get("island", "—"),
-            f"{f.get('sharpe', 0):.2f}",
-            f"{f.get('ic_mean', f.get('ic', 0)):.4f}",
-            f"{f.get('icir', 0):.2f}",
-            passed_emoji,
-            f.get("formula", "")[:60],
-        )
-    console.print(table)
+    console.print(_render_factor_table(results, top=top, island=island))
 
 
 @app.command()
@@ -205,8 +354,11 @@ def stop():
 
 
 @app.command()
-def report():
-    """查看最新 CIO 报告（Markdown 格式）。"""
+def report(
+    latest: bool = typer.Option(False, "--latest", help="显式查看最新一份 CIO 报告"),
+):
+    """查看 CIO 报告（当前仅支持最新一份）。"""
+    _ = latest
     try:
         reports = _get_state_store().list_reports(limit=1)
     except Exception as e:
@@ -222,7 +374,7 @@ def report():
         console.print(f"[red]报告文件不存在: {report_path}[/red]")
         return
 
-    console.print(Markdown(report_path.read_text(encoding="utf-8")))
+    console.print(_render_report_view(reports[0], report_path.read_text(encoding="utf-8")))
 
 
 def _inject_human_decision(decision: str) -> bool:

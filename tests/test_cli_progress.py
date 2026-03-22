@@ -63,6 +63,10 @@ def test_run_progress_panel_includes_stage_round_and_snapshot_path(tmp_path: Pat
     assert "round_003.json" in rendered
     assert "1870.50 ms" in rendered
     assert "market_context (1250.50 ms)" in rendered
+    assert "Approved Notes" in rendered
+    assert "Backtest Reports" in rendered
+    assert "Verdicts" in rendered
+    assert "pixiu approve" in rendered
 
 
 def test_run_with_progress_skips_live_when_not_tty(monkeypatch):
