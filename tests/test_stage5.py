@@ -18,7 +18,7 @@ from src.execution.coder import Coder
 from src.execution.docker_runner import ExecutionResult
 from src.factor_pool.pool import FactorPool
 from src.schemas.backtest import BacktestMetrics, BacktestReport
-from src.schemas.judgment import CriticVerdict, ThresholdCheck
+from src.schemas.judgment import CriticVerdict, RiskAuditReport, ThresholdCheck
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.state import AgentState
 
@@ -352,6 +352,66 @@ def test_judgment_node_returns_verdicts_and_risk_reports():
     assert "risk_audit_reports" in result
     assert len(result["critic_verdicts"]) == 1
     assert len(result["risk_audit_reports"]) == 1
+
+
+def test_judgment_node_parallel_exception_does_not_drop_other_results():
+    from src.core.orchestrator import judgment_node
+
+    ok_note = _make_note_for_writeback("factor_ok")
+    boom_note = _make_note_for_writeback("factor_boom")
+    ok_report = _make_report_for_writeback("factor_ok", sharpe=3.0)
+    boom_report = _make_report_for_writeback("factor_boom", sharpe=2.5)
+    state = AgentState(
+        current_round=1,
+        approved_notes=[ok_note, boom_note],
+        backtest_reports=[ok_report, boom_report],
+        critic_verdicts=[],
+    )
+    pool = _StubPoolWriteback()
+
+    async def _critic_side_effect(report, regime=None):
+        if report.factor_id == "factor_boom":
+            raise RuntimeError("critic boom")
+        return CriticVerdict(
+            report_id=report.report_id,
+            factor_id=report.factor_id,
+            note_id=report.note_id,
+            overall_passed=True,
+            decision="promote",
+            score=0.95,
+            checks=[],
+            passed_checks=["sharpe"],
+            failed_checks=[],
+            failure_mode=None,
+            failure_explanation=None,
+            suggested_fix=None,
+            summary="ok",
+            reason_codes=[],
+            regime_at_judgment=regime,
+            register_to_pool=True,
+            pool_tags=["passed"],
+        )
+
+    async def _audit_side_effect(report):
+        return RiskAuditReport(
+            factor_id=report.factor_id,
+            overfitting_score=0.0,
+            overfitting_flag=False,
+            recommendation="keep",
+            audit_notes="ok",
+        )
+
+    with patch("src.core.orchestrator.control_plane.get_factor_pool", return_value=pool), \
+         patch("src.core.orchestrator.control_plane._write_snapshot"), \
+         patch("src.agents.judgment.Critic.evaluate", new=AsyncMock(side_effect=_critic_side_effect)), \
+         patch("src.agents.judgment.RiskAuditor.audit", new=AsyncMock(side_effect=_audit_side_effect)):
+        result = judgment_node(state)
+
+    assert [verdict.factor_id for verdict in result["critic_verdicts"]] == ["factor_ok"]
+    assert [risk.factor_id for risk in result["risk_audit_reports"]] == ["factor_ok"]
+    assert len(pool.calls) == 1
+    assert pool.calls[0]["report"].factor_id == "factor_ok"
+    assert pool.calls[0]["note"] is ok_note
 
 
 def test_judgment_node_records_execution_error_constraint_as_warning():

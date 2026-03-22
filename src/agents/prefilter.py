@@ -148,8 +148,16 @@ class Validator:
         capabilities = None
         if allowed_fields is None or approved_operators is None:
             capabilities = get_runtime_formula_capabilities()
-        self.allowed_fields = allowed_fields or set(capabilities.available_fields)
-        self.approved_operators = approved_operators or set(capabilities.approved_operators)
+        self.allowed_fields = (
+            allowed_fields
+            if allowed_fields is not None
+            else set(capabilities.available_fields)
+        )
+        self.approved_operators = (
+            approved_operators
+            if approved_operators is not None
+            else set(capabilities.approved_operators)
+        )
 
     # 数学常数 → 数值替换（LLM 常生成裸 e / pi，qlib 不识别）
     _MATH_CONSTANTS = {"e": "2.71828", "pi": "3.14159"}

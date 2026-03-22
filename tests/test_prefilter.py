@@ -365,6 +365,37 @@ def test_prefilter_tracks_rejection_diagnostics():
     assert prefilter.last_diagnostics["sample_rejections"][0]["note_id"] == "reject_validator"
 
 
+def test_prefilter_parallel_exception_does_not_drop_other_candidates():
+    """单个 note 的并行检查异常不应影响其他候选通过。"""
+    prefilter = PreFilter(factor_pool=MagicMock(), validator=_make_validator())
+    notes = [
+        _make_note(note_id="pass_candidate"),
+        _make_note(note_id="alignment_boom"),
+    ]
+
+    async def _alignment_side_effect(note):
+        if note.note_id == "alignment_boom":
+            raise RuntimeError("llm boom")
+        return True, "ok"
+
+    with patch.object(prefilter.validator, "validate", return_value=(True, "ok")), \
+         patch.object(prefilter.novelty, "check", return_value=(True, "ok")), \
+         patch.object(prefilter.alignment, "check", new_callable=AsyncMock) as mock_alignment, \
+         patch.object(prefilter.constraint_checker, "check", return_value=(True, "ok")), \
+         patch.object(prefilter.regime_filter, "check", return_value=(True, "ok")):
+        mock_alignment.side_effect = _alignment_side_effect
+        approved, filtered = asyncio.run(
+            prefilter.filter_batch(notes, current_regime="bull_trend")
+        )
+
+    assert [note.note_id for note in approved] == ["pass_candidate"]
+    assert filtered == 1
+    assert prefilter.last_diagnostics["input_count"] == 2
+    assert prefilter.last_diagnostics["approved_count"] == 1
+    assert prefilter.last_diagnostics["rejection_counts_by_filter"] == {}
+    assert prefilter.last_diagnostics["sample_rejections"] == []
+
+
 def test_prefilter_tracks_top_k_truncation_in_diagnostics(monkeypatch):
     """超过 Top-K 的候选应计入单独的截断拒绝统计。"""
     from src.schemas.thresholds import THRESHOLDS

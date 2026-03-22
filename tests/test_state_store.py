@@ -253,6 +253,28 @@ def test_api_approve_requires_waiting_snapshot(tmp_path, monkeypatch):
     assert exc.value.status_code == 409
 
 
+def test_api_approve_rejects_invalid_action(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    monkeypatch.setattr(server, "_get_state_store", lambda: store)
+
+    with pytest.raises(server.HTTPException) as exc:
+        server.post_approve(server.ApproveRequest(action="reject:bad_factor"))
+
+    assert exc.value.status_code == 400
+    assert "无效的 action" in exc.value.detail
+
+
+def test_api_approve_returns_404_when_no_run_exists(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    monkeypatch.setattr(server, "_get_state_store", lambda: store)
+
+    with pytest.raises(server.HTTPException) as exc:
+        server.post_approve(server.ApproveRequest(action="approve"))
+
+    assert exc.value.status_code == 404
+    assert "找不到正在运行的实验" in exc.value.detail
+
+
 def test_api_approve_queues_decision_when_waiting(tmp_path, monkeypatch):
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="single")
@@ -368,6 +390,52 @@ def test_cli_inject_human_decision_queues_action(tmp_path, monkeypatch):
     latest = store.pop_latest_human_decision(run.run_id)
     assert latest is not None
     assert latest.action == "redirect:momentum"
+
+
+def test_human_gate_defaults_approve_when_run_record_missing(monkeypatch):
+    from src.core.orchestrator.nodes import control as control_nodes
+
+    monkeypatch.setattr(orchestrator_control_plane, "_ensure_run_record", lambda mode="adhoc": None)
+
+    result = control_nodes.human_gate_node(
+        AgentState(current_round=2, awaiting_human_approval=True)
+    )
+
+    assert result["human_decision"] == "approve"
+    assert result["awaiting_human_approval"] is False
+
+
+def test_human_gate_timeout_defaults_stop_and_updates_control_plane(tmp_path, monkeypatch):
+    from src.core.orchestrator.nodes import control as control_nodes
+
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="evolve")
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    monkeypatch.setattr(orchestrator_runtime, "get_current_run_id", lambda: run.run_id)
+    monkeypatch.setenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "0")
+    monkeypatch.setenv("PIXIU_HUMAN_GATE_TIMEOUT_SEC", "1")
+
+    monotonic_values = iter([0.0, 1.1])
+    monkeypatch.setattr(control_nodes.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(control_nodes.time, "sleep", lambda _seconds: None)
+
+    result = control_nodes.human_gate_node(
+        AgentState(current_round=5, awaiting_human_approval=True)
+    )
+
+    assert result["human_decision"] == "stop"
+    assert result["awaiting_human_approval"] is False
+
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.run_id == run.run_id
+    assert latest_run.status == "stopped"
+    assert latest_run.current_stage == orchestrator.NODE_HUMAN_GATE
+    assert latest_run.current_round == 5
+
+    snapshot = store.get_snapshot(run.run_id)
+    assert snapshot is not None
+    assert snapshot.awaiting_human_approval is False
 
 
 # ─────────────────────────────────────────────────────────
