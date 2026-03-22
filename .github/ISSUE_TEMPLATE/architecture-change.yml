@@ -1,0 +1,92 @@
+name: Architecture Change
+description: Record a Stage boundary, contract, or product-to-runtime architecture change before implementation.
+title: "[Architecture] "
+labels:
+  - architecture
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这是 Pixiu 内部协作模板，不是公开社区 intake 表。
+        架构问题必须先收口真相，再允许 worker 落实现。
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: 一句话说明这次架构变更要解决什么问题。
+      placeholder: 例如：把 Stage 1 timeout 从 soft fallback 升级为实验模式红灯。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: 贴出最关键的文档、代码入口、日志或实验现象。
+      placeholder: |
+        docs/overview/05_spec-execution-audit.md
+        src/core/orchestrator/nodes/stage1.py
+        最近 single/evolve 运行日志
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Boundary Decision
+      description: 这次变更具体影响哪些 Stage、contract、control-plane 或产品边界？
+      placeholder: |
+        - Stage 1 / Stage 2 / Stage 3
+        - 是否影响 schema / typed contract
+        - 是否影响产品层语言
+    validations:
+      required: true
+  - type: textarea
+    id: truth
+    attributes:
+      label: Source of Truth
+      description: 明确当前真相文件和可能漂移的文件。
+      placeholder: |
+        Current truth:
+        - docs/overview/05_spec-execution-audit.md
+        - src/schemas/...
+
+        Drift to fix:
+        - docs/design/...
+        - prompt / tests / runtime ...
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: 不能动什么、必须保持什么、哪些东西不能外包给 worker。
+      placeholder: |
+        - 不扩大 execution power
+        - 不绕过 Stage 3 hard gate
+        - schema 先行
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: 架构层面的完成判据。
+      placeholder: |
+        - 真相文件与 runtime 一致
+        - caller / docs / tests 不再双轨
+        - 有明确验证命令
+    validations:
+      required: true
+  - type: textarea
+    id: worker_split
+    attributes:
+      label: Worker Split
+      description: 如果要派 worker，写清楚任务拆分和写集边界。
+      placeholder: |
+        Worker A:
+        - Task:
+        - Files:
+
+        Worker B:
+        - Task:
+        - Files:
+

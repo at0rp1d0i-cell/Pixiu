@@ -1,0 +1,99 @@
+name: Experiment Run
+description: Plan a controlled Pixiu run with fixed variables, reset boundary, and stop conditions.
+title: "[Experiment] "
+labels:
+  - experiment
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这是受控实验模板，不是“先跑了再看”的记录纸。
+        实验开始前必须固定变量、明确 reset 范围、写清 stop 条件。
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: 这轮实验要回答什么问题。
+      placeholder: 验证 Stage 1 timeout 修复后，2 轮 evolve 是否还能出现空 market context 污染后续轮次。
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Run Command
+      description: 贴出准备执行的命令和关键环境变量。
+      placeholder: |
+        REPORT_EVERY_N_ROUNDS=999 uv run pixiu run --mode evolve --rounds 2
+    validations:
+      required: true
+  - type: textarea
+    id: control_variables
+    attributes:
+      label: Control Variables
+      description: 这轮固定不变的东西。
+      placeholder: |
+        - model profile
+        - Stage 3 thresholds
+        - active islands
+        - data snapshot / provider
+    validations:
+      required: true
+  - type: dropdown
+    id: reset_needed
+    attributes:
+      label: Reset Needed
+      options:
+        - "No reset"
+        - "Reset control plane + experiment artifacts only"
+        - "Other (describe below)"
+    validations:
+      required: true
+  - type: textarea
+    id: reset_scope
+    attributes:
+      label: Reset Scope
+      description: 明确清什么，不清什么。
+      placeholder: |
+        Clear:
+        - data/control_plane_state.db
+        - data/experiment_runs/
+        - data/artifacts/
+
+        Keep:
+        - data/factor_pool_db/
+    validations:
+      required: true
+  - type: textarea
+    id: observability
+    attributes:
+      label: Observability
+      description: 这轮实验要看哪些日志、JSON、状态面。
+      placeholder: |
+        - data/experiment_runs/<run_id>/round_*.json
+        - control plane run_records
+        - Stage 1 / Stage 3 / Stage 5 tags
+    validations:
+      required: true
+  - type: textarea
+    id: stop_conditions
+    attributes:
+      label: Stop Conditions
+      description: 触发立即暂停的红灯条件。
+      placeholder: |
+        - Stage 1 timeout fallback 出现
+        - Stage 3 通过率连续 0
+        - 未捕获异常
+    validations:
+      required: true
+  - type: textarea
+    id: success_criteria
+    attributes:
+      label: Success Criteria
+      description: 这轮实验怎样才算成功。
+      placeholder: |
+        - 没有空 market context 污染
+        - round snapshots 完整
+        - prefilter 拒绝原因结构化
+    validations:
+      required: true
+

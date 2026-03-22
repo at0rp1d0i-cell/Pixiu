@@ -1,0 +1,84 @@
+name: Runtime Fix
+description: Track a bounded runtime bugfix with reproducible evidence and verification.
+title: "[Runtime] "
+labels:
+  - runtime
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先写证据，再写修复。没有复现路径的 runtime issue 不进入执行。
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: 失败现象或日志摘要。
+      placeholder: Stage 1 round 0 经常在 60s 超时后退回空 memo。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: 必须给出最小复现命令或路径。
+      placeholder: |
+        uv run pixiu run --mode single --island momentum
+        或
+        uv run pytest -q tests/path::test_name -v
+    validations:
+      required: true
+  - type: textarea
+    id: root_cause
+    attributes:
+      label: Root Cause Hypothesis
+      description: 当前最可信的根因判断；如果还没有，写“未定”并说明已排除什么。
+      placeholder: |
+        证据：
+        - ...
+
+        推断：
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: affected_files
+    attributes:
+      label: Likely Files
+      description: 先列怀疑范围，避免 worker 扩写集。
+      placeholder: |
+        src/agents/market_analyst.py
+        src/core/orchestrator/nodes/stage1.py
+        tests/test_stage1.py
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: 明确不能用的修法和必须守住的边界。
+      placeholder: |
+        - 不用“加大 timeout”掩盖问题
+        - 不绕过 Stage 3
+        - 不把智能塞进 execution layer
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Plan
+      description: 修复后必须跑什么。
+      placeholder: |
+        - uv run pytest -q tests -m "smoke or unit"
+        - single-island repro
+        - targeted integration test
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk
+      description: 可能引入的行为变化或回归面。
+      placeholder: |
+        - Stage 1 工具面缩窄后上下文变薄
+        - validator 口径收紧会降低通过率
+
