@@ -18,6 +18,7 @@ pytestmark = pytest.mark.unit
         "download_stk_limit_data.py",
         "download_margin_history.py",
         "convert_daily_basic_to_qlib.py",
+        "reset_experiment_state.py",
     ],
 )
 def test_script_entrypoints_can_import_src_modules(script_name: str):
