@@ -467,8 +467,8 @@ def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
             "economic_intuition": "bad",
             "formula_recipe": {
                 "base_field": "$close",
-                "lookback_short": 7,
-                "lookback_long": 20,
+                "lookback_short": 20,
+                "lookback_long": 5,
                 "transform_family": "mean_spread",
                 "normalization": "none"
             },
@@ -534,6 +534,7 @@ def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     assert researcher.last_generation_diagnostics["local_retry_count"] == 1
     assert "重试硬约束" in captured_user_messages[1]
     assert "FormulaSketch recipe 无效" in captured_user_messages[1]
+    assert "lookback_short < lookback_long" in captured_user_messages[1]
     assert "InvalidRecipe" not in captured_user_messages[1]
 
 
@@ -605,6 +606,31 @@ def test_factor_algebra_rejects_free_form_only_path_and_retries():
     sample_reason = researcher.last_generation_diagnostics["sample_rejections"][0]["reason"]
     assert "FormulaSketch recipe 无效" in sample_reason
     assert "missing_formula_recipe" in sample_reason
+
+
+def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
+    from src.agents.researcher import AlphaResearcher
+
+    feedback = AlphaResearcher._build_local_rejection_feedback(
+        [
+            {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：missing_formula_recipe",
+            },
+            {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：lookback_short must be smaller than lookback_long",
+            },
+            {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：volume_confirmation requires interaction_mode='mul'",
+            },
+        ]
+    )
+
+    assert "必须提供 formula_recipe 对象" in feedback
+    assert "lookback_short < lookback_long" in feedback
+    assert "interaction_mode 必须为 mul" in feedback
 
 
 def test_non_factor_algebra_subspace_keeps_free_form_path():

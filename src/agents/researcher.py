@@ -610,8 +610,30 @@ class AlphaResearcher:
         if not sample_rejections:
             return "本地预筛未通过，但无拒绝样本。请更换思路并避免重复提交已被本地预筛拒绝的模式。"
         lines = []
+        hints: list[str] = []
+        seen_hints: set[str] = set()
         for idx, item in enumerate(sample_rejections[:3], start=1):
-            lines.append(f"{idx}. [{item.get('filter', 'unknown')}] {item.get('reason', '')}")
+            reason = item.get("reason", "")
+            lines.append(f"{idx}. [{item.get('filter', 'unknown')}] {reason}")
+            reason_lower = reason.lower()
+            if "missing_formula_recipe" in reason_lower:
+                hint = "- FACTOR_ALGEBRA 必须提供 formula_recipe 对象，不能只给 proposed_formula 字符串。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "lookback_short must be smaller than lookback_long" in reason_lower:
+                hint = "- 公式窗口必须满足 lookback_short < lookback_long（例如 5 < 20）。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "volume_confirmation requires interaction_mode='mul'" in reason_lower:
+                hint = "- 当 transform_family=volume_confirmation 时，interaction_mode 必须为 mul。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+        if hints:
+            lines.append("针对本轮拒绝样本，请按下列 recipe 约束修正：")
+            lines.extend(hints)
         lines.append("请避免重复提交与上述拒绝原因相同的公式模式。")
         return "\n".join(lines)
 

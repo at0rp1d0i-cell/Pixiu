@@ -1,47 +1,51 @@
-# 因子代数搜索 — 假设生成框架
+# 因子代数搜索 — FormulaSketch Lite v1
 
 > **Type C — 子空间注入：当 subspace == FACTOR_ALGEBRA 时注入。**
-> 补充动态 context 中的"推理层"：如何系统化生成代数因子假设，以及质量自检。
+> 本子空间采用 FormulaSketch Lite v1：先输出 `formula_recipe`，再由系统渲染 `proposed_formula`。
 
 ---
 
 ## 核心定位
 
-因子代数搜索是**有约束的组合搜索**，不是随机尝试公式。
-每个假设必须锚定在一个可解释的市场机制上，代数表达式是该机制的最小可测形式。
+因子代数搜索是**有约束的 recipe 组合搜索**，不是自由公式写作。
+每个假设必须锚定可解释机制，`formula_recipe` 是唯一主路径。
 
 ---
 
-## 结构化生成步骤
+## 结构化生成步骤（必须按顺序）
 
-**Step 1 — 选择信号源**
-从可用原语中选择 1-2 个基础字段，明确它们捕捉了什么市场信息：
-- 价量类：动量、成交量异动、价格波动率
-- 基本面类：估值水平、盈利质量、成长性
-- 衍生类：资金流向代理、流动性代理
+**Step 1 — 选择机制与字段**
+- 选一个机制（均值差、比值动量、波动状态、量价确认）
+- 选择 `base_field`；仅 `volume_confirmation` 需要 `secondary_field`
 
-**Step 2 — 选择核心算子**
-选择一个时间变换，说明变换的经济含义：
-- 时间窗口（Mean/Std/Max/Min over N）：捕捉持续性 vs 短期异动
-- 排序/标准化类算子：只有在当前 prompt 明确列为合法算子时才可使用
-- 动量（收益率计算）：信号的方向性
+**Step 2 — 填写 formula_recipe**
+- 必填字段：
+  - `base_field`
+  - `lookback_short`
+  - `lookback_long`
+  - `transform_family`（`mean_spread | ratio_momentum | volatility_state | volume_confirmation`）
+  - `interaction_mode`（`none | mul | sub`）
+  - `normalization`（`none | rank | quantile`）
+- 条件字段：
+  - `normalization_window`（当 normalization != none）
+  - `quantile_qscore`（当 normalization = quantile）
+  - `secondary_field`（仅 volume_confirmation）
 
-**Step 3 — 构造公式**
-基于 Step 1-2 写出单行 Qlib 表达式，验证语法后写入 `proposed_formula`。
+**Step 3 — recipe 合规自检**
+- [ ] `lookback_short < lookback_long`
+- [ ] `volume_confirmation` 时 `interaction_mode='mul'`
+- [ ] 归一化仅使用 `Rank(expr, N)` 或 `Quantile(expr, N, qscore)` 对应 recipe 字段
+- [ ] 不提交自由 `Div`、不手写任意算子树
 
-**Step 4 — 质量自检（必须完成）**
-在输出前逐项确认：
-- [ ] 这个因子的市场机制是什么？（能用一句话解释）
-- [ ] 它在什么 regime 下有效？（如：高波动期、趋势市）
-- [ ] 它在什么 regime 下会失效？（如：政策冲击、流动性危机）
-- [ ] 它与本 Island 历史最优因子有实质差异吗？（机制不同，不是参数微调）
-- [ ] 换手率预期是否可控？（高频动量信号慎用）
+**Step 4 — 输出 Note**
+- `proposed_formula` 填占位文本即可，系统会按 recipe 覆盖渲染
+- hypothesis/economic_intuition/risk/regime 仍需完整输出
 
 ---
 
 ## 禁止项
 
-- **禁止**：使用 `Ref($close, -N)`（未来数据泄露）
-- **禁止**：嵌套超过 3 层的复杂表达式（过拟合风险）
-- **禁止**：提交同一公式的参数微调变体（仅改窗口长度不算差异化）
-- **禁止**：使用未在可用字段列表中注册的字段名
+- **禁止**：把自由 `proposed_formula` 字符串作为主路径（缺失 `formula_recipe` 会被拒绝）
+- **禁止**：`lookback_short >= lookback_long`
+- **禁止**：`volume_confirmation` 搭配非 `mul` 交互模式
+- **禁止**：使用未在运行时可用列表中的字段
