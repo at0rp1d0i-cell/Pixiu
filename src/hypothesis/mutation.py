@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # 已知的 Qlib 函数算子（前缀调用形式）
 _KNOWN_OPS = {
     "Mean", "Std", "Rank", "Ref", "Corr", "Sum", "Min", "Max",
-    "Delta", "Div", "Mul", "Add", "Sub", "Zscore", "Demean",
+    "Delta", "Div", "Mul", "Add", "Sub",
     "Log", "Abs", "Sign", "Power", "If", "Slope", "Resi",
-    "Neutralize",
+    "Quantile",
 }
 
 # 窗口参数候选：可以在此范围内轮换
@@ -35,9 +35,8 @@ _HORIZON_CANDIDATES = [5, 10, 20, 40, 60, 120]
 
 # Normalization 算子对（互相切换）
 _NORM_PAIRS = {
-    "Rank": "Zscore",
-    "Zscore": "Rank",
-    "Demean": "Zscore",
+    "Rank": "Quantile",
+    "Quantile": "Rank",
 }
 
 # SWAP_FIELD 的替换映射（同类字段互换）
@@ -53,6 +52,8 @@ _FIELD_SWAP_MAP = {
 
 # ADD_INTERACTION_TERM 可注入的交叉字段
 _INTERACTION_FIELD = "$volume"
+_DEFAULT_RANK_WINDOW = 20
+_DEFAULT_QUANTILE_SCORE = 0.8
 
 
 # ─────────────────────────────────────────────────────────
@@ -321,7 +322,7 @@ class SymbolicMutator:
             case MutationOperator.REMOVE_OPERATOR:
                 return self._remove_outer_operator(node)
             case MutationOperator.ADD_OPERATOR:
-                return self._add_cross_section_wrapper(node)
+                return self._add_temporal_rank_wrapper(node)
             case MutationOperator.ALTER_INTERACTION:
                 return self._add_interaction_term(node)
             case _:
@@ -375,13 +376,40 @@ class SymbolicMutator:
     # ── CHANGE_NORMALIZATION ─────────────────────────────
 
     def _change_normalization(self, node: FormulaNode) -> Optional[FormulaNode]:
-        """将最外层归一化算子在 Rank / Zscore / Demean 之间切换。"""
+        """将最外层归一化算子在 Rank / Quantile 之间切换。"""
         target = _NORM_PAIRS.get(node.op)
         if target is None:
             return None
         result = copy.deepcopy(node)
-        result.op = target
-        return result
+        if target == "Quantile":
+            if not result.args:
+                return None
+            expr = copy.deepcopy(result.args[0])
+            if len(result.args) >= 2 and result.args[1].is_numeric():
+                window = copy.deepcopy(result.args[1])
+            else:
+                window = FormulaNode(op=str(_DEFAULT_RANK_WINDOW))
+            result.op = "Quantile"
+            result.args = [
+                expr,
+                window,
+                FormulaNode(op=str(_DEFAULT_QUANTILE_SCORE)),
+            ]
+            return result
+
+        if target == "Rank":
+            if not result.args:
+                return None
+            expr = copy.deepcopy(result.args[0])
+            if len(result.args) >= 2 and result.args[1].is_numeric():
+                window = copy.deepcopy(result.args[1])
+            else:
+                window = FormulaNode(op=str(_DEFAULT_RANK_WINDOW))
+            result.op = "Rank"
+            result.args = [expr, window]
+            return result
+
+        return None
 
     # ── REMOVE_OPERATOR ──────────────────────────────────
 
@@ -399,28 +427,47 @@ class SymbolicMutator:
                 return copy.deepcopy(arg)
         return None
 
-    # ── ADD_OPERATOR（ADD_CROSS_SECTION_WRAPPER）────────
+    # ── ADD_OPERATOR（ADD_TEMPORAL_RANK_WRAPPER）────────
 
-    def _add_cross_section_wrapper(self, node: FormulaNode) -> Optional[FormulaNode]:
-        """在公式外包裹一层 Rank（截面标准化）。
+    def _add_temporal_rank_wrapper(self, node: FormulaNode) -> Optional[FormulaNode]:
+        """在公式外包裹一层时序 Rank(expr, N)。
 
-        若最外层已是 Rank，则改为 Zscore（避免 Rank(Rank(...)) 冗余）。
+        若最外层已是 Rank，则改为 Quantile(expr, N, q) 避免 Rank(Rank(...)) 冗余。
         """
         if node.op == "Rank":
-            # 改 Rank 为 Zscore（避免双重 Rank）
-            return FormulaNode(op="Zscore", args=[copy.deepcopy(node.args[0])] if node.args else [])
-        return FormulaNode(op="Rank", args=[copy.deepcopy(node)])
+            if not node.args:
+                return None
+            expr = copy.deepcopy(node.args[0])
+            if len(node.args) >= 2 and node.args[1].is_numeric():
+                window = copy.deepcopy(node.args[1])
+            else:
+                window = FormulaNode(op=str(_DEFAULT_RANK_WINDOW))
+            return FormulaNode(
+                op="Quantile",
+                args=[
+                    expr,
+                    window,
+                    FormulaNode(op=str(_DEFAULT_QUANTILE_SCORE)),
+                ],
+            )
+        return FormulaNode(
+            op="Rank",
+            args=[copy.deepcopy(node), FormulaNode(op=str(_DEFAULT_RANK_WINDOW))],
+        )
 
     # ── ALTER_INTERACTION ────────────────────────────────
 
     def _add_interaction_term(self, node: FormulaNode) -> Optional[FormulaNode]:
-        """添加与成交量的交叉项：Mul(原公式, Rank($volume))。
+        """添加与成交量的交叉项：Mul(原公式, Rank($volume, N))。
 
-        若公式已经是 Mul 节点且参数数量为 2，则尝试替换第二个参数为 Rank($volume)。
+        若公式已经是 Mul 节点且参数数量为 2，则尝试替换第二个参数为 Rank($volume, N)。
         """
         volume_rank = FormulaNode(
             op="Rank",
-            args=[FormulaNode(op=_INTERACTION_FIELD)],
+            args=[
+                FormulaNode(op=_INTERACTION_FIELD),
+                FormulaNode(op=str(_DEFAULT_RANK_WINDOW)),
+            ],
         )
         if node.op == "Mul" and len(node.args) == 2:
             # 已有 Mul：替换第二个 arg
@@ -437,7 +484,7 @@ class SymbolicMutator:
             MutationOperator.SWAP_HORIZON: f"时间窗口变异: {src} → {result}",
             MutationOperator.CHANGE_NORMALIZATION: f"归一化切换: {src} → {result}",
             MutationOperator.REMOVE_OPERATOR: f"移除外层算子: {src} → {result}",
-            MutationOperator.ADD_OPERATOR: f"添加截面算子: {src} → {result}",
+            MutationOperator.ADD_OPERATOR: f"添加时序排名算子: {src} → {result}",
             MutationOperator.ALTER_INTERACTION: f"添加交叉项: {src} → {result}",
         }
         return desc_map.get(op, f"{op.value}: {src} → {result}")

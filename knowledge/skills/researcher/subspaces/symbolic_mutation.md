@@ -21,7 +21,7 @@
 
 **Step 2 — 选择变异算子**
 选择一种变异方式，说明预期改进：
-- `ADD_OPERATOR`：补充一个维度（如加入截面排名消除量纲）
+- `ADD_OPERATOR`：补充一个时间算子维度（例如加入合法的时序 `Rank(expr, N)`）
 - `REMOVE_OPERATOR`：简化公式减少噪声（如去掉不稳定的嵌套层）
 - `SWAP_HORIZON`：测试不同时间尺度（短期 5d vs 中期 20d vs 长期 60d）
 - `CHANGE_NORMALIZATION`：测试不同标准化对 IC 的影响
@@ -47,3 +47,5 @@
 - **禁止**：对同一个基础因子连续提交多个细微变体
 - **禁止**：变异后的公式比原公式更复杂但无法解释复杂度的来源
 - **禁止**：当前 Island 无已有因子时强行"变异"（应改用 FACTOR_ALGEBRA）
+- **禁止**：使用当前运行时未批准的算子（如 `Zscore`、`Neutralize`）
+- **禁止**：将 `Rank` 写成无窗口参数形式（`Rank(expr)`）；应使用 `Rank(expr, N)`

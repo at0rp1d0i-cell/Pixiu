@@ -109,3 +109,31 @@ class TestConditionalInjection:
             subspace=ExplorationSubspace.CROSS_MARKET,
         )
         assert "跨市场模式迁移" in result
+
+    def test_symbolic_mutation_skill_avoids_cross_section_wording(self, loader):
+        result = loader.load_for_agent(
+            "researcher",
+            _state(),
+            subspace=ExplorationSubspace.SYMBOLIC_MUTATION,
+        )
+        assert "截面排名" not in result
+        assert "Rank(expr, N)" in result
+
+
+class TestSkillDriftGuards:
+    def test_island_evolution_uses_current_note_contract(self, loader):
+        content = loader._load("researcher/island_evolution.md")
+        assert content is not None
+        assert "AlphaResearcherBatch -> FactorResearchNote[]" in content
+        assert "note_id" in content
+        assert "proposed_formula" in content
+        assert "market_observation" not in content
+        assert "expected_direction" not in content
+
+    def test_northbound_and_sentiment_are_proxy_only(self, loader):
+        northbound = loader._load("researcher/islands/northbound.md")
+        sentiment = loader._load("researcher/islands/sentiment.md")
+        assert northbound is not None
+        assert sentiment is not None
+        assert "proxy-only" in northbound
+        assert "proxy-only" in sentiment

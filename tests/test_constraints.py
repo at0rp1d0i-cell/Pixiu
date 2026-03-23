@@ -867,11 +867,12 @@ class TestQlibFormulaParserBasic:
         assert node.args == []
 
     def test_parse_simple_function(self):
-        node = self.parser.parse("Rank($close)")
+        node = self.parser.parse("Rank($close, 20)")
         assert node is not None
         assert node.op == "Rank"
-        assert len(node.args) == 1
+        assert len(node.args) == 2
         assert node.args[0].op == "$close"
+        assert node.args[1].op == "20"
 
     def test_parse_function_with_window(self):
         node = self.parser.parse("Mean($close, 5)")
@@ -882,7 +883,7 @@ class TestQlibFormulaParserBasic:
         assert node.args[1].op == "5"
 
     def test_parse_nested_function(self):
-        node = self.parser.parse("Rank(Mean($close, 20))")
+        node = self.parser.parse("Rank(Mean($close, 20), 20)")
         assert node is not None
         assert node.op == "Rank"
         assert node.args[0].op == "Mean"
@@ -900,7 +901,7 @@ class TestQlibFormulaParserBasic:
         assert node.to_formula() == formula
 
     def test_roundtrip_nested(self):
-        formula = "Rank(Mean($close, 20))"
+        formula = "Rank(Mean($close, 20), 20)"
         node = self.parser.parse(formula)
         assert node is not None
         assert node.to_formula() == formula
@@ -925,7 +926,7 @@ class TestQlibFormulaParserInfixDetection:
         assert self.parser.parse("Mean($close, 5) / Mean($close, 20)") is None
 
     def test_nested_infix_inside_function_not_detected_as_toplevel(self):
-        result = self.parser.parse("Rank($close)")
+        result = self.parser.parse("Rank($close, 20)")
         assert result is not None
 
     def test_empty_string_returns_none(self):
@@ -978,14 +979,14 @@ class TestChangeNormalization:
         self.mutator = SymbolicMutator()
 
     def test_rank_to_zscore(self):
-        result = self.mutator.mutate("Rank($close)", MutationOperator.CHANGE_NORMALIZATION)
+        result = self.mutator.mutate("Rank($close, 20)", MutationOperator.CHANGE_NORMALIZATION)
         assert result is not None
-        assert result.result_formula == "Zscore($close)"
+        assert result.result_formula == "Quantile($close, 20, 0.8)"
 
-    def test_zscore_to_rank(self):
-        result = self.mutator.mutate("Zscore($close)", MutationOperator.CHANGE_NORMALIZATION)
+    def test_quantile_to_rank(self):
+        result = self.mutator.mutate("Quantile($close, 20, 0.8)", MutationOperator.CHANGE_NORMALIZATION)
         assert result is not None
-        assert result.result_formula == "Rank($close)"
+        assert result.result_formula == "Rank($close, 20)"
 
     def test_non_norm_op_returns_none(self):
         result = self.mutator.mutate("Mean($close, 5)", MutationOperator.CHANGE_NORMALIZATION)
@@ -1002,7 +1003,7 @@ class TestRemoveOperator:
         self.mutator = SymbolicMutator()
 
     def test_remove_rank(self):
-        result = self.mutator.mutate("Rank($close)", MutationOperator.REMOVE_OPERATOR)
+        result = self.mutator.mutate("Rank($close, 20)", MutationOperator.REMOVE_OPERATOR)
         assert result is not None
         assert result.result_formula == "$close"
 
@@ -1012,7 +1013,7 @@ class TestRemoveOperator:
         assert result.result_formula == "$close"
 
     def test_remove_nested(self):
-        result = self.mutator.mutate("Rank(Mean($close, 20))", MutationOperator.REMOVE_OPERATOR)
+        result = self.mutator.mutate("Rank(Mean($close, 20), 20)", MutationOperator.REMOVE_OPERATOR)
         assert result is not None
         assert result.result_formula == "Mean($close, 20)"
 
@@ -1029,13 +1030,12 @@ class TestAddOperator:
     def test_add_rank_wrapper(self):
         result = self.mutator.mutate("Mean($close, 5)", MutationOperator.ADD_OPERATOR)
         assert result is not None
-        assert result.result_formula.startswith("Rank(")
-        assert "Mean($close, 5)" in result.result_formula
+        assert result.result_formula == "Rank(Mean($close, 5), 20)"
 
-    def test_rank_wrapped_in_zscore(self):
-        result = self.mutator.mutate("Rank($close)", MutationOperator.ADD_OPERATOR)
+    def test_rank_wrapped_in_quantile(self):
+        result = self.mutator.mutate("Rank($close, 20)", MutationOperator.ADD_OPERATOR)
         assert result is not None
-        assert result.result_formula == "Zscore($close)"
+        assert result.result_formula == "Quantile($close, 20, 0.8)"
 
     def test_add_operator_changes_formula(self):
         result = self.mutator.mutate("$close", MutationOperator.ADD_OPERATOR)
@@ -1055,9 +1055,10 @@ class TestAlterInteraction:
         assert "$volume" in result.result_formula
 
     def test_interaction_wraps_in_mul(self):
-        result = self.mutator.mutate("Rank($close)", MutationOperator.ALTER_INTERACTION)
+        result = self.mutator.mutate("Rank($close, 20)", MutationOperator.ALTER_INTERACTION)
         assert result is not None
         assert result.result_formula.startswith("Mul(")
+        assert "Rank($volume, 20)" in result.result_formula
 
     def test_existing_mul_replaces_second_arg(self):
         result = self.mutator.mutate("Mul($close, $open)", MutationOperator.ALTER_INTERACTION)
@@ -1069,7 +1070,7 @@ class TestAlterInteraction:
 class TestTryAllMutations:
 
     def test_rank_produces_multiple_mutations(self):
-        results = try_all_mutations("Rank($close)")
+        results = try_all_mutations("Rank($close, 20)")
         assert len(results) >= 2
 
     def test_mean_with_window_produces_mutations(self):
@@ -1086,17 +1087,17 @@ class TestTryAllMutations:
             assert isinstance(r, MutationResult)
 
     def test_results_have_valid_operators(self):
-        results = try_all_mutations("Rank($close)")
+        results = try_all_mutations("Rank($close, 20)")
         for r in results:
             assert isinstance(r.operator, MutationOperator)
-            assert r.source_formula == "Rank($close)"
+            assert r.source_formula == "Rank($close, 20)"
             assert r.result_formula != r.source_formula
 
 
 class TestBuildMutationRecordDict:
 
     def test_dict_has_required_keys(self):
-        results = try_all_mutations("Rank($close)")
+        results = try_all_mutations("Rank($close, 20)")
         assert results, "需要至少一个变异结果"
         d = build_mutation_record_dict(results[0])
         assert "operator" in d

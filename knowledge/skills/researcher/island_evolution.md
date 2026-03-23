@@ -51,11 +51,11 @@ Step 5 → 输出结构化因子假设（JSON 格式）
 | Island | 核心变量要求 |
 |---|---|
 | `momentum` | 主变量来自价格或成交量的时序特征（收益率、量比等） |
-| `northbound` | 主变量**必须包含**北向资金相关数据（净流入、持股变化） |
+| `northbound` | 主变量使用可用字段构造“外资风格/资金偏好”代理（当前不要求真实北向字段） |
 | `valuation` | 主变量必须是某种估值比率或行业估值分位数 |
 | `volatility` | 主变量来自价格波动特征（历史波动率、ATR、偏度） |
 | `volume` | 主变量来自资金流向（主力净流入、大单净流入、量价背离） |
-| `sentiment` | 主变量来自情绪代理（研报评级、分析师预期修正） |
+| `sentiment` | 主变量使用价量可计算的情绪代理（当前不要求研报/分析师外部字段） |
 
 ---
 
@@ -101,20 +101,11 @@ Step 5 → 输出结构化因子假设（JSON 格式）
 
 ## 输出标准提醒
 
-最终输出必须是合法 JSON（Validator 会检查）：
-```json
-{
-  "name": "island_方向_描述_滚动窗口",
-  "formula": "合法的 Qlib 表达式",
-  "hypothesis": "因子的中文假设（1-3句）",
-  "market_observation": "今日工具调用观察到的关键数据",
-  "expected_direction": "positive 或 negative",
-  "rationale": "A 股市场下的经济逻辑（1-3句）"
-}
-```
-
-命名规范：`{island}_{signal_type}_{window}d`
-例：`northbound_flow_momentum_5d`、`momentum_vol_adj_corr_20d`
+最终输出必须符合当前 `AlphaResearcherBatch -> FactorResearchNote[]` 契约：
+- 顶层返回 `notes`（2-3 个）和 `generation_rationale`
+- 每个 note 至少包含：`note_id`、`island`、`iteration`、`hypothesis`、`economic_intuition`、`proposed_formula`、`risk_factors`、`market_context_date`、`applicable_regimes`、`invalid_regimes`
+- `applicable_regimes` 与 `invalid_regimes` 必须各至少一项
+- 不要回退到旧的五字段输出契约；统一使用当前 `FactorResearchNote` 结构
 
 ---
 
