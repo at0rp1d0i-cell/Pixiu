@@ -303,6 +303,7 @@ Last Reviewed: 2026-03-23
   - 未来 Stage 2 formula sketch 配置
 - `Evidence`:
   - 本次 2026-03-23 架构讨论结论
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
 
 ### DEF-001
 
@@ -344,6 +345,46 @@ Last Reviewed: 2026-03-23
   - 未来 Stage 2 family/novelty memory settings
 - `Evidence`:
   - 本次 2026-03-23 架构讨论结论
+
+### DEF-003
+
+- `Type`: `deferred`
+- `Status`: `agreed`
+- `Scope`: `Stage 2 formula generation`
+- `Current Behavior`:
+  - 尚未实现 AST-first formula generation
+  - 当前仍以内部 recipe/renderer 与字符串公式 contract 为过渡形态
+- `Why It Exists`:
+  - 当前主线优先让 `factor_algebra` 先收敛，避免再次打开大基础设施改造
+- `Risk If Kept`:
+  - 只靠 lite recipe 很难彻底消灭自由字符串残留和表达能力上限
+- `Removal Trigger`:
+  - FormulaSketch Lite v1 稳定
+  - Stage 2 需要更强的可组合表达与更彻底的 impossible-by-construction 约束
+- `Related Settings`:
+  - 未来 Stage 2 formula generation settings
+- `Evidence`:
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
+
+### DEF-004
+
+- `Type`: `deferred`
+- `Status`: `agreed`
+- `Scope`: `Stage 2/3/4 schema contract`
+- `Current Behavior`:
+  - 尚未实现 schema-level FormulaSketch
+  - 当前 `FactorResearchNote` / `Hypothesis` / `StrategySpec` 仍以 `proposed_formula / final_formula` 为主 contract
+- `Why It Exists`:
+  - 这轮优先恢复实验收敛，不做跨 Stage 的 schema 迁移
+- `Risk If Kept`:
+  - sketch 仍不是一等对象，跨 stage 审计与测试边界会继续偏弱
+- `Removal Trigger`:
+  - internal FormulaSketch Lite 跑稳
+  - sketch object 的 Stage 2/3/4 边界和 schema 真相完成设计
+- `Related Settings`:
+  - 未来 Stage 2 sketch schema settings
+- `Evidence`:
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
 
 ## 4. 维护规则
 
