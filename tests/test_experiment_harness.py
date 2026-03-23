@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -152,3 +154,52 @@ async def test_harness_long_run_requires_flag_and_respects_env_override(monkeypa
     assert result.ok
     assert result.long_run_executed
     assert calls == [("single", "momentum"), ("evolve", 2), ("evolve", 7)]
+
+
+@pytest.mark.asyncio
+async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    module = _load_harness_module()
+    qlib_dir = tmp_path / "qlib_runtime"
+    qlib_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.delenv("QLIB_DATA_DIR", raising=False)
+    monkeypatch.delenv("REPORT_EVERY_N_ROUNDS", raising=False)
+
+    def fake_resolve_profile_env_truth(profile, **kwargs):
+        return SimpleNamespace(
+            merged_env={
+                "TUSHARE_TOKEN": "runtime-token",
+                "QLIB_DATA_DIR": str(qlib_dir),
+            },
+            sources={
+                "TUSHARE_TOKEN": "user_runtime_env",
+                "QLIB_DATA_DIR": "user_runtime_env",
+            },
+        )
+
+    observed: dict[str, str] = {}
+
+    async def fake_single(_island: str) -> None:
+        observed["TUSHARE_TOKEN"] = os.environ.get("TUSHARE_TOKEN", "")
+        observed["QLIB_DATA_DIR"] = os.environ.get("QLIB_DATA_DIR", "")
+        observed["REPORT_EVERY_N_ROUNDS"] = os.environ.get("REPORT_EVERY_N_ROUNDS", "")
+
+    async def fake_evolve(_rounds: int) -> None:
+        return None
+
+    monkeypatch.setattr(module, "resolve_profile_env_truth", fake_resolve_profile_env_truth)
+
+    result = await module.run_harness(
+        _FakeProfile(report_every_n_rounds=9),
+        profile_path="dummy.json",
+        long_run=False,
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=True, blocking_errors=[]),
+        run_single_fn=fake_single,
+        run_evolve_fn=fake_evolve,
+        status_runner=lambda mode: (True, f"{mode} ok"),
+    )
+
+    assert result.ok
+    assert observed["TUSHARE_TOKEN"] == "runtime-token"
+    assert observed["QLIB_DATA_DIR"] == str(qlib_dir)
+    assert observed["REPORT_EVERY_N_ROUNDS"] == "9"

@@ -63,8 +63,10 @@ def test_load_profile_missing_key_raises(tmp_path: Path):
         module.load_profile(profile_path)
 
 
-def test_run_preflight_blocks_when_env_missing(tmp_path: Path):
+def test_run_preflight_blocks_when_env_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     module = _load_preflight_module()
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.delenv("QLIB_DATA_DIR", raising=False)
     profile = module.ExperimentProfile(
         doctor_mode="core",
         single_island="momentum",
@@ -93,6 +95,8 @@ def test_run_preflight_blocks_when_env_missing(tmp_path: Path):
     assert not called["doctor"]
     assert any("QLIB_DATA_DIR not found" in err for err in result.blocking_errors)
     assert any("TUSHARE_TOKEN missing" in err for err in result.blocking_errors)
+    assert result.qlib_data_dir_source == "profile"
+    assert result.tushare_token_source == "unset"
 
 
 def test_run_preflight_propagates_doctor_failure(tmp_path: Path):
@@ -120,6 +124,8 @@ def test_run_preflight_propagates_doctor_failure(tmp_path: Path):
     assert not result.ok
     assert result.doctor_exit_code == 7
     assert any("doctor --mode core failed (exit=7)" in err for err in result.blocking_errors)
+    assert result.qlib_data_dir_source == "profile"
+    assert result.tushare_token_source == "process_env"
 
 
 def test_run_preflight_passes_with_structured_success(tmp_path: Path):
@@ -147,6 +153,8 @@ def test_run_preflight_passes_with_structured_success(tmp_path: Path):
     assert result.ok
     assert result.blocking_errors == []
     assert result.doctor_exit_code == 0
+    assert result.qlib_data_dir_source == "profile"
+    assert result.tushare_token_source == "process_env"
 
 
 def test_run_preflight_prefers_env_qlib_data_dir_override(tmp_path: Path):
@@ -180,6 +188,7 @@ def test_run_preflight_prefers_env_qlib_data_dir_override(tmp_path: Path):
     assert result.ok
     assert result.qlib_data_dir == str(qlib_dir)
     assert seen["qlib"] == str(qlib_dir)
+    assert result.qlib_data_dir_source == "process_env"
 
 
 def test_run_preflight_require_reset_clean_honors_project_root(tmp_path: Path, monkeypatch):
@@ -213,3 +222,64 @@ def test_run_preflight_require_reset_clean_honors_project_root(tmp_path: Path, m
     )
     assert not result.ok
     assert any("require_reset_clean=true" in err for err in result.blocking_errors)
+    assert result.tushare_token_source == "process_env"
+
+
+def test_run_preflight_user_runtime_env_beats_repo_env_and_reports_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load_preflight_module()
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.delenv("QLIB_DATA_DIR", raising=False)
+
+    qlib_runtime = tmp_path / "qlib_runtime"
+    qlib_runtime.mkdir(parents=True, exist_ok=True)
+    qlib_repo = tmp_path / "qlib_repo"
+    qlib_repo.mkdir(parents=True, exist_ok=True)
+
+    runtime_env_path = tmp_path / "runtime.env"
+    runtime_env_path.write_text(
+        f"TUSHARE_TOKEN=runtime-token\nQLIB_DATA_DIR={qlib_runtime}\n",
+        encoding="utf-8",
+    )
+
+    repo_env_path = tmp_path / ".env"
+    repo_env_path.write_text(
+        f"TUSHARE_TOKEN=repo-token\nQLIB_DATA_DIR={qlib_repo}\n",
+        encoding="utf-8",
+    )
+
+    profile = module.ExperimentProfile(
+        doctor_mode="core",
+        single_island="momentum",
+        preflight_evolve_rounds=2,
+        long_run_rounds=20,
+        require_reset_clean=False,
+        qlib_data_dir="data/qlib_bin_in_profile",
+        report_every_n_rounds=5,
+        max_rounds_env_override_allowed=True,
+    )
+
+    observed_env: dict[str, str] = {}
+
+    def fake_doctor(mode, env):
+        observed_env["TUSHARE_TOKEN"] = env.get("TUSHARE_TOKEN", "")
+        observed_env["QLIB_DATA_DIR"] = env.get("QLIB_DATA_DIR", "")
+        return 0
+
+    result = module.run_preflight(
+        profile,
+        profile_path="dummy.json",
+        project_root=tmp_path,
+        env={},
+        doctor_runner=fake_doctor,
+        runtime_env_path=runtime_env_path,
+        repo_env_path=repo_env_path,
+    )
+
+    assert result.ok
+    assert result.tushare_token_source == "user_runtime_env"
+    assert result.qlib_data_dir_source == "user_runtime_env"
+    assert result.qlib_data_dir == str(qlib_runtime)
+    assert observed_env["TUSHARE_TOKEN"] == "runtime-token"
+    assert observed_env["QLIB_DATA_DIR"] == str(qlib_runtime)

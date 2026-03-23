@@ -35,6 +35,7 @@ _PRE = _load_preflight_module()
 DEFAULT_PROFILE_PATH = _PRE.DEFAULT_PROFILE_PATH
 load_profile = _PRE.load_profile
 run_preflight = _PRE.run_preflight
+resolve_profile_env_truth = _PRE.resolve_profile_env_truth
 
 
 @dataclass(frozen=True)
@@ -102,15 +103,16 @@ def _resolve_long_run_rounds(profile) -> int:
 
 
 def _apply_runtime_env(profile, env: Mapping[str, str] | None = None) -> dict[str, str]:
-    merged = dict(os.environ)
-    if env is not None:
-        merged.update(env)
-    qlib_path = Path(profile.qlib_data_dir)
-    if not qlib_path.is_absolute():
-        qlib_path = PROJECT_ROOT / qlib_path
-    merged["QLIB_DATA_DIR"] = str(qlib_path)
+    env_truth = resolve_profile_env_truth(
+        profile,
+        project_root=PROJECT_ROOT,
+        env=env,
+        repo_env_path=PROJECT_ROOT / ".env",
+    )
+    merged = dict(env_truth.merged_env)
     merged["REPORT_EVERY_N_ROUNDS"] = str(profile.report_every_n_rounds)
-    os.environ["QLIB_DATA_DIR"] = merged["QLIB_DATA_DIR"]
+    for key in env_truth.sources:
+        os.environ[key] = merged[key]
     os.environ["REPORT_EVERY_N_ROUNDS"] = merged["REPORT_EVERY_N_ROUNDS"]
     return merged
 

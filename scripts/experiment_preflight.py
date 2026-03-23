@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
 
+from src.core.env import apply_resolved_env, resolve_layered_env
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE_PATH = PROJECT_ROOT / "config" / "experiments" / "default.json"
@@ -21,6 +22,9 @@ RESET_TARGETS = (
     PROJECT_ROOT / "data" / "experiment_runs",
     PROJECT_ROOT / "data" / "artifacts",
 )
+CRITICAL_ENV_KEYS = ("TUSHARE_TOKEN", "QLIB_DATA_DIR")
+SOURCE_PROFILE = "profile"
+SOURCE_UNSET = "unset"
 
 
 @dataclass(frozen=True)
@@ -41,12 +45,21 @@ class PreflightResult:
     profile_path: str
     doctor_mode: str
     qlib_data_dir: str
+    qlib_data_dir_source: str
+    tushare_token_source: str
     doctor_exit_code: int | None
     blocking_errors: list[str]
     warnings: list[str]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ResolvedProfileEnv:
+    merged_env: dict[str, str]
+    qlib_data_dir: str
+    sources: dict[str, str]
 
 
 def _read_json(path: Path) -> dict[str, object]:
@@ -103,20 +116,44 @@ def _validate_profile(profile: ExperimentProfile) -> None:
         raise ValueError("qlib_data_dir must be non-empty")
 
 
-def resolve_qlib_path(
+def resolve_profile_env_truth(
     profile: ExperimentProfile,
     *,
     project_root: Path = PROJECT_ROOT,
     env: Mapping[str, str] | None = None,
-) -> Path:
-    if env:
-        override = env.get("QLIB_DATA_DIR")
-        if override:
-            raw = Path(override)
-            return raw if raw.is_absolute() else project_root / raw
+    runtime_env_path: str | Path | None = None,
+    repo_env_path: str | Path | None = None,
+) -> ResolvedProfileEnv:
+    merged_env = dict(os.environ)
+    if env is not None:
+        merged_env.update(env)
 
-    raw = Path(profile.qlib_data_dir)
-    return raw if raw.is_absolute() else project_root / raw
+    repo_path = Path(repo_env_path) if repo_env_path is not None else project_root / ".env"
+    resolved = resolve_layered_env(
+        keys=CRITICAL_ENV_KEYS,
+        process_env=merged_env,
+        runtime_env_path=runtime_env_path,
+        repo_env_path=repo_path,
+        defaults={"QLIB_DATA_DIR": profile.qlib_data_dir},
+        default_source=SOURCE_PROFILE,
+    )
+    apply_resolved_env(resolved, target_env=merged_env)
+
+    raw_qlib = Path(merged_env["QLIB_DATA_DIR"])
+    qlib_path = raw_qlib if raw_qlib.is_absolute() else project_root / raw_qlib
+    merged_env["QLIB_DATA_DIR"] = str(qlib_path)
+
+    sources = dict(resolved.sources)
+    if "TUSHARE_TOKEN" not in sources:
+        sources["TUSHARE_TOKEN"] = SOURCE_UNSET
+    if "QLIB_DATA_DIR" not in sources:
+        sources["QLIB_DATA_DIR"] = SOURCE_PROFILE
+
+    return ResolvedProfileEnv(
+        merged_env=merged_env,
+        qlib_data_dir=str(qlib_path),
+        sources=sources,
+    )
 
 
 def run_doctor(mode: str, env: Mapping[str, str]) -> int:
@@ -151,18 +188,23 @@ def run_preflight(
     project_root: Path = PROJECT_ROOT,
     env: Mapping[str, str] | None = None,
     doctor_runner=run_doctor,
+    runtime_env_path: str | Path | None = None,
+    repo_env_path: str | Path | None = None,
 ) -> PreflightResult:
-    merged_env = dict(os.environ)
-    if env is not None:
-        merged_env.update(env)
+    env_truth = resolve_profile_env_truth(
+        profile,
+        project_root=project_root,
+        env=env,
+        runtime_env_path=runtime_env_path,
+        repo_env_path=repo_env_path,
+    )
+    merged_env = env_truth.merged_env
     warnings: list[str] = []
     blocking: list[str] = []
 
-    qlib_path = resolve_qlib_path(profile, project_root=project_root, env=merged_env)
+    qlib_path = Path(env_truth.qlib_data_dir)
     if not qlib_path.exists():
         blocking.append(f"QLIB_DATA_DIR not found: {qlib_path}")
-    else:
-        merged_env["QLIB_DATA_DIR"] = str(qlib_path)
 
     if not merged_env.get("TUSHARE_TOKEN"):
         blocking.append("TUSHARE_TOKEN missing")
@@ -184,6 +226,8 @@ def run_preflight(
         profile_path=str(Path(profile_path)),
         doctor_mode=profile.doctor_mode,
         qlib_data_dir=str(qlib_path),
+        qlib_data_dir_source=env_truth.sources["QLIB_DATA_DIR"],
+        tushare_token_source=env_truth.sources["TUSHARE_TOKEN"],
         doctor_exit_code=doctor_exit_code,
         blocking_errors=blocking,
         warnings=warnings,
@@ -210,6 +254,8 @@ def _print_text(result: PreflightResult) -> None:
     print("[Preflight] profile:", result.profile_path)
     print("[Preflight] doctor_mode:", result.doctor_mode)
     print("[Preflight] qlib_data_dir:", result.qlib_data_dir)
+    print("[Preflight] qlib_data_dir_source:", result.qlib_data_dir_source)
+    print("[Preflight] tushare_token_source:", result.tushare_token_source)
     if result.doctor_exit_code is not None:
         print("[Preflight] doctor_exit_code:", result.doctor_exit_code)
     if result.blocking_errors:

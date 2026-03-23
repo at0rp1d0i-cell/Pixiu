@@ -17,9 +17,12 @@ from typing import Awaitable, Callable
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from src.core.env import ResolvedEnv, resolve_and_apply_layered_env
 
 console = Console()
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_QLIB_DATA_DIR = PROJECT_ROOT / "data" / "qlib_bin"
+CRITICAL_ENV_KEYS = ("TUSHARE_TOKEN", "QLIB_DATA_DIR")
 
 
 DoctorRunner = Callable[[], bool | str | tuple[bool | str, str] | Awaitable[bool | str | tuple[bool | str, str]]]
@@ -56,7 +59,10 @@ def check_runtime_readiness() -> tuple[bool | str, str]:
         from src.formula.capabilities import get_runtime_formula_capabilities
 
         caps = get_runtime_formula_capabilities()
-        qlib_path = PROJECT_ROOT / "data" / "qlib_bin"
+        qlib_env = os.getenv("QLIB_DATA_DIR")
+        qlib_path = Path(qlib_env) if qlib_env else DEFAULT_QLIB_DATA_DIR
+        if not qlib_path.is_absolute():
+            qlib_path = PROJECT_ROOT / qlib_path
         if not qlib_path.exists():
             return False, f"Qlib bin dir not found: {qlib_path}"
 
@@ -185,13 +191,36 @@ def build_doctor_checks(mode: str = "core") -> list[DoctorCheck]:
     return checks
 
 
-async def run_doctor(mode: str = "core") -> int:
+def resolve_doctor_env_truth(*, process_env: dict[str, str] | None = None) -> ResolvedEnv:
+    return resolve_and_apply_layered_env(
+        keys=CRITICAL_ENV_KEYS,
+        process_env=process_env if process_env is not None else os.environ,
+        target_env=os.environ,
+        repo_env_path=PROJECT_ROOT / ".env",
+        defaults={"QLIB_DATA_DIR": str(DEFAULT_QLIB_DATA_DIR)},
+    )
+
+
+def _doctor_env_trace_details(env_truth: ResolvedEnv) -> str:
+    token_value = os.getenv("TUSHARE_TOKEN", "")
+    token_status = "set" if token_value else "missing"
+    token_source = env_truth.sources.get("TUSHARE_TOKEN", "unset")
+    qlib_value = os.getenv("QLIB_DATA_DIR", "")
+    qlib_source = env_truth.sources.get("QLIB_DATA_DIR", "default")
+    return f"TUSHARE_TOKEN={token_status} ({token_source}) | QLIB_DATA_DIR={qlib_value} ({qlib_source})"
+
+
+async def run_doctor(mode: str = "core", *, env_truth: ResolvedEnv | None = None) -> int:
+    if env_truth is None:
+        env_truth = resolve_doctor_env_truth()
+
     console.print(
         Panel(
             f"[bold cyan]Pixiu System Doctor[/bold cyan]\nmode={mode}",
             border_style="cyan",
         )
     )
+    console.print(f"[dim]{_doctor_env_trace_details(env_truth)}[/dim]")
 
     table = Table(show_header=True, header_style="bold magenta", expand=True)
     table.add_column("检查项目", width=24)
@@ -231,7 +260,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def main_async(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    return await run_doctor(mode=args.mode)
+    env_truth = resolve_doctor_env_truth()
+    return await run_doctor(mode=args.mode, env_truth=env_truth)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -239,7 +269,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-
-    load_dotenv(PROJECT_ROOT / ".env", override=True)
     raise SystemExit(main())
