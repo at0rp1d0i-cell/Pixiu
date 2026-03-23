@@ -1,0 +1,17 @@
+{
+  "default_provider": "deepseek",
+  "provider_defaults": {
+    "deepseek": {
+      "model": "deepseek-chat"
+    },
+    "openai": {
+      "model": "gpt-5.4"
+    }
+  },
+  "roles": {
+    "market_analyst": {},
+    "researcher": {},
+    "alignment_checker": {},
+    "exploration_agent": {}
+  }
+}

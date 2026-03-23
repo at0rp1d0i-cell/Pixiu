@@ -8,6 +8,7 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from src.core.env import load_dotenv_if_available
+from .runtime_settings import resolve_role_provider_connection
 from .settings import get_llm_profile_settings
 from .usage_ledger import UsageLedgerCallback, get_usage_ledger_callback
 
@@ -19,7 +20,12 @@ _ROLE_BY_PROFILE = {
 }
 
 
-def _ensure_runtime_metadata(kwargs: dict[str, Any], *, profile: str | None) -> None:
+def _ensure_runtime_metadata(
+    kwargs: dict[str, Any],
+    *,
+    profile: str | None,
+    provider_name: str | None = None,
+) -> None:
     existing_metadata = kwargs.get("metadata")
     metadata: dict[str, Any] = {}
     if isinstance(existing_metadata, Mapping):
@@ -30,7 +36,7 @@ def _ensure_runtime_metadata(kwargs: dict[str, Any], *, profile: str | None) -> 
     if profile and "agent_role" not in metadata:
         metadata["agent_role"] = _ROLE_BY_PROFILE.get(profile, profile)
     if "provider" not in metadata:
-        metadata["provider"] = "openai_compatible"
+        metadata["provider"] = provider_name or "openai_compatible"
     if "model" not in metadata and kwargs.get("model"):
         metadata["model"] = kwargs["model"]
 
@@ -79,6 +85,19 @@ def get_researcher_llm_kwargs(
         "base_url": os.getenv("RESEARCHER_BASE_URL", os.getenv("OPENAI_API_BASE")),
         "api_key": os.getenv("RESEARCHER_API_KEY", os.getenv("OPENAI_API_KEY")),
     }
+    resolved_provider_name: str | None = None
+
+    if profile is not None:
+        resolved_provider = resolve_role_provider_connection(role=profile)
+        if resolved_provider is not None:
+            kwargs.update(
+                {
+                    "model": resolved_provider.model,
+                    "base_url": resolved_provider.base_url,
+                    "api_key": resolved_provider.api_key,
+                }
+            )
+            resolved_provider_name = resolved_provider.provider
 
     profile_kwargs: dict[str, Any] = {}
     if profile is not None:
@@ -97,7 +116,11 @@ def get_researcher_llm_kwargs(
         if value is not None:
             kwargs[key] = value
 
-    _ensure_runtime_metadata(kwargs, profile=profile)
+    _ensure_runtime_metadata(
+        kwargs,
+        profile=profile,
+        provider_name=resolved_provider_name,
+    )
     _ensure_usage_callback(kwargs)
     return kwargs
 
