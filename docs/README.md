@@ -56,9 +56,20 @@
 
 其余目录如 `reference / research / archive / specs` 默认都不在第一阅读路径里。
 
+如果你已经读完 `overview` 主路径，但还需要理解：
+
+- 哪些行为是当前主线故意接受的降级
+- 哪些实验特判只服务于 fast feedback / harness
+- 哪些能力已经达成共识、但明确延期实现
+
+继续读：
+
+1. `docs/overview/06_runtime-concessions.md`
+
 ## Ground Rules
 
 - 需要理解项目时，先走 `overview` 五篇主路径。
 - 需要改实现时，再进入 `design/` 或 `plans/`。
+- 需要区分“设计漂移”和“故意让步”时，再看 `docs/overview/06_runtime-concessions.md`。
 - 当设计与代码不一致时，以 `docs/overview/05_spec-execution-audit.md` 为准。
 - 文档系统本身的规范见 `docs/00_documentation-standard.md`。

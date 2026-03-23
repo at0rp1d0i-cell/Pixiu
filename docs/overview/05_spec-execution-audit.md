@@ -50,6 +50,10 @@ Last Reviewed: 2026-03-22
 | `../archive/specs/island_scheduler_spec.md` | archive | 已退出主入口 |
 | `../archive/specs/skills_architecture_spec.md` | archive | 已退出主入口 |
 
+这份审计文档只处理“设计与实现是否对齐”。
+
+对于当前主线里**被明确接受**的运行时让步、实验特判、MVP 简化和延期实现，请改看 [06_runtime-concessions.md](/home/torpedo/Workspace/ML/Pixiu/docs/overview/06_runtime-concessions.md)。
+
 ## 关键结论
 
 ### 1. 当前主风险不是“没有 runtime”，而是“边界仍在漂移”
