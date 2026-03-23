@@ -103,7 +103,18 @@ def _validate_profile(profile: ExperimentProfile) -> None:
         raise ValueError("qlib_data_dir must be non-empty")
 
 
-def resolve_qlib_path(profile: ExperimentProfile, *, project_root: Path = PROJECT_ROOT) -> Path:
+def resolve_qlib_path(
+    profile: ExperimentProfile,
+    *,
+    project_root: Path = PROJECT_ROOT,
+    env: Mapping[str, str] | None = None,
+) -> Path:
+    if env:
+        override = env.get("QLIB_DATA_DIR")
+        if override:
+            raw = Path(override)
+            return raw if raw.is_absolute() else project_root / raw
+
     raw = Path(profile.qlib_data_dir)
     return raw if raw.is_absolute() else project_root / raw
 
@@ -114,8 +125,16 @@ def run_doctor(mode: str, env: Mapping[str, str]) -> int:
     return proc.returncode
 
 
-def _has_runtime_traces() -> bool:
-    for target in RESET_TARGETS:
+def _reset_targets(project_root: Path) -> tuple[Path, Path, Path]:
+    return (
+        project_root / "data" / "control_plane_state.db",
+        project_root / "data" / "experiment_runs",
+        project_root / "data" / "artifacts",
+    )
+
+
+def _has_runtime_traces(*, project_root: Path = PROJECT_ROOT) -> bool:
+    for target in _reset_targets(project_root):
         if not target.exists():
             continue
         if target.is_file():
@@ -133,11 +152,13 @@ def run_preflight(
     env: Mapping[str, str] | None = None,
     doctor_runner=run_doctor,
 ) -> PreflightResult:
-    merged_env = dict(os.environ if env is None else env)
+    merged_env = dict(os.environ)
+    if env is not None:
+        merged_env.update(env)
     warnings: list[str] = []
     blocking: list[str] = []
 
-    qlib_path = resolve_qlib_path(profile, project_root=project_root)
+    qlib_path = resolve_qlib_path(profile, project_root=project_root, env=merged_env)
     if not qlib_path.exists():
         blocking.append(f"QLIB_DATA_DIR not found: {qlib_path}")
     else:
@@ -146,7 +167,7 @@ def run_preflight(
     if not merged_env.get("TUSHARE_TOKEN"):
         blocking.append("TUSHARE_TOKEN missing")
 
-    if profile.require_reset_clean and _has_runtime_traces():
+    if profile.require_reset_clean and _has_runtime_traces(project_root=project_root):
         blocking.append("require_reset_clean=true but runtime traces exist; run scripts/reset_experiment_state.py")
 
     doctor_exit_code: int | None = None
