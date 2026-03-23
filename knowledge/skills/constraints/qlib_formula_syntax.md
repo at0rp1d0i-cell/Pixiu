@@ -71,8 +71,9 @@ $pe_ttm  $pb  $turnover_rate  $float_mv
 |---|---|
 | `Abs(expr)` | 绝对值 |
 | `Sign(expr)` | 符号（-1/0/1） |
-| `Log(expr)` | 自然对数（expr 必须 > 0） |
+| `Log(expr)` | 自然对数（expr 必须 > 0；要求公式本身可证明正值域，不是固定写法） |
 | `Power(expr, n)` | 幂次 |
+| `Div(expr1, expr2)` | 除法（分母必须可证明非零，存在零风险会被拒绝） |
 | `If(cond, t, f)` | 条件表达式 |
 </approved-operators>
 
@@ -107,6 +108,31 @@ Exp($close)    # 错误！Exp 算子未注册
 # ❌ 对数的参数可能为负
 Log($close - Ref($close, 1))   # 日收益率可能为负
 # 应改为：Log($close / Ref($close, 1)) 或 Log(Abs(expr) + 1e-8)
+```
+
+### 除法/对数定义域风险（fail-closed）
+
+Validator 会通过 AST 静态分析拒绝“可能除零”或“Log 参数可能非正”的表达式。
+重点是“可证明安全”，而不是某个固定包装模板。
+
+```python
+# ❌ 分母可能为零（会被拒绝）
+Div($close - Ref($close, 5), Std($close, 5))
+
+# ✅ 通过下界平移确保分母非零（可接受）
+Div($close - Ref($close, 5), Std($close, 5) + 1e-8)
+
+# ✅ 分母来自可证明正值域（可接受）
+Div($close, Ref($close, 5))
+
+# ❌ Log 参数可能为零或负（会被拒绝）
+Log($volume / Mean($volume, 20))
+
+# ✅ 让 Log 参数具备正值域证明（可接受）
+Log($close / Ref($close, 1))
+
+# ✅ Max 保护也是可接受方案之一（不是唯一方案）
+Log(Max($volume / Mean($volume, 20), 1e-8))
 ```
 </forbidden-patterns>
 
@@ -178,7 +204,7 @@ Mean(If(Gt($close,Ref($close,1)),$close/Ref($close,1)-1,0),14) / (Mean(Abs($clos
 ```
 
 **使用注意**：
-- 除法分母加 `1e-8` 防止零除（Validator 不检查，但 Qlib 执行时可能产生 NaN）
+- Div/Mod/Log/Sqrt 采用 fail-closed：表达式必须在公式层面可证明安全；不可证明时会被 Stage 3 拒绝，不会自动改写。
 - 以上模板为出发点，结合当前 Island 上下文和市场状态做变体，不要直接照搬
 </verified-factors>
 

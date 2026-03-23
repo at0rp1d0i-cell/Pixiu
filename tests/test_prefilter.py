@@ -131,6 +131,7 @@ def test_validator_log_with_unsafe_domain_is_rejected_without_rewrite():
     passed, reason = v.validate(note)
     assert not passed
     assert "Log" in reason
+    assert "Trap it with Max" not in reason
     assert note.proposed_formula == original_formula
 
 

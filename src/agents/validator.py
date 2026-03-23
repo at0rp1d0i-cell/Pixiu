@@ -30,7 +30,7 @@ def _check_log_safety(formula: str) -> tuple[bool, str]:
     """检查 Log() 的参数是否可能为负。"""
     # 检测 Log($close - ...) 或 Log($close/Ref... - 1) 等危险模式
     if re.search(r'Log\s*\(\s*\$\w+\s*[-]', formula):
-        return False, "[Validator 拦截] Log() 的参数可能为负数，请改用 Log($close / Ref($close, N)) 形式。"
+        return False, "[Validator 拦截] Log() 的参数可能非正，请改写为可证明正值域的表达式。"
     return True, ""
 
 def validator_node(state: Any) -> dict:

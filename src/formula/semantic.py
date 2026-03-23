@@ -79,7 +79,10 @@ class MathSafetyVisitor:
             
         elif node_type == "Log":
             if z is not None and (z or n):
-                raise MathSafetyError("Log() operand must be strictly positive to avoid domain errors (Log(0) or Log(-x)). Trap it with Max() or Abs()+1.")
+                raise MathSafetyError(
+                    "Log() operand must be strictly positive to avoid domain errors "
+                    "(Log(0) or Log(-x)). Rewrite formula to guarantee a positive domain."
+                )
             return True, True
             
         elif node_type == "Sqrt":
