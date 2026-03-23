@@ -124,9 +124,7 @@ def resolve_profile_env_truth(
     runtime_env_path: str | Path | None = None,
     repo_env_path: str | Path | None = None,
 ) -> ResolvedProfileEnv:
-    merged_env = dict(os.environ)
-    if env is not None:
-        merged_env.update(env)
+    merged_env = dict(os.environ) if env is None else dict(env)
 
     repo_path = Path(repo_env_path) if repo_env_path is not None else project_root / ".env"
     resolved = resolve_layered_env(
