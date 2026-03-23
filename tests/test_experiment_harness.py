@@ -203,3 +203,37 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["TUSHARE_TOKEN"] == "runtime-token"
     assert observed["QLIB_DATA_DIR"] == str(qlib_dir)
     assert observed["REPORT_EVERY_N_ROUNDS"] == "9"
+
+
+def test_default_status_runner_prefers_current_run_id_over_latest(monkeypatch: pytest.MonkeyPatch):
+    module = _load_harness_module()
+    current_run = SimpleNamespace(
+        run_id="run-current",
+        mode="single",
+        status="completed",
+        current_round=1,
+        last_error=None,
+    )
+    latest_run = SimpleNamespace(
+        run_id="run-latest",
+        mode="evolve",
+        status="running",
+        current_round=99,
+        last_error=None,
+    )
+
+    class FakeStore:
+        def get_run(self, run_id: str):
+            assert run_id == "run-current"
+            return current_run
+
+        def get_latest_run(self):
+            return latest_run
+
+    monkeypatch.setattr(module, "StateStore", lambda: FakeStore())
+    monkeypatch.setattr(module._runtime, "get_current_run_id", lambda: "run-current")
+
+    ok, detail = module._default_status_runner("single")
+
+    assert ok
+    assert "run_id=run-current" in detail

@@ -53,6 +53,10 @@ def test_create_update_and_get_latest_run(tmp_path):
     assert latest is not None
     assert latest.run_id == run.run_id
     assert latest.status == "completed"
+    fetched = store.get_run(run.run_id)
+    assert fetched is not None
+    assert fetched.run_id == run.run_id
+    assert fetched.status == "completed"
 
 
 def test_write_snapshot_and_get_snapshot(tmp_path):

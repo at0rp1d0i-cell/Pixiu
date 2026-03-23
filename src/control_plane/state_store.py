@@ -287,6 +287,9 @@ class StateStore:
             return None
         return self._row_to_run(row)
 
+    def get_run(self, run_id: str) -> Optional[RunRecord]:
+        return self._get_run(run_id)
+
     def get_snapshot(self, run_id: str) -> Optional[RunSnapshot]:
         with self._conn() as conn:
             row = conn.execute(

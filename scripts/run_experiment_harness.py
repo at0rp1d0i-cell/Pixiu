@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Mapping
 
 from src.control_plane.state_store import StateStore
+from src.core.orchestrator import runtime as _runtime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -81,7 +82,9 @@ async def _default_run_evolve(rounds: int) -> None:
 
 
 def _default_status_runner(expected_mode: str) -> tuple[bool, str]:
-    run = StateStore().get_latest_run()
+    store = StateStore()
+    run_id = _runtime.get_current_run_id()
+    run = store.get_run(run_id) if run_id else store.get_latest_run()
     if run is None:
         return False, "No run record found after execution."
     if run.mode != expected_mode:
