@@ -194,7 +194,20 @@ class AlphaResearcher:
         if subspace_hint == ExplorationSubspace.SYMBOLIC_MUTATION and self.factor_pool is not None:
             symbolic_batch = self._try_symbolic_mutation_batch(iteration)
             if symbolic_batch is not None:
-                return symbolic_batch
+                approved_notes, diagnostics = self._local_prescreen_notes(symbolic_batch.notes)
+                self.last_generation_diagnostics = {
+                    "generated_count": diagnostics["generated_count"],
+                    "delivered_count": len(approved_notes),
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": diagnostics["rejection_counts_by_filter"],
+                    "sample_rejections": diagnostics["sample_rejections"],
+                }
+                if not approved_notes:
+                    logger.info(
+                        "[AlphaResearcher] SYMBOLIC_MUTATION 本地预筛后无可用候选: island=%s",
+                        self.island,
+                    )
+                return symbolic_batch.model_copy(update={"notes": approved_notes})
 
         # 子空间探索上下文（结构化注入）
         if subspace_hint:

@@ -560,6 +560,59 @@ def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics()
     assert result["stage2_diagnostics"]["generated_count"] >= 1
 
 
+def test_alpha_researcher_symbolic_path_runs_local_prescreen():
+    from src.agents.researcher import AlphaResearcher
+
+    safe_note = FactorResearchNote(
+        note_id="safe_symbolic",
+        island="momentum",
+        iteration=1,
+        hypothesis="safe",
+        economic_intuition="safe",
+        proposed_formula="Mean($close, 5) - Mean($close, 20)",
+        risk_factors=[],
+        market_context_date="2026-03-08",
+        applicable_regimes=["bull_trend"],
+        invalid_regimes=["range_bound"],
+        exploration_subspace=ExplorationSubspace.SYMBOLIC_MUTATION,
+    )
+    unsafe_note = FactorResearchNote(
+        note_id="unsafe_symbolic",
+        island="momentum",
+        iteration=1,
+        hypothesis="unsafe",
+        economic_intuition="unsafe",
+        proposed_formula="Rank($close)",
+        risk_factors=[],
+        market_context_date="2026-03-08",
+        applicable_regimes=["bull_trend"],
+        invalid_regimes=["range_bound"],
+        exploration_subspace=ExplorationSubspace.SYMBOLIC_MUTATION,
+    )
+    symbolic_batch = AlphaResearcherBatch(
+        island="momentum",
+        notes=[safe_note, unsafe_note],
+        generation_rationale="symbolic",
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.get_island_factors.return_value = []
+
+    researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+    with patch.object(researcher, "_try_symbolic_mutation_batch", return_value=symbolic_batch):
+        batch = asyncio.run(
+            researcher.generate_batch(
+                context=None,
+                iteration=1,
+                subspace_hint=ExplorationSubspace.SYMBOLIC_MUTATION,
+            )
+        )
+
+    assert [note.note_id for note in batch.notes] == ["safe_symbolic"]
+    assert researcher.last_generation_diagnostics["generated_count"] == 2
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("validator", 0) >= 1
+
+
 def test_alpha_researcher_injects_market_regime_skill_from_context():
     """当 generate_batch() 收到 market context 时，system prompt 应包含 regime skill。"""
     from src.agents.researcher import AlphaResearcher
