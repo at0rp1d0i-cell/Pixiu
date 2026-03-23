@@ -34,6 +34,7 @@ class _FakeProfile:
     qlib_data_dir: str = "data/qlib_bin"
     report_every_n_rounds: int = 5
     max_rounds_env_override_allowed: bool = True
+    human_gate_auto_action: str = "approve"
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     monkeypatch.delenv("QLIB_DATA_DIR", raising=False)
     monkeypatch.delenv("REPORT_EVERY_N_ROUNDS", raising=False)
+    monkeypatch.delenv("PIXIU_HUMAN_GATE_AUTO_ACTION", raising=False)
 
     def fake_resolve_profile_env_truth(profile, **kwargs):
         return SimpleNamespace(
@@ -183,6 +185,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
         observed["TUSHARE_TOKEN"] = os.environ.get("TUSHARE_TOKEN", "")
         observed["QLIB_DATA_DIR"] = os.environ.get("QLIB_DATA_DIR", "")
         observed["REPORT_EVERY_N_ROUNDS"] = os.environ.get("REPORT_EVERY_N_ROUNDS", "")
+        observed["PIXIU_HUMAN_GATE_AUTO_ACTION"] = os.environ.get("PIXIU_HUMAN_GATE_AUTO_ACTION", "")
 
     async def fake_evolve(_rounds: int) -> None:
         return None
@@ -203,6 +206,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["TUSHARE_TOKEN"] == "runtime-token"
     assert observed["QLIB_DATA_DIR"] == str(qlib_dir)
     assert observed["REPORT_EVERY_N_ROUNDS"] == "9"
+    assert observed["PIXIU_HUMAN_GATE_AUTO_ACTION"] == "approve"
 
 
 def test_default_status_runner_prefers_current_run_id_over_latest(monkeypatch: pytest.MonkeyPatch):

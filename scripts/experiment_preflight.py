@@ -37,6 +37,7 @@ class ExperimentProfile:
     qlib_data_dir: str
     report_every_n_rounds: int
     max_rounds_env_override_allowed: bool
+    human_gate_auto_action: str = "none"
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ def load_profile(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> ExperimentP
         qlib_data_dir=str(payload["qlib_data_dir"]),
         report_every_n_rounds=int(payload["report_every_n_rounds"]),
         max_rounds_env_override_allowed=bool(payload["max_rounds_env_override_allowed"]),
+        human_gate_auto_action=str(payload.get("human_gate_auto_action", "none")),
     )
     _validate_profile(profile)
     return profile
@@ -114,6 +116,13 @@ def _validate_profile(profile: ExperimentProfile) -> None:
         raise ValueError("single_island must be non-empty")
     if not profile.qlib_data_dir.strip():
         raise ValueError("qlib_data_dir must be non-empty")
+    action = profile.human_gate_auto_action.strip()
+    if not action:
+        raise ValueError("human_gate_auto_action must be non-empty")
+    if action not in {"none", "approve", "stop"} and not action.startswith("redirect:"):
+        raise ValueError(
+            "human_gate_auto_action must be one of: none, approve, stop, redirect:<island>"
+        )
 
 
 def resolve_profile_env_truth(

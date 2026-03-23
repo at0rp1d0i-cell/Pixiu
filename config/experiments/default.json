@@ -6,5 +6,6 @@
   "require_reset_clean": false,
   "qlib_data_dir": "data/qlib_bin",
   "report_every_n_rounds": 5,
-  "max_rounds_env_override_allowed": true
+  "max_rounds_env_override_allowed": true,
+  "human_gate_auto_action": "approve"
 }

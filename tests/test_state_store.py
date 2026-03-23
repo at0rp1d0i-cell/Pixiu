@@ -407,6 +407,7 @@ def test_api_approve_enqueue_then_human_gate_routes_and_updates_run(
     expected_route,
     expected_status,
 ):
+    monkeypatch.delenv("PIXIU_HUMAN_GATE_AUTO_ACTION", raising=False)
     store = StateStore(tmp_path / "state_store.sqlite")
     run = store.create_run(mode="evolve")
     store.write_snapshot(
@@ -506,6 +507,7 @@ def test_human_gate_timeout_defaults_stop_and_updates_control_plane(tmp_path, mo
     run = store.create_run(mode="evolve")
     monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
     monkeypatch.setattr(orchestrator_runtime, "get_current_run_id", lambda: run.run_id)
+    monkeypatch.delenv("PIXIU_HUMAN_GATE_AUTO_ACTION", raising=False)
     monkeypatch.setenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "0")
     monkeypatch.setenv("PIXIU_HUMAN_GATE_TIMEOUT_SEC", "1")
 
@@ -526,6 +528,34 @@ def test_human_gate_timeout_defaults_stop_and_updates_control_plane(tmp_path, mo
     assert latest_run.status == "stopped"
     assert latest_run.current_stage == orchestrator.NODE_HUMAN_GATE
     assert latest_run.current_round == 5
+
+    snapshot = store.get_snapshot(run.run_id)
+    assert snapshot is not None
+    assert snapshot.awaiting_human_approval is False
+
+
+def test_human_gate_auto_action_approve_skips_wait_and_updates_control_plane(tmp_path, monkeypatch):
+    from src.core.orchestrator.nodes import control as control_nodes
+
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="evolve")
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+    monkeypatch.setattr(orchestrator_runtime, "get_current_run_id", lambda: run.run_id)
+    monkeypatch.setenv("PIXIU_HUMAN_GATE_AUTO_ACTION", "approve")
+
+    result = control_nodes.human_gate_node(
+        AgentState(current_round=6, awaiting_human_approval=True)
+    )
+
+    assert result["human_decision"] == "approve"
+    assert result["awaiting_human_approval"] is False
+
+    latest_run = store.get_latest_run()
+    assert latest_run is not None
+    assert latest_run.run_id == run.run_id
+    assert latest_run.status == "running"
+    assert latest_run.current_stage == orchestrator.NODE_HUMAN_GATE
+    assert latest_run.current_round == 6
 
     snapshot = store.get_snapshot(run.run_id)
     assert snapshot is not None

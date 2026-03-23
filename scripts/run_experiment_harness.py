@@ -114,9 +114,11 @@ def _apply_runtime_env(profile, env: Mapping[str, str] | None = None) -> dict[st
     )
     merged = dict(env_truth.merged_env)
     merged["REPORT_EVERY_N_ROUNDS"] = str(profile.report_every_n_rounds)
+    merged["PIXIU_HUMAN_GATE_AUTO_ACTION"] = str(profile.human_gate_auto_action)
     for key in env_truth.sources:
         os.environ[key] = merged[key]
     os.environ["REPORT_EVERY_N_ROUNDS"] = merged["REPORT_EVERY_N_ROUNDS"]
+    os.environ["PIXIU_HUMAN_GATE_AUTO_ACTION"] = merged["PIXIU_HUMAN_GATE_AUTO_ACTION"]
     return merged
 
 

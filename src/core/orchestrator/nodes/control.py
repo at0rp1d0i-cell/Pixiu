@@ -11,17 +11,65 @@ from src.core.orchestrator.timing import merge_stage_timing
 logger = logging.getLogger(__name__)
 
 
+def _resolve_human_gate_auto_action() -> str | None:
+    raw = os.getenv("PIXIU_HUMAN_GATE_AUTO_ACTION", "").strip()
+    if not raw:
+        return None
+    lowered = raw.lower()
+    if lowered in {"none", "off", "disabled"}:
+        return None
+    if lowered in {"approve", "stop"}:
+        return lowered
+    if lowered.startswith("redirect:"):
+        return raw
+    logger.warning(
+        "[Human Gate] 忽略非法 PIXIU_HUMAN_GATE_AUTO_ACTION=%r", raw
+    )
+    return None
+
+
+def _apply_human_decision(state: AgentState, action: str, _control_plane, started_at: float) -> HumanGateOutput:
+    next_state = state.model_copy(
+        update={
+            "human_decision": action,
+            "awaiting_human_approval": False,
+        }
+    )
+    if action == "stop":
+        _control_plane._update_run_record(
+            "human_gate",
+            status="stopped",
+            current_round=state.current_round,
+        )
+    else:
+        _control_plane._update_run_record(
+            "human_gate",
+            status="running",
+            current_round=state.current_round,
+        )
+    _control_plane._write_snapshot(
+        next_state,
+        "human_gate",
+        awaiting_human_approval=False,
+    )
+    return {
+        "human_decision": action,
+        "awaiting_human_approval": False,
+        **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+    }
+
+
 def human_gate_node(state: AgentState) -> HumanGateOutput:
     """Human Gate: 通过 control plane 轮询人类决策，支持跨进程审批。"""
     from .. import control_plane as _control_plane
-    started_at = time.perf_counter()
+    started_perf = time.perf_counter()
 
     if not state.awaiting_human_approval:
         logger.info("[Human Gate] 当前状态未等待审批，直接结束当前 run")
         return {
             "human_decision": "stop",
             "awaiting_human_approval": False,
-            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_perf) * 1000.0, 2)),
         }
 
     run_id = _control_plane._ensure_run_record()
@@ -30,68 +78,30 @@ def human_gate_node(state: AgentState) -> HumanGateOutput:
         return {
             "human_decision": "approve",
             "awaiting_human_approval": False,
-            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
+            **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_perf) * 1000.0, 2)),
         }
 
     store = _control_plane.get_state_store()
+    auto_action = _resolve_human_gate_auto_action()
+
     poll_interval = float(os.getenv("PIXIU_HUMAN_GATE_POLL_INTERVAL_SEC", "1.0"))
     timeout_sec = float(os.getenv("PIXIU_HUMAN_GATE_TIMEOUT_SEC", "0"))
-    started_at = time.monotonic()
+    wait_started = time.monotonic()
 
     logger.info("[Human Gate] 等待 run=%s 的人类决策...", run_id)
     while True:
         decision = store.pop_latest_human_decision(run_id)
         if decision is not None:
             logger.info("[Human Gate] 收到决策: %s", decision.action)
-            next_state = state.model_copy(
-                update={
-                    "human_decision": decision.action,
-                    "awaiting_human_approval": False,
-                }
-            )
-            if decision.action == "stop":
-                _control_plane._update_run_record(
-                    "human_gate",
-                    status="stopped",
-                    current_round=state.current_round,
-                )
-            else:
-                _control_plane._update_run_record(
-                    "human_gate",
-                    status="running",
-                    current_round=state.current_round,
-                )
-            _control_plane._write_snapshot(
-                next_state,
-                "human_gate",
-                awaiting_human_approval=False,
-            )
-            return {
-                "human_decision": decision.action,
-                "awaiting_human_approval": False,
-                **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
-            }
+            return _apply_human_decision(state, decision.action, _control_plane, started_perf)
 
-        if timeout_sec > 0 and (time.monotonic() - started_at) >= timeout_sec:
+        if auto_action is not None:
+            logger.info("[Human Gate] 使用自动决策: %s", auto_action)
+            return _apply_human_decision(state, auto_action, _control_plane, started_perf)
+
+        if timeout_sec > 0 and (time.monotonic() - wait_started) >= timeout_sec:
             logger.warning("[Human Gate] 等待超时，默认 stop")
-            next_state = state.model_copy(
-                update={"human_decision": "stop", "awaiting_human_approval": False}
-            )
-            _control_plane._update_run_record(
-                "human_gate",
-                status="stopped",
-                current_round=state.current_round,
-            )
-            _control_plane._write_snapshot(
-                next_state,
-                "human_gate",
-                awaiting_human_approval=False,
-            )
-            return {
-                "human_decision": "stop",
-                "awaiting_human_approval": False,
-                **merge_stage_timing(state, "human_gate", round((time.perf_counter() - started_at) * 1000.0, 2)),
-            }
+            return _apply_human_decision(state, "stop", _control_plane, started_perf)
 
         time.sleep(poll_interval)
 
@@ -202,6 +212,7 @@ def loop_control_node(state: AgentState) -> LoopControlOutput:
         "research_notes": [],
         "approved_notes": [],
         "subspace_generated": {},
+        "stage1_reliability": {},
         "filtered_count": 0,
         "prefilter_diagnostics": {},
         "exploration_results": [],
