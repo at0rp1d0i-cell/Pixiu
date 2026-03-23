@@ -2,21 +2,34 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-20
+Last Reviewed: 2026-03-22
 
-> 更新时间：2026-03-20
+> 更新时间：2026-03-22
 > 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
 
 ---
 
 ## 目标
 
-把 Pixiu 从“主干闭环可运行但数据与能力边界仍漂移”的状态，推进到“Stage 2-5 合约更一致、数据能力真实可见、实验可解释”的状态。
+把 Pixiu 从“主干闭环可运行但实验有效性被 Stage 1/3 漂移污染”的状态，推进到“Stage 2-5 合约更一致、数据能力真实可见、实验可解释”的状态。
 并继续完成 authority model 收口：LLM 负责认知，deterministic 系统负责执行真值。
 
 ---
 
 ## 当前阶段
+
+### Phase 0: 实验有效性恢复（进行中）
+
+- [x] 确认 `Stage 1 timeout` 不是偶发 bug，而是预算设计与工具面混杂造成的结构性问题
+- [x] 确认 `Stage 3 数学安全` 问题本质是 SSOT 漂移，而不是单点校验漏掉
+- [x] 约定 Stage 1 目标架构：`blocking core + async enrichment`
+- [x] 约定 `async enrichment` 只影响下一轮，不做同轮 late merge
+- [x] 约定实验模式下 `blocking core timeout` 为红灯，不再静默积累统计
+- [x] 增加显式 reset 工具：`scripts/reset_experiment_state.py`
+- [ ] 将 `doctor` 收口为分层自检：blocking / core optional / enrichment / data plane
+- [ ] 收口 Stage 1 默认工具 allowlist 与数据源边界
+- [ ] 收口 Stage 3 `fail-closed` 数学安全真相到 prompt / tests / runtime
+- [ ] 仅在 Phase 0 完成后，重跑 `single -> evolve 2 rounds -> longer rounds`
 
 ### Phase A: 文档与入口收敛
 
@@ -74,6 +87,7 @@ Last Reviewed: 2026-03-20
 - [x] `moneyflow_hsgt` 下载脚本已建立，可作为下一批 Stage 1 / regime 资金流数据
 - [x] `moneyflow` / `stk_limit` staging 下载脚本已建立，进入 P1 数据面准备阶段
 - [x] Tushare 下载脚本已内建 localhost proxy 清理，避免本地失效代理导致批量下载中断
+- [ ] 将 `moneyflow_hsgt` / `margin` 这类结构化聚合信号正式接入 Stage 1 blocking core
 - [ ] `moneyflow` / `stk_limit` 的真实下载与后续接入顺序仍待执行
 - [ ] 再次运行 Phase 4B 实验前，需确认扩展字段覆盖率与 Docker Stage 4 blocker 都已收口
 
@@ -150,11 +164,11 @@ Last Reviewed: 2026-03-20
 
 - 方向明确
 - schema 基本成型
-- Stage 4/5 最小闭环已经可运行、可回归
+- Stage 4/5 最小闭环已经可运行，但当前实验样本还不应被当成可信基线
 - 默认测试入口已经稳定
 - 最小 control-plane state_store 已经落地
 - richer contract 已开始进入主干，但仍处在新旧字段双轨期
-- 当前主任务已经转为三条主线
+- 当前主任务先转为一条前置主线：恢复实验有效性
 - 测试体系已从“支持开发”升级为“后续 B/C 重构的前置 gate”
 - 数据能力收口与下载链稳定化
 - Researcher 技能/工具边界继续收口

@@ -49,7 +49,8 @@ Last Reviewed: 2026-03-18
 
 - 入口节点：`src/core/orchestrator/nodes/stage3.py`
 - 主要实现：`src/agents/prefilter.py`
-- 相关校验：`src/agents/validator.py`
+- canonical 校验链：`Validator.validate()` → `src/formula/semantic.py`
+- 遗留参考：`src/agents/validator.py`（非 canonical runtime）
 
 ### Stage 4: Execution
 

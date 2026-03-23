@@ -1,313 +1,194 @@
 # Pixiu v2 Stage 3：前置过滤层规格
-Purpose: Define the hard-gate filtering chain before expensive execution begins.
+Purpose: Define the Stage 3 hard-gate chain before expensive execution, with a single canonical truth for formula legality and math safety.
 Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-20
+Last Reviewed: 2026-03-22
 
-> 版本：2.0
+> 版本：2.1
 > 创建：2026-03-07
 > 前置依赖：`11_interface-contracts.md`
-> 文件位置：`src/agents/prefilter.py`
+> 文件位置：`src/agents/prefilter.py`、`src/formula/semantic.py`
 
 ---
 
 ## 1. 职责
 
-在进入昂贵回测（Stage 4）之前，用五个串行过滤器筛选 `FactorResearchNote` 批次，只放行 Top K（当前默认 `K=10`）最有潜力的候选。
+Stage 3 的职责是在进入昂贵 Stage 4 之前，对 `FactorResearchNote` 做硬 gate。
 
-**无回测，无 LLM（前两个过滤器），成本极低。**
+目标不是“帮 Stage 2 修公式”，而是：
+
+- 拒绝不合法或不安全的公式
+- 拒绝过于重复的候选
+- 拒绝与假设不一致或与 regime 明显冲突的候选
+- 只放行少量更值得进入确定性执行的对象
+
+Stage 3 是收缩层，不是修补层。
 
 ---
 
-## 2. 五个过滤器
+## 2. 唯一真相
 
-### Filter A：Validator（A 股硬约束，active）
+Stage 3 的 canonical runtime path 是：
 
-**当前代码**：`src/agents/prefilter.py` 中的 `Validator`
+- `src/agents/prefilter.py` 中的 `Validator.validate()`
+- `src/formula/semantic.py` 中的 `parse_and_check_ast()`
 
-检查规则（当前 runtime 口径）：
-```
-1. 字段名合法性：字段集合来自 runtime capability manifest，而不是文档硬编码
-2. Ref() 偏移符号：Ref($close, -N) 是未来数据，必须拒绝（只允许正整数）
-3. Log() 安全性：Log 参数必须保证 > 0（检查是否有 +1 保护）
-4. 括号匹配：所有 ([ 必须有对应 )]
-5. 算子白名单：集合来自 runtime capability manifest，而不是 skills 自己维护
-6. 裸标识符检查：除算子名、布尔字面量和 `$field` 外，不允许裸标识符
-7. 算子签名校验：当前至少校验常见算子的参数个数、窗口参数位置和基础类型
-8. 公式非空且长度合理（5 < len < 500 字符）
-```
+当前口径：
 
-**接口（更新为新 schema）**：
-```python
-from src.schemas.research_note import FactorResearchNote
+- 字段合法性来自 runtime capability manifest
+- 算子合法性来自 runtime capability manifest
+- 语法、参数个数和数学安全由 AST 语义检查统一裁决
 
-def validate(note: FactorResearchNote) -> tuple[bool, str]:
-    """
-    返回 (passed: bool, reason: str)
-    passed=False 时 reason 说明拦截原因
-    """
-    formula = note.final_formula or note.proposed_formula
-    # ... 规则检查逻辑 ...
-```
+`src/agents/validator.py` 是历史遗留实现，不是 Stage 3 的 canonical runtime。
 
-### Diagnostics
+如果文档、prompt、测试和 runtime 冲突，先以这条主链为准，再回写文档。
 
-Stage 3 会输出一个结构化 `prefilter_diagnostics`，至少包含：
+---
+
+## 3. Fail-closed 数学安全
+
+Stage 3 对数学安全采用 `fail-closed`：
+
+- 如果不能证明公式安全，就拒绝
+- 不做自动改写
+- 不做 silent repair
+- 不在 Stage 3 替模型补公式
+
+这意味着：
+
+- `Researcher` 必须直接产出符合当前 canonical 约束的公式
+- Stage 3 只判断是否放行，不负责把危险公式“修成安全公式”
+
+当前需要被硬 gate 的典型约束：
+
+- `Ref($close, -N)` 这类未来数据引用必须拒绝
+- `Div` / `Mod` 的分母如果可能为零，必须拒绝
+- `Log()` 的参数如果不能证明严格大于零，必须拒绝
+- `Sqrt()` 的参数如果可能为负，必须拒绝
+- 未注册字段、未批准算子、未知裸标识符必须拒绝
+
+文档、提示词和测试不应继续传播：
+
+- “自动加 `+1` 就安全”的旧叙事
+- “Stage 3 会替你加 `Max(..., 1e-8)`”的旧叙事
+
+只有 runtime 真正接受的 canonical 写法，才可以出现在 prompt 和测试里。
+
+---
+
+## 4. 过滤链
+
+### Filter A：Validator（active, hard gate）
+
+职责：
+
+- 做公式合法性与数学安全检查
+- 依赖 runtime capability manifest
+- 依赖 AST 语义检查
+
+返回：
+
+- `(passed: bool, reason: str)`
+
+如果失败，直接拒绝。
+
+### Filter B：NoveltyFilter（active, hard gate）
+
+职责：
+
+- 基于公式 token / AST 近似，拒绝与历史对象过度相似的候选
+
+当前实现：
+
+- 从 `FactorPool` 读取同岛历史对象
+- 使用 Jaccard 相似度做轻量重复检测
+
+### Filter C：AlignmentChecker（active, soft-on-failure）
+
+职责：
+
+- 快速判断假设与公式是否语义一致
+
+当前实现：
+
+- 可使用小模型做快速 JSON 判断
+- 如果 checker 自身调用失败，默认放行，不因辅助检查阻塞主流程
+
+### Filter D：ConstraintChecker（active, hard gate for `severity=hard`）
+
+职责：
+
+- 消费历史失败约束
+- 优先拦截已知坏模式
+
+当前实现：
+
+- `severity=hard` 的约束直接拒绝
+- warning 级别保留给上游 prompt 或报告，不在此层一刀切
+
+### Filter E：RegimeFilter（active, conditional hard gate）
+
+职责：
+
+- 当 note 显式声明 `applicable_regimes` / `invalid_regimes` 时，检查与当前 `MarketContextMemo.market_regime` 的兼容性
+
+当前实现：
+
+- regime 缺失时放行
+- note 未声明 regime 时放行
+- 明确不兼容时拒绝
+
+---
+
+## 5. Diagnostics
+
+Stage 3 应输出结构化 `prefilter_diagnostics`，至少包含：
+
 - `input_count`
 - `approved_count`
 - `rejection_counts_by_filter`
 - `sample_rejections`
 
-`sample_rejections` 只保留前几个拒绝样本，用于 round snapshot 和快速排障，不承载完整历史。
+诊断的目标是帮助快速定位“为什么被拒绝”，不是替代完整审计存档。
 
 ---
 
-### Filter B：NoveltyFilter（新颖性过滤，active）
+## 6. Prompt / 测试 / Runtime 一致性要求
 
-**目标**：防止重复探索已有因子，提高研究效率。
+以下三层必须共享同一口径：
 
-**实现方式**：AST 相似度（不用向量，用字符串/token 级别相似度即可）
+- `Researcher` 公式生成提示词
+- `tests/test_prefilter.py` 等测试样例
+- `Validator.validate() -> parse_and_check_ast()` runtime 主链
 
-```python
-# src/agents/prefilter.py
+不得出现：
 
-import ast
-import re
-from src.factor_pool.pool import FactorPool
-
-class NoveltyFilter:
-    def __init__(self, pool: FactorPool, threshold: float = 0.3):
-        """
-        threshold：AST 相似度超过此值则认为是重复因子
-        值越低，筛选越严格（0.3 = 允许30%相似度）
-        """
-        self.pool = pool
-        self.threshold = threshold
-
-    def check(self, note: FactorResearchNote) -> tuple[bool, str]:
-        formula = note.final_formula or note.proposed_formula
-        tokens_new = self._tokenize(formula)
-
-        # 从 FactorPool 获取同 Island 的历史因子
-        existing = self.pool.get_island_factors(
-            island=note.island,
-            limit=50,
-        )
-
-        for existing_factor in existing:
-            tokens_existing = self._tokenize(existing_factor["formula"])
-            similarity = self._jaccard(tokens_new, tokens_existing)
-            if similarity > self.threshold:
-                return False, (
-                    f"与已有因子 {existing_factor['factor_id']} 相似度过高 "
-                    f"({similarity:.2f} > {self.threshold})，"
-                    f"已有因子：{existing_factor['formula'][:80]}"
-                )
-
-        return True, "通过新颖性检查"
-
-    def _tokenize(self, formula: str) -> set:
-        """
-        将 Qlib 公式分解为 token 集合。
-        例："Mean(Abs($close/Ref($close,1)-1), 20)"
-        → {"Mean", "Abs", "$close", "Ref", "1", "20"}
-        """
-        # 提取算子名、字段名、数字常量
-        tokens = set(re.findall(r'\$\w+|[A-Za-z]+|\d+', formula))
-        return tokens
-
-    def _jaccard(self, a: set, b: set) -> float:
-        if not a and not b:
-            return 1.0
-        return len(a & b) / len(a | b)
-```
+- prompt 鼓励一种写法，而 runtime 拒绝
+- 测试通过一种安全叙事，而 runtime 实际不接受
+- 文档仍把 legacy validator 当作 Stage 3 主入口
 
 ---
 
-### Filter C：AlignmentChecker（语义一致性，active）
+## 7. 实现收口要求
 
-**目标**：检验公式与经济直觉是否一致，拦截"公式看起来合法但与假设无关"的情况。
+当前主线应按这个顺序推进：
 
-**实现**：LLM 快速调用（使用小/快速模型，如 deepseek-chat，温度=0）
-
-```python
-# src/agents/prefilter.py（续）
-
-ALIGNMENT_PROMPT = """你是量化因子审核员。判断以下因子的经济假设与公式是否一致。
-
-假设：{hypothesis}
-公式：{formula}
-
-判断标准：
-- 公式的计算逻辑是否能捕捉假设描述的市场现象？
-- 公式的时间窗口和操作符是否与假设的持仓周期 / 观测窗口匹配？
-
-只输出 JSON，不输出其他内容：
-{{"aligned": true/false, "reason": "一句话说明"}}
-"""
-
-class AlignmentChecker:
-    def __init__(self):
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-            base_url=os.getenv("RESEARCHER_BASE_URL"),
-            api_key=os.getenv("RESEARCHER_API_KEY"),
-            temperature=0,
-            max_tokens=200,  # 输出很短
-        )
-
-    async def check(self, note: FactorResearchNote) -> tuple[bool, str]:
-        formula = note.final_formula or note.proposed_formula
-        prompt = ALIGNMENT_PROMPT.format(
-            hypothesis=note.hypothesis[:300],
-            formula=formula,
-        )
-
-        try:
-            response = await self.llm.ainvoke(prompt)
-            import json
-            result = json.loads(response.content.strip())
-            return result["aligned"], result["reason"]
-        except Exception as e:
-            # AlignmentChecker 失败时放行（不因辅助检查阻塞主流程）
-            return True, f"AlignmentChecker 调用失败，跳过：{e}"
-```
+1. 明确 `PreFilter.Validator -> parse_and_check_ast` 为唯一真相
+2. 把 prompt、docs、tests 收口到同一数学安全语义
+3. 把 legacy `src/agents/validator.py` 从主路径和高信任文档里退出
+4. 只在 canonical path 上继续补数学安全与算子签名测试
 
 ---
 
-### Filter D：ConstraintChecker（失败约束过滤，active）
+## 8. 测试要求
 
-目标：把历史失败沉淀成 prompt 可见和 hard gate 可执行的约束，优先拦截已知坏模式。
+至少应覆盖以下场景：
 
-当前实现：
-- 从 `FactorPool` 读取 `FailureConstraint`
-- 对 `severity=hard` 的已知模式直接拒绝
-- 对 `warning` 级别约束保留为上游 prompt 注入参考，不在此层一刀切拒绝
-
-### Filter E：RegimeFilter（regime 适配过滤，active）
-
-目标：若 note 明确声明 `applicable_regimes`，则只在当前 `MarketContextMemo.market_regime` 兼容时放行。
-
-当前实现：
-- 当前 regime 缺失时放行
-- note 未声明 regime 时放行
-- 仅在二者都存在且不兼容时拒绝
-
----
-
-## 3. 五维过滤器的组合执行
-
-```python
-# src/agents/prefilter.py
-
-from src.schemas.thresholds import THRESHOLDS
-
-class PreFilter:
-    def __init__(self, factor_pool: FactorPool):
-        self.validator = Validator()
-        self.novelty = NoveltyFilter(pool=factor_pool, threshold=THRESHOLDS.min_novelty_threshold)
-        self.alignment = AlignmentChecker()
-
-    async def filter_batch(
-        self,
-        notes: list[FactorResearchNote],
-    ) -> tuple[list[FactorResearchNote], int]:
-        """
-        返回 `(approved_notes, filtered_count, diagnostics)`
-        `approved_notes` 数量 <= `THRESHOLDS.stage3_top_k`
-        """
-        candidates = []
-        diagnostics = {...}
-
-        for note in notes:
-            formula = note.final_formula or note.proposed_formula
-
-            # Filter A（同步，最快）
-            passed, reason = self.validator.validate(note)
-            if not passed:
-                logger.info(f"[Filter A] 拒绝 {note.note_id}: {reason}")
-                continue
-
-            # Filter B（同步，无 LLM）
-            passed, reason = self.novelty.check(note)
-            if not passed:
-                logger.info(f"[Filter B] 拒绝 {note.note_id}: {reason}")
-                continue
-
-            # Filter C（异步，LLM）
-            passed, reason = await self.alignment.check(note)
-            if not passed:
-                logger.info(f"[Filter C] 拒绝 {note.note_id}: {reason}")
-                continue
-
-            # Filter D（历史失败约束）
-            ...
-
-            # Filter E（regime 兼容）
-            ...
-
-            candidates.append(note)
-
-        # 如果通过数量 > Top K，按优先级排序后截断，并把 overflow 记到 diagnostics
-        candidates.sort(key=lambda n: len(n.exploration_questions))
-        approved = candidates[:THRESHOLDS.stage3_top_k]
-        overflow = candidates[THRESHOLDS.stage3_top_k:]
-        filtered_count = len(notes) - len(approved)
-
-        logger.info(
-            f"[Stage 3] {len(notes)} 个候选 → "
-            f"{len(approved)} 个通过（淘汰 {filtered_count} 个）"
-        )
-        return approved, filtered_count, diagnostics
-```
-
----
-
-## 4. 测试要求
-
-当前应主要映射到：
-
-- `tests/test_prefilter.py`
-- `tests/integration/test_stage3_to_stage5.py`
-
-其中至少覆盖：
-
-```python
-# 现有测试保留，新增以下
-
-def test_novelty_filter_identical_formula():
-    """与 FactorPool 中完全相同的公式应被拒绝"""
-
-def test_novelty_filter_similar_formula():
-    """相似度超过阈值的公式应被拒绝"""
-
-def test_novelty_filter_novel_formula():
-    """全新公式应通过"""
-
-def test_alignment_checker_consistent():
-    """公式与假设一致时应返回 aligned=True"""
-
-def test_alignment_checker_failure_graceful():
-    """AlignmentChecker LLM 调用失败时应放行（不阻塞流程）"""
-
-def test_prefilter_top_k_limit():
-    """通过的候选数量不超过 THRESHOLDS.stage3_top_k，overflow 要进入 diagnostics"""
-
-def test_prefilter_empty_result():
-    """全部被过滤时返回空列表，不报错"""
-```
-
----
-
-## 5. 与 v1 的差异
-
-| 对比项 | v1 Validator | 当前 v2 PreFilter |
-|---|---|---|
-| 过滤维度 | 1（语法规则）| 5（语法 + 新颖性 + 语义对齐 + 失败约束 + regime）|
-| 输入 | `factor_hypothesis` dict | `FactorResearchNote` Pydantic 模型 |
-| 输出 | boolean | `PrefilterOutput` + `prefilter_diagnostics` |
-| Novelty | 无 | AST Jaccard 相似度 vs FactorPool |
-| 语义检查 | 无 | LLM 快速调用（可降级）|
-| Top K 限流 | 无 | 最多放行 K=10 个进回测 |
+- `Ref($close, -N)` 被拒绝
+- `Log()` 危险定义域被拒绝
+- 可能除零的分母被拒绝
+- 未注册字段和未批准算子被拒绝
+- alignment checker 失败时批次仍可继续
+- novelty / constraint / regime 的拒绝原因会进入结构化 diagnostics

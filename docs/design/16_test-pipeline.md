@@ -236,7 +236,7 @@ uv run pytest -q tests -m e2e
 
 - `live / e2e` 仍缺少稳定环境说明和自动化触发策略，默认 merge gate 继续排除这两层
 - async 测试的长期方案尚未定稿，当前是同步包装与少量原生 async 并存
-- 默认 `smoke or unit` 基线当前为 `524 passed, 29 deselected`
+- 默认 `smoke or unit` 基线当前为 `561 passed, 29 deselected`
 - CLI / API 的最小联通 smoke 已补齐；后续重点是保持 approval / report / human-gate 路径与真实 graph 路由一致
 - `test_e2e_pipeline.py` 的层级定位与文档曾经漂移，现已明确按 `integration` 处理
 - 部分 unit 测试仍会读取真实 runtime capability 或依赖模块级全局状态；这正是 Test Pipeline Refactor 的首要清理目标

@@ -1,215 +1,210 @@
 # Pixiu v2 Stage 1：市场上下文层规格
-Purpose: Define how Stage 1 builds market context and which signals reach downstream stages.
+Purpose: Define the Stage 1 market-context boundary, its two-layer execution model, and the signals that are allowed to influence downstream stages.
 Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-22
 
-> 版本：2.0
+> 版本：2.1
 > 创建：2026-03-07
 > 前置依赖：`11_interface-contracts.md`
-> 文件位置：`src/agents/market_analyst.py`、`src/agents/literature_miner.py`（新建）
+> 文件位置：`src/agents/market_analyst.py`、`src/core/orchestrator/nodes/stage1.py`
 
 ---
 
-## 1. 两个 Agent
+## 1. 职责
+
+Stage 1 的职责不是“尽可能多抓市场信息”，而是：
+
+- 为当前轮生成可消费的 `MarketContextMemo`
+- 提供足以支持 regime 判断和探索方向选择的市场级上下文
+- 在不拖垮实验有效性的前提下，为下游提供可追溯的上下文输入
+
+Stage 1 是上下文层，不是大而全的资讯抓取层。
+
+---
+
+## 2. 双层模型
+
+Stage 1 采用两层执行模型：
+
+### Blocking Core Context
+
+当前轮必须拿到的最小上下文集合。
+
+要求：
+
+- 稳定、低延迟、市场级
+- 只包含当前轮真的需要的 regime / 风险偏好信号
+- 失败会直接影响实验有效性
+
+当前推荐的 blocking core 范围：
+
+- 交易日 / 日期真相
+- 指数级技术态势，用于 regime 判断
+- 市场级资金或风险偏好代理
+  - `moneyflow_hsgt` 这类北向聚合摘要
+  - `margin` 聚合摘要这类杠杆风险偏好代理
+
+### Async Enrichment Context
+
+不阻塞当前轮的补充上下文。
+
+特点：
+
+- best-effort
+- 信息密度可以更高，但不能卡住主链
+- 失败只记黄灯，不改变当前轮是否有效的判断
+
+典型 enrichment：
+
+- 热点题材
+- 新闻 / 公告摘要
+- 更长链条的宏观补充
+- 板块或叙事层扩展说明
+
+---
+
+## 3. 当前轮与下一轮的边界
+
+Blocking core 只服务当前轮。
+
+Async enrichment 的结果：
+
+- 不做同轮 best-effort 拼接
+- 不在 blocking deadline 之后强行并回当前轮 memo
+- 只允许进入日志、缓存或下一轮上下文
+
+这条边界的目标是保持实验统计干净，避免“同样一轮”因为补充信息回来的时间不同而变成不可比较。
+
+---
+
+## 4. 数据源原则
+
+### 4.1 稳定性优先于信息密度
+
+Stage 1 默认策略是：
+
+- 宁可信息少，也不要默认走脆弱或慢接口
+- 宁可少数高质量聚合信号，也不要把大量原始数据直接塞给 Stage 1
+
+### 4.2 工具必须显式 allowlist
+
+Stage 1 不允许把 MCP 返回的全量工具直接暴露给 `MarketAnalyst`。
+
+原因：
+
+- 默认全量工具会把 slow / fragile / semantically drifted 的接口带入主链
+- 这会把 Stage 1 timeout 从偶发问题变成系统性问题
+
+因此，blocking core 和 enrichment 必须分别有自己的 allowlist。
+
+### 4.3 Tushare Pro 作为结构化真值优先源
+
+对 Stage 1 的市场级结构化信号，优先级应为：
+
+1. Tushare Pro 这类稳定、可回放的结构化源
+2. 本地 materialized / readiness 已确认可用的数据资产
+3. AKShare 等更适合探索或补位的数据源
+
+AKShare 仍然可以存在，但默认角色更接近：
+
+- enrichment
+- backup
+- 快速探索
+
+而不是 blocking core 的唯一真值来源。
+
+---
+
+## 5. Timeout 与降级语义
+
+### 5.1 `single` / 调试模式
+
+允许降级，但必须显式记录。
+
+可接受的行为：
+
+- 输出最小可解析 memo
+- 记录 timeout / degraded 状态
+- 允许开发者继续看下游链路是否通
+
+### 5.2 `evolve` / 实验模式
+
+Blocking core timeout 或缺失，不应再被视为“可比较的绿灯样本”。
+
+要求：
+
+- blocking core 失败应触发显式红灯
+- 不再静默带空上下文继续积累实验统计
+- rerun 前应允许使用显式 reset 工具清理无效运行痕迹
+
+### 5.3 同日 memo 复用
+
+同日复用只允许发生在：
+
+- 先前 memo 来自成功的 blocking core
+- 先前 memo 没有被标记为 degraded / timed out
+
+不允许：
+
+- 把 round 0 的空或降级 memo 静默复用到后续轮次
+
+---
+
+## 6. Agent 角色
 
 ### MarketAnalyst
 
-**职责**：整合 AKShare 实时数据 + 新闻 RSS，生成今日市场上下文。
+`MarketAnalyst` 的主职责是生成 blocking core memo。
 
-**工具（MCP）**：复用现有 `akshare_server.py` 的全部 7 个工具：
-- `get_northbound_flow_today`
-- `get_northbound_holdings`
-- `get_sector_pe_ratios`
-- `get_hot_money_flow`
-- `get_individual_stock_fund_flow`
-- `get_broker_research_reports`
-- `get_market_news`
+它可以：
 
-```python
-# src/agents/market_analyst.py
+- 调用 blocking-core allowlist 工具
+- 输出结构化 `MarketContextMemo`
+- 触发或调度 enrichment
 
-MARKET_ANALYST_PROMPT = """你是 Pixiu 的市场分析师，负责每日开盘前生成市场上下文备忘录。
+它不应：
 
-今天的日期：{today}
-
-你需要：
-1. 调用工具获取北向资金、热门板块、宏观信号
-2. 判断当前市场 regime（trending_up/trending_down/sideways/volatile）
-3. 基于数据推断哪些 Island 方向本轮最值得探索
-4. 输出一份简洁的 MarketContextMemo JSON
-
-Island 选项：momentum（动量）、northbound（北向资金）、
-valuation（估值）、volatility（波动率）、volume（量价）、sentiment（情绪）
-
-必须以合法的 JSON 输出，格式见 MarketContextMemo schema。
-不需要解释，直接输出 JSON。"""
-
-class MarketAnalyst:
-    def __init__(self, mcp_tools: list):
-        self.llm = ChatOpenAI(
-            model=os.getenv("RESEARCHER_MODEL", "deepseek-chat"),
-            base_url=os.getenv("RESEARCHER_BASE_URL"),
-            api_key=os.getenv("RESEARCHER_API_KEY"),
-            temperature=0.1,
-        ).bind_tools(mcp_tools)
-        self.tools = {t.name: t for t in mcp_tools}
-
-    async def analyze(self) -> MarketContextMemo:
-        messages = [
-            SystemMessage(content=MARKET_ANALYST_PROMPT.format(today=today_str())),
-            HumanMessage(content="请生成今日市场上下文备忘录。"),
-        ]
-
-        # ReAct 循环（最多 5 轮工具调用）
-        for _ in range(5):
-            response = await self.llm.ainvoke(messages)
-            messages.append(response)
-
-            if not response.tool_calls:
-                break
-
-            for call in response.tool_calls:
-                tool_result = await self.tools[call["name"]].ainvoke(call["args"])
-                messages.append(ToolMessage(content=str(tool_result), tool_call_id=call["id"]))
-
-        # 解析最终 JSON 输出
-        return self._parse_memo(response.content)
-
-    def _parse_memo(self, content: str) -> MarketContextMemo:
-        import json, re
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-            return MarketContextMemo(**data)
-        # 降级：返回空 memo
-        return MarketContextMemo(
-            date=today_str(),
-            northbound=None,
-            macro_signals=[],
-            hot_themes=[],
-            historical_insights=[],
-            suggested_islands=["momentum"],
-            market_regime="sideways",
-            raw_summary="MarketAnalyst 解析失败，使用空上下文",
-        )
-```
-
----
+- 默认等待长链条补充信息
+- 依赖全量热点/新闻/宏观抓取才算完成
+- 把 enrichment 结果在 deadline 之后硬塞回当前轮
 
 ### LiteratureMiner
 
-**职责**：从 FactorPool 检索各 Island 的历史优秀因子和常见失败模式，为 Researcher 提供参考。
+`LiteratureMiner` 负责补充本地历史上下文：
 
-**工具（MCP）**：复用现有 `chromadb_server.py` 的全部 4 个工具：
-- `get_island_best_factors`
-- `get_similar_failures`
-- `get_factor_leaderboard`
-- `get_global_statistics`
+- 岛屿历史优秀因子
+- 常见失败模式
+- 方向性参考
 
-```python
-# src/agents/literature_miner.py
+它的特点是：
 
-class LiteratureMiner:
-    """
-    不需要 LLM，直接调用 FactorPool API 生成结构化摘要。
-    """
-    def __init__(self, factor_pool: FactorPool):
-        self.pool = factor_pool
-
-    async def retrieve_insights(
-        self,
-        active_islands: list[str],
-    ) -> list[HistoricalInsight]:
-        insights = []
-        for island in active_islands:
-            top = self.pool.get_island_best_factors(island=island, limit=3)
-            failures = self.pool.get_common_failure_modes(island=island, limit=5)
-
-            if not top:
-                # 该 Island 尚无历史数据
-                insights.append(HistoricalInsight(
-                    island=island,
-                    best_factor_formula="（无历史记录）",
-                    best_sharpe=0.0,
-                    common_failure_modes=[],
-                    suggested_directions=["从基础动量因子开始探索"],
-                ))
-                continue
-
-            best = top[0]
-            insights.append(HistoricalInsight(
-                island=island,
-                best_factor_formula=best["formula"],
-                best_sharpe=best["sharpe"],
-                common_failure_modes=[f["failure_mode"] for f in failures],
-                suggested_directions=self._infer_directions(top, failures),
-            ))
-
-        return insights
-
-    def _infer_directions(self, top_factors, failure_modes) -> list[str]:
-        """
-        基于历史最优因子和失败模式，推断本轮建议方向。
-        规则：
-        - 如果 high_turnover 是常见失败 → 建议增大时间窗口
-        - 如果 low_ic 是常见失败 → 建议换信号类型
-        - 如果历史最优 Sharpe > 3.0 → 建议在此方向深化
-        """
-        suggestions = []
-        failure_types = [f["failure_mode"] for f in failure_modes]
-
-        if "high_turnover" in failure_types:
-            suggestions.append("增大时间窗口参数（如 Mean(x,5) → Mean(x,20)）")
-        if "low_ic" in failure_types:
-            suggestions.append("尝试换用不同类型的信号（量价/资金流/情绪等）")
-        if top_factors and top_factors[0].get("sharpe", 0) > 3.0:
-            suggestions.append(f"在已有最优因子基础上组合变体：{top_factors[0]['formula'][:60]}")
-        if not suggestions:
-            suggestions.append("当前方向进展正常，继续探索")
-
-        return suggestions[:3]
-```
+- 不依赖外网
+- 可以作为 Stage 1 的稳定本地补充
+- 但不能替代 blocking core 的市场真值
 
 ---
 
-## 2. 降级策略
+## 7. 实现收口要求
 
-Stage 1 是辅助上下文，不是必需的。如果 MCP 调用失败或超时：
+在当前主干上，Stage 1 后续实现应按这个顺序收口：
 
-```python
-# Orchestrator 中的 market_context_node 降级逻辑
-try:
-    memo = await analyst.analyze()
-except Exception as e:
-    logger.warning(f"MarketAnalyst 失败，使用空上下文：{e}")
-    memo = MarketContextMemo(
-        date=today_str(),
-        northbound=None,
-        macro_signals=[],
-        hot_themes=[],
-        historical_insights=await miner.retrieve_insights(ACTIVE_ISLANDS),  # FactorPool 查询不依赖外网，通常可用
-        suggested_islands=ACTIVE_ISLANDS,
-        market_regime="unknown",
-        raw_summary="市场数据获取失败，仅使用历史 FactorPool 上下文",
-    )
-```
+1. 建立 blocking core / enrichment 分层
+2. 给 `MarketAnalyst` 建立默认工具 allowlist
+3. 把市场级资金面真值切到更稳定的结构化来源
+4. 把慢且脆弱的接口移出 blocking 主路径
+5. 让 timeout 结果进入显式 experiment validity 语义
 
 ---
 
-## 3. 测试要求
+## 8. 测试要求
 
-新建 `tests/test_market_context.py`：
+至少应覆盖以下场景：
 
-```python
-def test_market_analyst_empty_fallback():
-    """MCP 工具全部失败时应返回合法的空 MarketContextMemo"""
-
-def test_literature_miner_empty_pool():
-    """FactorPool 为空时应返回提示性 HistoricalInsight，不报错"""
-
-def test_literature_miner_direction_inference():
-    """high_turnover 失败模式应推断出增大时间窗口的建议"""
-```
+- blocking core timeout 在实验模式下触发显式无效状态
+- enrichment 失败不阻塞当前轮
+- degraded memo 不会被同日静默复用
+- Stage 1 allowlist 不会把 fragile 工具带入 blocking 主路径
+- LiteratureMiner 在无历史数据时仍返回合法结构
