@@ -305,8 +305,13 @@ class AlignmentChecker:
     """
 
     def __init__(self, skill_loader: Optional[SkillLoader] = None):
-        self.llm = build_researcher_llm(profile="alignment_checker")
+        self._llm = None
         self.skill_loader = skill_loader or _SKILL_LOADER
+
+    def _get_llm(self):
+        if self._llm is None:
+            self._llm = build_researcher_llm(profile="alignment_checker")
+        return self._llm
 
     async def check(self, note: FactorResearchNote) -> tuple[bool, str]:
         formula = note.final_formula or note.proposed_formula
@@ -321,7 +326,8 @@ class AlignmentChecker:
                 system_content + "\n\n## 过滤规范\n\n" + skill_context
             )
         try:
-            response = await self.llm.ainvoke([
+            llm = self._get_llm()
+            response = await llm.ainvoke([
                 SystemMessage(content=system_content),
                 HumanMessage(content=prompt),
             ])

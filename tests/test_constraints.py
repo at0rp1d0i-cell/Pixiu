@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, UTC
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -629,6 +629,12 @@ class TestE2EConstraintFlow:
         researcher = AlphaResearcher(island="momentum", factor_pool=None)
         section = researcher._build_constraint_section(failed_formulas=None)
         assert section == "无"
+
+    def test_researcher_init_does_not_require_openai_key(self):
+        from src.agents.researcher import AlphaResearcher
+        with patch("src.agents.researcher.build_researcher_llm", side_effect=AssertionError("should not build llm in __init__")):
+            researcher = AlphaResearcher(island="momentum", factor_pool=None)
+        assert researcher is not None
 
 
 # ─────────────────────────────────────────────

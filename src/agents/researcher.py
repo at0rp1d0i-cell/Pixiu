@@ -142,7 +142,12 @@ class AlphaResearcher:
         self.capabilities = capabilities or get_runtime_formula_capabilities()
         self.registry = registry or SubspaceRegistry.get_default_registry(capabilities=self.capabilities)
         self.factor_pool = factor_pool
-        self.llm = build_researcher_llm(profile="researcher")
+        self._llm = None
+
+    def _get_llm(self):
+        if self._llm is None:
+            self._llm = build_researcher_llm(profile="researcher")
+        return self._llm
 
     async def generate_batch(
         self,
@@ -232,7 +237,8 @@ class AlphaResearcher:
                 system_content + "\n\n## 研究规范与子空间框架\n\n" + skill_context
             )
 
-        response = await self.llm.ainvoke([
+        llm = self._get_llm()
+        response = await llm.ainvoke([
             SystemMessage(content=system_content),
             HumanMessage(content=user_msg),
         ])

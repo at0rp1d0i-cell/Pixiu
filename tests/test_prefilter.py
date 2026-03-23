@@ -461,3 +461,10 @@ def test_prefilter_uses_provided_capabilities_without_runtime_rescan():
 
     assert set(prefilter.validator.allowed_fields) == set(capabilities.available_fields)
     assert set(prefilter.validator.approved_operators) == set(capabilities.approved_operators)
+
+
+def test_prefilter_init_does_not_require_openai_key():
+    """PreFilter 构造阶段不应触发 AlignmentChecker 的 LLM 初始化。"""
+    with patch("src.agents.prefilter.build_researcher_llm", side_effect=AssertionError("should not build llm in __init__")):
+        prefilter = PreFilter(factor_pool=MagicMock(), validator=_make_validator())
+    assert prefilter is not None

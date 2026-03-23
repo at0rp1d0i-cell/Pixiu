@@ -371,7 +371,8 @@ def report(
 
     report_path = Path(reports[0].path)
     if not report_path.exists():
-        console.print(f"[red]报告文件不存在: {report_path}[/red]")
+        console.print("[red]报告文件不存在[/red]")
+        print(report_path)
         return
 
     console.print(_render_report_view(reports[0], report_path.read_text(encoding="utf-8")))
