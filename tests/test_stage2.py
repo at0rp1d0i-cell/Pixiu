@@ -23,6 +23,13 @@ from src.scheduling.subspace_scheduler import SubspaceScheduler
 pytestmark = pytest.mark.unit
 
 
+def _stage2_test_capabilities():
+    return MagicMock(
+        available_fields=("$close", "$volume", "$vwap"),
+        approved_operators=("Mean", "Std", "Mul", "Sub", "Rank", "Quantile", "Ref"),
+    )
+
+
 # ─────────────────────────────────────────────────────────
 # From test_stage2_batch.py — Schema tests
 # ─────────────────────────────────────────────────────────
@@ -385,6 +392,253 @@ def test_batch_notes_carry_exploration_subspace():
             ))
 
     assert batch.notes[0].exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA
+
+
+def test_factor_algebra_renders_formula_from_recipe_payload():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [
+            {
+                "note_id": "recipe_ok",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "recipe",
+                "economic_intuition": "recipe",
+                "proposed_formula": "Div($close, 0)",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-23",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "recipe path"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+
+
+def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_recipe",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "bad",
+            "economic_intuition": "bad",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 7,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "bad recipe"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_recipe",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "good",
+            "economic_intuition": "good",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "good recipe"
+    }'''
+
+    async def capture_ainvoke(messages):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good_recipe"
+    assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
+    assert mock_chat.ainvoke.await_count == 2
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert "重试硬约束" in captured_user_messages[1]
+
+
+def test_factor_algebra_rejects_free_form_only_path_and_retries():
+    from src.agents.researcher import AlphaResearcher
+
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "free_form_only",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "free",
+            "economic_intuition": "free",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "free form only"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "recipe_after_retry",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "recipe",
+            "economic_intuition": "recipe",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "recipe"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[first, second])
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "recipe_after_retry"
+    assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+
+
+def test_non_factor_algebra_subspace_keeps_free_form_path():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [{
+            "note_id": "cross_market_free_form",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "cross market",
+            "economic_intuition": "cross market",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "free form for non-factor-algebra"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.CROSS_MARKET,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "cross_market_free_form"
+    assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
 
 
 def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():

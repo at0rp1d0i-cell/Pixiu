@@ -28,6 +28,7 @@ from src.formula.capabilities import (
     format_available_operators_for_prompt,
     get_runtime_formula_capabilities,
 )
+from src.formula.sketch import FormulaRecipe, render_formula_recipe
 from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 _SKILL_LOADER = SkillLoader()
 _MAX_STAGE2_REJECTION_SAMPLES = 5
 _MAX_LOCAL_RETRY = 1
+_FACTOR_ALGEBRA_RECIPE_ONLY_FALLBACK = "InvalidRecipe(missing_formula_recipe)"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -122,6 +124,23 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 请提出 2-3 个差异化的 FactorResearchNote，输出 AlphaResearcherBatch JSON。
 每个假设应捕捉 {island} 方向下不同的市场机制，而非同一思路的变体。
 每个假设必须声明 applicable_regimes（适用市场环境）和 invalid_regimes（失效环境）。
+"""
+
+FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
+## FACTOR_ALGEBRA 专用输出约束（必须遵守）
+- 本子空间必须输出 `formula_recipe` 对象，由系统渲染 `proposed_formula`
+- 不接受只提供自由字符串 `proposed_formula` 的路径
+- `formula_recipe` 字段：
+  - base_field
+  - lookback_short
+  - lookback_long
+  - transform_family: mean_spread | ratio_momentum | volatility_state | volume_confirmation
+  - interaction_mode: none | mul | sub
+  - normalization: none | rank | quantile
+  - normalization_window（normalization != none 时必填）
+  - quantile_qscore（normalization = quantile 时必填）
+  - secondary_field（仅 volume_confirmation 时必填）
+- `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
 """
 
 def _today_str() -> str:
@@ -270,6 +289,8 @@ class AlphaResearcher:
                 feedback_section=fb,
                 failed_factors_section=failed_section,
             )
+            if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
+                user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
             if attempt > 0:
                 user_msg += (
                     "\n\n## 本地预筛拒绝反馈（重试约束）\n"
@@ -355,6 +376,8 @@ class AlphaResearcher:
 
         notes = []
         for note_data in notes_data:
+            if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
+                note_data = self._render_factor_algebra_recipe_into_note(note_data)
             note_data.setdefault("note_id", f"{self.island}_{_today_str()}_{uuid.uuid4().hex[:8]}")
             note_data.setdefault("island", self.island)
             note_data.setdefault("iteration", iteration)
@@ -371,6 +394,23 @@ class AlphaResearcher:
             notes=notes,
             generation_rationale=data.get("generation_rationale", ""),
         )
+
+    @staticmethod
+    def _render_factor_algebra_recipe_into_note(note_data: dict[str, Any]) -> dict[str, Any]:
+        rendered_note = dict(note_data)
+        recipe_payload = rendered_note.pop("formula_recipe", None)
+        if recipe_payload is None:
+            recipe_payload = rendered_note.pop("recipe", None)
+        if not isinstance(recipe_payload, dict):
+            rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_ONLY_FALLBACK
+            return rendered_note
+
+        try:
+            recipe = FormulaRecipe(**recipe_payload)
+            rendered_note["proposed_formula"] = render_formula_recipe(recipe)
+        except Exception:
+            rendered_note["proposed_formula"] = "InvalidRecipe(invalid_formula_recipe)"
+        return rendered_note
 
     def _try_symbolic_mutation_batch(
         self,
