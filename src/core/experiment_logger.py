@@ -179,6 +179,9 @@ class ExperimentLogger:
             "input_count": prefilter_diag.get("input_count", len(state.research_notes)),
             "approved_count": prefilter_diag.get("approved_count", len(state.approved_notes)),
             "rejection_counts_by_filter": dict(prefilter_diag.get("rejection_counts_by_filter", {})),
+            "rejection_counts_by_filter_and_subspace": dict(
+                prefilter_diag.get("rejection_counts_by_filter_and_subspace", {})
+            ),
             "sample_rejections": list(prefilter_diag.get("sample_rejections", [])),
         }
         stage1_reliability = dict(getattr(state, "stage1_reliability", {}) or {})

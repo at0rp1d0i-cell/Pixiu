@@ -422,6 +422,10 @@ def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():
     assert len(batch.notes) == 1
     assert batch.notes[0].note_id == "safe"
     assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("validator", 0) >= 1
+    grouped = researcher.last_generation_diagnostics.get("rejection_counts_by_filter_and_subspace", {})
+    assert grouped.get("validator", {}).get("unknown", 0) >= 1
+    sample = researcher.last_generation_diagnostics["sample_rejections"][0]
+    assert sample["exploration_subspace"] == "unknown"
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
 
 
@@ -646,6 +650,39 @@ def test_alpha_researcher_symbolic_path_runs_local_prescreen():
     assert [note.note_id for note in batch.notes] == ["safe_symbolic"]
     assert researcher.last_generation_diagnostics["generated_count"] == 2
     assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("validator", 0) >= 1
+    grouped = researcher.last_generation_diagnostics.get("rejection_counts_by_filter_and_subspace", {})
+    assert grouped.get("validator", {}).get("symbolic_mutation", 0) >= 1
+    assert researcher.last_generation_diagnostics["sample_rejections"][0]["exploration_subspace"] == "symbolic_mutation"
+
+
+def test_prefilter_diagnostics_include_rejection_subspace_breakdown():
+    from src.agents.prefilter import PreFilter
+
+    note = FactorResearchNote(
+        note_id="reject_cross_market",
+        island="momentum",
+        iteration=1,
+        hypothesis="test",
+        economic_intuition="test",
+        proposed_formula="Mean($close, 5)",
+        risk_factors=[],
+        market_context_date="2026-03-08",
+        applicable_regimes=["bull_trend"],
+        invalid_regimes=["range_bound"],
+        exploration_subspace=ExplorationSubspace.CROSS_MARKET,
+    )
+
+    prefilter = PreFilter(factor_pool=MagicMock())
+    with patch.object(prefilter.validator, "validate", return_value=(False, "bad formula")):
+        approved, filtered = asyncio.run(prefilter.filter_batch([note], current_regime="bull_trend"))
+
+    assert approved == []
+    assert filtered == 1
+    assert prefilter.last_diagnostics["rejection_counts_by_filter"]["validator"] == 1
+    grouped = prefilter.last_diagnostics["rejection_counts_by_filter_and_subspace"]
+    assert grouped["validator"]["cross_market"] == 1
+    sample = prefilter.last_diagnostics["sample_rejections"][0]
+    assert sample["exploration_subspace"] == "cross_market"
 
 
 def test_alpha_researcher_injects_market_regime_skill_from_context():

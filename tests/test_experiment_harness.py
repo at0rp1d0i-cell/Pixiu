@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -241,3 +242,69 @@ def test_default_status_runner_prefers_current_run_id_over_latest(monkeypatch: p
 
     assert ok
     assert "run_id=run-current" in detail
+
+
+def test_experiment_logger_persists_subspace_aware_rejection_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from src.core.experiment_logger import ExperimentLogger
+    from src.schemas.state import AgentState
+    from src.schemas.research_note import FactorResearchNote
+    from src.schemas.hypothesis import ExplorationSubspace
+
+    note = FactorResearchNote(
+        note_id="n1",
+        island="momentum",
+        iteration=1,
+        hypothesis="h",
+        economic_intuition="i",
+        proposed_formula="Mean($close, 5)",
+        risk_factors=[],
+        market_context_date="2026-03-23",
+        exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+    state = AgentState(
+        current_round=0,
+        research_notes=[note],
+        stage2_diagnostics={
+            "generated_count": 2,
+            "delivered_count": 1,
+            "local_retry_count": 0,
+            "rejection_counts_by_filter": {"validator": 1},
+            "rejection_counts_by_filter_and_subspace": {"validator": {"factor_algebra": 1}},
+            "sample_rejections": [
+                {
+                    "note_id": "n_bad",
+                    "filter": "validator",
+                    "reason": "bad",
+                    "exploration_subspace": "factor_algebra",
+                }
+            ],
+        },
+        prefilter_diagnostics={
+            "input_count": 1,
+            "approved_count": 0,
+            "rejection_counts_by_filter": {"alignment": 1},
+            "rejection_counts_by_filter_and_subspace": {"alignment": {"factor_algebra": 1}},
+            "sample_rejections": [
+                {
+                    "note_id": "n1",
+                    "filter": "alignment",
+                    "reason": "mismatch",
+                    "exploration_subspace": "factor_algebra",
+                }
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        "src.factor_pool.pool.get_factor_pool",
+        lambda: SimpleNamespace(get_passed_factors=lambda limit=9999: []),
+    )
+
+    logger = ExperimentLogger(run_id="telemetry_test", runs_dir=tmp_path)
+    logger.snapshot(0, state)
+
+    payload = json.loads((tmp_path / "telemetry_test" / "round_000.json").read_text(encoding="utf-8"))
+    assert payload["stage2"]["rejection_counts_by_filter_and_subspace"]["validator"]["factor_algebra"] == 1
+    assert payload["stage2"]["sample_rejections"][0]["exploration_subspace"] == "factor_algebra"
+    assert payload["prefilter"]["rejection_counts_by_filter_and_subspace"]["alignment"]["factor_algebra"] == 1
+    assert payload["prefilter"]["sample_rejections"][0]["exploration_subspace"] == "factor_algebra"

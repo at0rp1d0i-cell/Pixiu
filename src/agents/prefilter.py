@@ -522,6 +522,7 @@ class PreFilter:
             "input_count": 0,
             "approved_count": 0,
             "rejection_counts_by_filter": {},
+            "rejection_counts_by_filter_and_subspace": {},
             "sample_rejections": [],
         }
 
@@ -530,12 +531,17 @@ class PreFilter:
             "input_count": input_count,
             "approved_count": 0,
             "rejection_counts_by_filter": {},
+            "rejection_counts_by_filter_and_subspace": {},
             "sample_rejections": [],
         }
 
     def _record_rejection(self, note: FactorResearchNote, filter_name: str, reason: str) -> None:
         counts = self.last_diagnostics.setdefault("rejection_counts_by_filter", {})
         counts[filter_name] = counts.get(filter_name, 0) + 1
+        subspace = note.exploration_subspace.value if note.exploration_subspace is not None else "unknown"
+        grouped_counts = self.last_diagnostics.setdefault("rejection_counts_by_filter_and_subspace", {})
+        filter_group = grouped_counts.setdefault(filter_name, {})
+        filter_group[subspace] = filter_group.get(subspace, 0) + 1
 
         samples = self.last_diagnostics.setdefault("sample_rejections", [])
         if len(samples) < _MAX_REJECTION_SAMPLES:
@@ -543,6 +549,7 @@ class PreFilter:
                 "note_id": note.note_id,
                 "filter": filter_name,
                 "reason": reason,
+                "exploration_subspace": subspace,
             })
 
     def _record_top_k_truncation(self, notes: list[FactorResearchNote]) -> None:

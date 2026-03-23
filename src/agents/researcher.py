@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date
 from typing import Any, Optional
 
@@ -128,6 +128,11 @@ def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 
 
+def _note_subspace_value(note: FactorResearchNote) -> str:
+    subspace = note.exploration_subspace
+    return subspace.value if subspace is not None else "unknown"
+
+
 def _build_researcher_system_prompt(capabilities: FormulaCapabilities) -> str:
     return ALPHA_RESEARCHER_SYSTEM_PROMPT.format(
         available_fields_block=format_available_fields_for_prompt(capabilities),
@@ -202,6 +207,7 @@ class AlphaResearcher:
                     "delivered_count": len(approved_notes),
                     "local_retry_count": 0,
                     "rejection_counts_by_filter": diagnostics["rejection_counts_by_filter"],
+                    "rejection_counts_by_filter_and_subspace": diagnostics["rejection_counts_by_filter_and_subspace"],
                     "sample_rejections": diagnostics["sample_rejections"],
                 }
                 if not approved_notes:
@@ -252,6 +258,7 @@ class AlphaResearcher:
         total_generated_count = 0
         local_retry_count = 0
         rejection_counts = Counter()
+        rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
         sample_rejections: list[dict[str, str]] = []
 
         for attempt in range(_MAX_LOCAL_RETRY + 1):
@@ -284,6 +291,8 @@ class AlphaResearcher:
 
             total_generated_count += diagnostics["generated_count"]
             rejection_counts.update(diagnostics["rejection_counts_by_filter"])
+            for filter_name, subspace_counts in diagnostics["rejection_counts_by_filter_and_subspace"].items():
+                rejection_counts_by_filter_and_subspace[filter_name].update(subspace_counts)
             for sample in diagnostics["sample_rejections"]:
                 if len(sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
                     break
@@ -295,6 +304,10 @@ class AlphaResearcher:
                     "delivered_count": len(approved_notes),
                     "local_retry_count": local_retry_count,
                     "rejection_counts_by_filter": dict(rejection_counts),
+                    "rejection_counts_by_filter_and_subspace": {
+                        filter_name: dict(subspace_counts)
+                        for filter_name, subspace_counts in rejection_counts_by_filter_and_subspace.items()
+                    },
                     "sample_rejections": sample_rejections,
                 }
                 return parsed_batch.model_copy(update={"notes": approved_notes})
@@ -315,6 +328,10 @@ class AlphaResearcher:
             "delivered_count": 0,
             "local_retry_count": local_retry_count,
             "rejection_counts_by_filter": dict(rejection_counts),
+            "rejection_counts_by_filter_and_subspace": {
+                filter_name: dict(subspace_counts)
+                for filter_name, subspace_counts in rejection_counts_by_filter_and_subspace.items()
+            },
             "sample_rejections": sample_rejections,
         }
         return AlphaResearcherBatch(
@@ -465,6 +482,7 @@ class AlphaResearcher:
 
         approved_notes: list[FactorResearchNote] = []
         rejection_counts = Counter()
+        rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
         sample_rejections: list[dict[str, str]] = []
 
         validator = Validator(
@@ -477,9 +495,16 @@ class AlphaResearcher:
             passed, reason = validator.validate(note)
             if not passed:
                 rejection_counts["validator"] += 1
+                subspace = _note_subspace_value(note)
+                rejection_counts_by_filter_and_subspace["validator"][subspace] += 1
                 if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
                     sample_rejections.append(
-                        {"note_id": note.note_id, "filter": "validator", "reason": reason}
+                        {
+                            "note_id": note.note_id,
+                            "filter": "validator",
+                            "reason": reason,
+                            "exploration_subspace": subspace,
+                        }
                     )
                 continue
 
@@ -487,9 +512,16 @@ class AlphaResearcher:
                 passed, reason = novelty_filter.check(note)
                 if not passed:
                     rejection_counts["novelty"] += 1
+                    subspace = _note_subspace_value(note)
+                    rejection_counts_by_filter_and_subspace["novelty"][subspace] += 1
                     if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
                         sample_rejections.append(
-                            {"note_id": note.note_id, "filter": "novelty", "reason": reason}
+                            {
+                                "note_id": note.note_id,
+                                "filter": "novelty",
+                                "reason": reason,
+                                "exploration_subspace": subspace,
+                            }
                         )
                     continue
 
@@ -499,6 +531,10 @@ class AlphaResearcher:
             "generated_count": len(notes),
             "delivered_count": len(approved_notes),
             "rejection_counts_by_filter": dict(rejection_counts),
+            "rejection_counts_by_filter_and_subspace": {
+                filter_name: dict(subspace_counts)
+                for filter_name, subspace_counts in rejection_counts_by_filter_and_subspace.items()
+            },
             "sample_rejections": sample_rejections,
         }
 
@@ -601,6 +637,7 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         s: [0, 0] for s in ExplorationSubspace
     }
     stage2_rejection_counts = Counter()
+    stage2_rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
     stage2_sample_rejections: list[dict[str, str]] = []
     stage2_generated_count = 0
     stage2_delivered_count = 0
@@ -612,6 +649,9 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         stage2_delivered_count += int(diagnostics.get("delivered_count", 0))
         stage2_retry_count += int(diagnostics.get("local_retry_count", 0))
         stage2_rejection_counts.update(diagnostics.get("rejection_counts_by_filter", {}))
+        for filter_name, subspace_counts in diagnostics.get("rejection_counts_by_filter_and_subspace", {}).items():
+            if isinstance(subspace_counts, dict):
+                stage2_rejection_counts_by_filter_and_subspace[filter_name].update(subspace_counts)
         for item in diagnostics.get("sample_rejections", []):
             if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
                 break
@@ -643,6 +683,10 @@ async def _hypothesis_gen_async(state: dict) -> dict:
             "delivered_count": stage2_delivered_count,
             "local_retry_count": stage2_retry_count,
             "rejection_counts_by_filter": dict(stage2_rejection_counts),
+            "rejection_counts_by_filter_and_subspace": {
+                filter_name: dict(subspace_counts)
+                for filter_name, subspace_counts in stage2_rejection_counts_by_filter_and_subspace.items()
+            },
             "sample_rejections": stage2_sample_rejections,
         },
     }
