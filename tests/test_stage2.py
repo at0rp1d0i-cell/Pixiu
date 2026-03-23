@@ -625,12 +625,29 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
                 "filter": "validator",
                 "reason": "FormulaSketch recipe 无效：volume_confirmation requires interaction_mode='mul'",
             },
+            {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：Unsupported quantile_qscore: 0.75",
+            },
+            {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：Unsupported normalization_window: 7",
+            },
         ]
     )
 
     assert "必须提供 formula_recipe 对象" in feedback
     assert "lookback_short < lookback_long" in feedback
     assert "interaction_mode 必须为 mul" in feedback
+    assert "quantile_qscore 仅允许：0.2, 0.5, 0.8" in feedback
+    assert "normalization_window 仅允许固定窗口桶：5, 10, 20, 30, 60" in feedback
+
+
+def test_factor_algebra_recipe_instruction_explicitly_lists_allowed_value_buckets():
+    from src.agents.researcher import FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+
+    assert "仅允许：5, 10, 20, 30, 60" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+    assert "quantile_qscore` 仅允许：0.2, 0.5, 0.8" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
 
 
 def test_non_factor_algebra_subspace_keeps_free_form_path():

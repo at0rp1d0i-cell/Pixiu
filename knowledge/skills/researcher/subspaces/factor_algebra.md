@@ -30,10 +30,15 @@
   - `normalization_window`（当 normalization != none）
   - `quantile_qscore`（当 normalization = quantile）
   - `secondary_field`（仅 volume_confirmation）
+- 数值白名单（必须命中）：
+  - `lookback_short / lookback_long / normalization_window` ∈ `{5, 10, 20, 30, 60}`
+  - `quantile_qscore` ∈ `{0.2, 0.5, 0.8}`
 
 **Step 3 — recipe 合规自检**
 - [ ] `lookback_short < lookback_long`
 - [ ] `volume_confirmation` 时 `interaction_mode='mul'`
+- [ ] 所有窗口值仅使用 `{5, 10, 20, 30, 60}`
+- [ ] `quantile_qscore`（若使用）仅为 `{0.2, 0.5, 0.8}`
 - [ ] 归一化仅使用 `Rank(expr, N)` 或 `Quantile(expr, N, qscore)` 对应 recipe 字段
 - [ ] 不提交自由 `Div`、不手写任意算子树
 
@@ -47,5 +52,7 @@
 
 - **禁止**：把自由 `proposed_formula` 字符串作为主路径（缺失 `formula_recipe` 会被拒绝）
 - **禁止**：`lookback_short >= lookback_long`
+- **禁止**：窗口值不在 `{5, 10, 20, 30, 60}` 内
+- **禁止**：`quantile_qscore` 不在 `{0.2, 0.5, 0.8}` 内（例如 `0.75`）
 - **禁止**：`volume_confirmation` 搭配非 `mul` 交互模式
 - **禁止**：使用未在运行时可用列表中的字段

@@ -28,7 +28,12 @@ from src.formula.capabilities import (
     format_available_operators_for_prompt,
     get_runtime_formula_capabilities,
 )
-from src.formula.sketch import FormulaRecipe, render_formula_recipe
+from src.formula.sketch import (
+    ALLOWED_QUANTILE_QSCORES,
+    ALLOWED_WINDOW_BUCKETS,
+    FormulaRecipe,
+    render_formula_recipe,
+)
 from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
@@ -141,6 +146,9 @@ FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
   - normalization_window（normalization != none 时必填）
   - quantile_qscore（normalization = quantile 时必填）
   - secondary_field（仅 volume_confirmation 时必填）
+- 窗口字段 `lookback_short/lookback_long/normalization_window` 仅允许：5, 10, 20, 30, 60
+- `quantile_qscore` 仅允许：0.2, 0.5, 0.8
+- 必须满足 `lookback_short < lookback_long`
 - `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
 """
 
@@ -299,6 +307,8 @@ class AlphaResearcher:
                     "\n## 重试硬约束\n"
                     "- Rank 必须写成 Rank(expr, N)，禁止 Rank(expr)\n"
                     "- 归一化仅允许 Rank(expr, N) 或 Quantile(expr, N, qscore)\n"
+                    "- `lookback_short/lookback_long/normalization_window` 仅允许: 5, 10, 20, 30, 60\n"
+                    "- `quantile_qscore` 仅允许: 0.2, 0.5, 0.8\n"
                     "- 禁止 Zscore/MinMax/Neutralize/Demean\n"
                     "- 避免重复提交与本地预筛已拒绝原因相同的模式\n"
                 )
@@ -615,6 +625,8 @@ class AlphaResearcher:
         for idx, item in enumerate(sample_rejections[:3], start=1):
             reason = item.get("reason", "")
             lines.append(f"{idx}. [{item.get('filter', 'unknown')}] {reason}")
+        for item in sample_rejections:
+            reason = item.get("reason", "")
             reason_lower = reason.lower()
             if "missing_formula_recipe" in reason_lower:
                 hint = "- FACTOR_ALGEBRA 必须提供 formula_recipe 对象，不能只给 proposed_formula 字符串。"
@@ -623,6 +635,30 @@ class AlphaResearcher:
                     seen_hints.add(hint)
             if "lookback_short must be smaller than lookback_long" in reason_lower:
                 hint = "- 公式窗口必须满足 lookback_short < lookback_long（例如 5 < 20）。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported lookback_short" in reason_lower or "unsupported lookback_long" in reason_lower:
+                hint = (
+                    "- lookback_short/lookback_long 仅允许固定窗口桶："
+                    f"{', '.join(str(v) for v in ALLOWED_WINDOW_BUCKETS)}。"
+                )
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported normalization_window" in reason_lower:
+                hint = (
+                    "- normalization_window 仅允许固定窗口桶："
+                    f"{', '.join(str(v) for v in ALLOWED_WINDOW_BUCKETS)}。"
+                )
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported quantile_qscore" in reason_lower:
+                hint = (
+                    "- quantile_qscore 仅允许："
+                    f"{', '.join(str(v) for v in ALLOWED_QUANTILE_QSCORES)}。"
+                )
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
