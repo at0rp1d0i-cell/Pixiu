@@ -1,6 +1,6 @@
 """
 Pixiu Tushare Pro MCP Server
-工具：股票列表、日线行情、财务指标、融资融券、新闻、公告
+工具：股票列表、日线行情、财务指标、沪深港通资金、融资融券、新闻、公告
 积分要求：2000积分（学生套餐已激活）
 启动：python mcp_servers/tushare_server.py
 """
@@ -169,7 +169,47 @@ async def get_financial_indicators(
 
 
 # ─────────────────────────────────────────────
-# 工具 4：融资融券市场汇总
+# 工具 4：沪深港通资金流
+# ─────────────────────────────────────────────
+@app.tool()
+async def get_moneyflow_hsgt(
+    start_date: str = "",
+    end_date: str = "",
+    limit: int = 30,
+) -> str:
+    """获取沪深港通资金流向摘要（北向/南向），用于 Stage 1 blocking core。
+
+    Args:
+        start_date: 起始日期，格式 YYYYMMDD
+        end_date: 结束日期，格式 YYYYMMDD；默认今日
+        limit: 返回最近多少条，默认 30
+
+    Returns:
+        JSON，包含 trade_date, north_money, south_money, hgt, sgt, ggt_ss, ggt_sz
+    积分要求：2000积分
+    """
+    try:
+        if not end_date:
+            end_date = date.today().strftime("%Y%m%d")
+        if not start_date:
+            start_date = (date.today() - timedelta(days=45)).strftime("%Y%m%d")
+        pro = _get_pro()
+        df = await _call(
+            pro.moneyflow_hsgt,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if df is None or df.empty:
+            return json.dumps({"data": [], "count": 0}, ensure_ascii=False)
+        df = df.sort_values("trade_date").tail(max(limit, 1))
+        return _df_to_json(df, limit=limit)
+    except Exception as e:
+        logger.error("[tushare] get_moneyflow_hsgt error: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# 工具 5：融资融券市场汇总
 # ─────────────────────────────────────────────
 @app.tool()
 async def get_margin_data(
@@ -209,7 +249,7 @@ async def get_margin_data(
 
 
 # ─────────────────────────────────────────────
-# 工具 5：财经新闻
+# 工具 6：财经新闻
 # ─────────────────────────────────────────────
 @app.tool()
 async def get_news(
@@ -252,7 +292,7 @@ async def get_news(
 
 
 # ─────────────────────────────────────────────
-# 工具 6：上市公司公告
+# 工具 7：上市公司公告
 # ─────────────────────────────────────────────
 @app.tool()
 async def get_announcements(
@@ -294,5 +334,5 @@ async def get_announcements(
 
 
 if __name__ == "__main__":
-    logger.info("Tushare MCP Server starting... (6 tools)")
+    logger.info("Tushare MCP Server starting... (7 tools)")
     app.run(transport="stdio")

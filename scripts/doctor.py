@@ -1,198 +1,245 @@
 #!/usr/bin/env python
 """
-Pixiu System Doctor: Pre-flight Health Check
-Run this script to verify the operational readiness of the pipeline.
+Pixiu System Doctor: tiered pre-flight health check.
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
 import os
-import sqlite3
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, timedelta
+from pathlib import Path
 from time import perf_counter
+from typing import Awaitable, Callable
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 console = Console()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-def check_data_layer():
-    """Verify local Qlib data and features."""
+
+DoctorRunner = Callable[[], bool | str | tuple[bool | str, str] | Awaitable[bool | str | tuple[bool | str, str]]]
+
+
+@dataclass(frozen=True)
+class DoctorCheck:
+    name: str
+    tier: str
+    domain: str
+    runner: DoctorRunner
+
+
+def _normalize_result(result) -> tuple[bool | str, str]:
+    if isinstance(result, tuple) and len(result) == 2:
+        return result
+    if isinstance(result, bool):
+        return result, ""
+    if isinstance(result, str):
+        return "WARN", result
+    return False, str(result)
+
+
+def _status_icon(status_code: bool | str) -> tuple[str, str]:
+    if status_code is True:
+        return "green", "PASS"
+    if status_code == "WARN":
+        return "yellow", "WARN"
+    return "red", "FAIL"
+
+
+def check_runtime_readiness() -> tuple[bool | str, str]:
     try:
         from src.formula.capabilities import get_runtime_formula_capabilities
-        caps = get_runtime_formula_capabilities()
-        fields_count = len(caps.available_fields)
 
-        # 项目内 qlib_bin 目录
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        qlib_path = os.path.join(project_root, "data", "qlib_bin")
-        if not os.path.exists(qlib_path):
+        caps = get_runtime_formula_capabilities()
+        qlib_path = PROJECT_ROOT / "data" / "qlib_bin"
+        if not qlib_path.exists():
             return False, f"Qlib bin dir not found: {qlib_path}"
 
-        # 检查数据时效性：读取 calendars 最后日期
-        cal_file = os.path.join(qlib_path, "calendars", "day.txt")
-        freshness_msg = ""
-        if os.path.exists(cal_file):
-            with open(cal_file) as f:
-                lines = f.read().strip().splitlines()
-                if lines:
-                    last_date = lines[-1].strip()
-                    freshness_msg = f"，数据截止: {last_date}"
+        cal_file = qlib_path / "calendars" / "day.txt"
+        last_date = "unknown"
+        if cal_file.exists():
+            lines = cal_file.read_text(encoding="utf-8").strip().splitlines()
+            if lines:
+                last_date = lines[-1].strip()
 
-        instruments_path = os.path.join(qlib_path, "instruments")
-        stock_count = len(os.listdir(instruments_path)) if os.path.exists(instruments_path) else 0
-        features_path = os.path.join(qlib_path, "features")
-        feature_dirs = len(os.listdir(features_path)) if os.path.exists(features_path) else 0
-
-        return True, f"能力集 {fields_count} 字段，{feature_dirs} 只股票 Bin{freshness_msg}"
-    except Exception as e:
-        return False, str(e)
+        return True, f"runtime fields={len(caps.available_fields)} | calendar={last_date}"
+    except Exception as exc:
+        return False, str(exc)
 
 
-async def check_llm_layer():
-    """Ping test to configured LLM."""
+def _tushare_client():
+    token = os.getenv("TUSHARE_TOKEN")
+    if not token:
+        raise RuntimeError("TUSHARE_TOKEN missing")
+    import tushare as ts
+
+    ts.set_token(token)
+    return ts.pro_api()
+
+
+def check_moneyflow_hsgt() -> tuple[bool | str, str]:
     try:
-        from src.llm.openai_compat import build_researcher_llm
-        from langchain_core.messages import HumanMessage
-        llm = build_researcher_llm(profile="alignment_checker")
+        pro = _tushare_client()
+        end_date = date.today().strftime("%Y%m%d")
+        start_date = (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+        df = pro.moneyflow_hsgt(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return False, "moneyflow_hsgt returned no rows"
+        latest = df.sort_values("trade_date").iloc[-1]
+        return True, f"rows={len(df)} | latest={latest['trade_date']}"
+    except Exception as exc:
+        return False, str(exc)
 
+
+def check_margin_proxy() -> tuple[bool | str, str]:
+    try:
+        pro = _tushare_client()
+        end_date = date.today().strftime("%Y%m%d")
+        start_date = (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+        df = pro.margin(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return False, "margin returned no rows"
+        latest = df.sort_values("trade_date").iloc[-1]
+        return True, f"rows={len(df)} | latest={latest['trade_date']}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+async def check_llm_layer() -> tuple[bool | str, str]:
+    try:
+        from langchain_core.messages import HumanMessage
+        from src.llm.openai_compat import build_researcher_llm
+
+        llm = build_researcher_llm(profile="alignment_checker")
         start = perf_counter()
         resp = await asyncio.wait_for(
             llm.ainvoke([HumanMessage(content="Reply 'OK' only.")]),
-            timeout=10.0
+            timeout=10.0,
         )
         elapsed = perf_counter() - start
-
         model_name = getattr(llm, "model_name", "unknown")
-        status = True
-        warn = ""
-        if elapsed > 3.0:
-            warn = " (Latency High!)"
-            status = "WARN"
-
-        return status, f"延时 {elapsed:.2f}s{warn} | Model: {model_name} | Response: {resp.content.strip()}"
-    except Exception as e:
-        return False, str(e)
+        status: bool | str = True if elapsed <= 3.0 else "WARN"
+        return status, f"latency={elapsed:.2f}s | model={model_name} | response={resp.content.strip()}"
+    except Exception as exc:
+        return False, str(exc)
 
 
-def check_env_apis():
-    """Check required API keys and MCP configs."""
-    messages = []
-    status = True
-    
-    # 1. LLM API Key（优先 RESEARCHER_API_KEY，fallback OPENAI_API_KEY）
-    api_key = os.getenv("RESEARCHER_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        messages.append("缺少 RESEARCHER_API_KEY / OPENAI_API_KEY")
-        status = False
-    else:
-        base = os.getenv("OPENAI_API_BASE", "default")
-        key_source = "RESEARCHER_API_KEY" if os.getenv("RESEARCHER_API_KEY") else "OPENAI_API_KEY"
-        messages.append(f"LLM API Key 存在 ({key_source}, base: {base})")
-        
-    # 2. Tushare
-    ts_token = os.getenv("TUSHARE_TOKEN")
-    if not ts_token:
-        messages.append("WARNING: 无 TUSHARE_TOKEN (如果仅使用 AkShare 可忽略)")
-        if status is True:
-            status = "WARN"
-    else:
-        try:
-            import tushare as ts
-            ts.set_token(ts_token)
-            pro = ts.pro_api()
-            # Test ping
-            user = pro.user(token=ts_token)
-            if user is not None and len(user) > 0:
-                messages.append("Tushare Pro Token 验证成功")
-            else:
-                messages.append("Tushare Token 验证失败或欠费")
-                status = False
-        except ImportError:
-            messages.append("Tushare API 未安装 (ModuleNotFoundError)")
-            status = "WARN"
-        except Exception as e:
-            messages.append(f"Tushare Ping 失败: {e}")
-            status = False
-            
-    return status, " | ".join(messages)
-
-
-def check_pool_knowledge():
-    """Query FactorPool for metrics on accumulated constraints and passed factors."""
+def check_pool_knowledge() -> tuple[bool | str, str]:
     try:
         from src.factor_pool.pool import get_factor_pool
-        pool = get_factor_pool()
 
+        pool = get_factor_pool()
         factors = pool.get_top_factors(limit=1000)
         constraints = pool.get_active_constraints() if hasattr(pool, "get_active_constraints") else []
-
-        knowledge_msg = f"已积累 {len(constraints)} 条避坑约束规则"
-        pool_msg = f"服役因子: {len(factors)} 个"
-
-        return True, {"knowledge": knowledge_msg, "pool": pool_msg}
-    except Exception as e:
-        return False, str(e)
-    except Exception as e:
-        return False, {"knowledge": str(e), "pool": str(e)}
+        return True, f"passed_factors={len(factors)} | active_constraints={len(constraints)}"
+    except Exception as exc:
+        return False, str(exc)
 
 
-async def main():
-    console.print(Panel("[bold cyan]Pixiu System Doctor: Pre-flight Check[/bold cyan]", border_style="cyan"))
-    
+def check_news_enrichment() -> tuple[bool | str, str]:
+    try:
+        pro = _tushare_client()
+        today = date.today().strftime("%Y-%m-%d")
+        df = pro.news(
+            src="sina",
+            start_date=f"{today} 09:00:00",
+            end_date=f"{today} 23:59:59",
+            limit=10,
+        )
+        if df is None or df.empty:
+            return "WARN", "news returned no rows"
+        return True, f"rows={len(df)}"
+    except Exception as exc:
+        return "WARN", str(exc)
+
+
+def check_moneyflow_staging() -> tuple[bool | str, str]:
+    moneyflow_dir = PROJECT_ROOT / "data" / "fundamental_staging" / "moneyflow"
+    hsgt_file = PROJECT_ROOT / "data" / "fundamental_staging" / "moneyflow_hsgt" / "moneyflow_hsgt.parquet"
+    moneyflow_files = list(moneyflow_dir.glob("*.parquet")) if moneyflow_dir.exists() else []
+    if not hsgt_file.exists():
+        return "WARN", "moneyflow_hsgt parquet missing"
+    return True, f"moneyflow_hsgt=present | moneyflow_files={len(moneyflow_files)}"
+
+
+def build_doctor_checks(mode: str = "core") -> list[DoctorCheck]:
+    checks = [
+        DoctorCheck("runtime_readiness", "blocking", "数据 (Data)", check_runtime_readiness),
+        DoctorCheck("moneyflow_hsgt", "blocking", "工具 (Blocking API)", check_moneyflow_hsgt),
+        DoctorCheck("margin_proxy", "blocking", "工具 (Blocking API)", check_margin_proxy),
+        DoctorCheck("llm", "core_optional", "算力 (LLM)", check_llm_layer),
+        DoctorCheck("factor_pool", "core_optional", "因子池 (Pool)", check_pool_knowledge),
+    ]
+    if mode == "full":
+        checks.extend(
+            [
+                DoctorCheck("news_enrichment", "enrichment", "增强 (Enrichment)", check_news_enrichment),
+                DoctorCheck("moneyflow_staging", "data_plane", "数据面 (Data Plane)", check_moneyflow_staging),
+            ]
+        )
+    return checks
+
+
+async def run_doctor(mode: str = "core") -> int:
+    console.print(
+        Panel(
+            f"[bold cyan]Pixiu System Doctor[/bold cyan]\nmode={mode}",
+            border_style="cyan",
+        )
+    )
+
     table = Table(show_header=True, header_style="bold magenta", expand=True)
-    table.add_column("检查项目 (Domain)", width=20)
-    table.add_column("状态 (Status)", width=10, justify="center")
-    table.add_column("详情 (Details)")
-    
-    def _add_result(name, status_code, details):
-        if status_code is True:
-            color = "green"
-            icon = "✅ PASS"
-        elif status_code == "WARN":
-            color = "yellow"
-            icon = "⚠️ WARN"
-        else:
-            color = "red"
-            icon = "❌ FAIL"
-            
-        table.add_row(name, f"[{color}]{icon}[/{color}]", details)
-    
-    # 1. Data layer
-    data_pass, data_msg = check_data_layer()
-    _add_result("数据 (Data)", data_pass, data_msg)
-    
-    # 2. LLM layer
-    llm_pass, llm_msg = await check_llm_layer()
-    _add_result("算力 (LLM)", llm_pass, llm_msg)
-    
-    # 3. Environment & APIs
-    env_pass, env_msg = check_env_apis()
-    _add_result("工具 (MCP/API)", env_pass, env_msg)
-    
-    # 4 & 5. Knowledge & Pool
-    k_pass, k_dict = check_pool_knowledge()
-    if k_pass:
-        _add_result("知识 (Knowledge)", True, k_dict.get("knowledge", ""))
-        _add_result("因子池 (Pool)", True, k_dict.get("pool", ""))
-    else:
-        _add_result("底层存储 (DB)", False, str(k_dict))
-        
+    table.add_column("检查项目", width=24)
+    table.add_column("Tier", width=14)
+    table.add_column("状态", width=10, justify="center")
+    table.add_column("详情")
+
+    failures = 0
+    for check in build_doctor_checks(mode):
+        result = check.runner()
+        if asyncio.iscoroutine(result):
+            result = await result
+        status_code, details = _normalize_result(result)
+        color, icon = _status_icon(status_code)
+        table.add_row(check.domain, check.tier, f"[{color}]{icon}[/{color}]", details)
+        if status_code is False and check.tier == "blocking":
+            failures += 1
+
     console.print(table)
-    
-    if not all(x is True for x in [data_pass, llm_pass, k_pass]) or env_pass is False:
-        console.print("[bold red]⚠️ 发现红灯错误，请在运行 Pixiu 之前修复。[/bold red]")
-    else:
-        console.print("[bold green]✓ 全系统自检通过。可以启动。[/bold green]")
+    if failures:
+        console.print("[bold red]Blocking checks failed. Do not start evolve/experiment runs.[/bold red]")
+        return 1
+    console.print("[bold green]Doctor checks passed for the selected mode.[/bold green]")
+    return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Pixiu tiered system doctor")
+    parser.add_argument(
+        "--mode",
+        choices=["core", "full"],
+        default="core",
+        help="core = blocking + core_optional, full = add enrichment + data_plane",
+    )
+    return parser.parse_args(argv)
+
+
+async def main_async(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    return await run_doctor(mode=args.mode)
+
+
+def main(argv: list[str] | None = None) -> int:
+    return asyncio.run(main_async(argv))
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    # 确保从项目根目录加载 .env
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    load_dotenv(os.path.join(project_root, ".env"), override=True)
-    
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        console.print("\n[yellow]已取消。[/yellow]")
+
+    load_dotenv(PROJECT_ROOT / ".env", override=True)
+    raise SystemExit(main())

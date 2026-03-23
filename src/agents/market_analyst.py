@@ -24,6 +24,21 @@ from src.skills.loader import SkillLoader
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
+_DEGRADED_SUMMARY_PREFIX = "市场数据获取失败："
+
+_STAGE1_BLOCKING_TOOL_NAMES = frozenset(
+    {
+        "get_moneyflow_hsgt",
+        "get_margin_data",
+    }
+)
+
+_STAGE1_ENRICHMENT_TOOL_NAMES = frozenset(
+    {
+        "get_news",
+        "get_market_hot_topics",
+    }
+)
 
 MCP_SERVER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "mcp_servers", "akshare_server.py")
@@ -42,10 +57,11 @@ MARKET_ANALYST_SYSTEM_PROMPT = """你是 Pixiu 的市场分析师，负责每日
 今天的日期：{today}
 
 你需要：
-1. 调用工具获取北向资金、热门板块、宏观信号（PMI/M2/CPI）
-2. 判断当前市场 regime（trending_up/trending_down/sideways/volatile）
-3. 基于数据推断哪些 Island 方向本轮最值得探索
-4. 输出一份简洁的 MarketContextMemo JSON
+1. 优先调用 blocking core 工具获取北向资金和市场级风险偏好信号
+2. 如有可用 enrichment 工具，再补充热点题材或新闻摘要
+3. 判断当前市场 regime（trending_up/trending_down/sideways/volatile）
+4. 基于数据推断哪些 Island 方向本轮最值得探索
+5. 输出一份简洁的 MarketContextMemo JSON
 
 Island 选项：momentum（动量）、northbound（北向资金）、
 valuation（估值）、volatility（波动率）、volume（量价）、sentiment（情绪）
@@ -72,6 +88,7 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
     "raw_summary": "今日北向净流入..."
 }}
 注意：
+- blocking core 缺失时，不要编造数据；允许 northbound=null、hot_themes=[]、macro_signals=[]。
 - historical_insights 必须是空列表 []，该字段由下游 LiteratureMiner 填充，你不需要生成。
 - index_ma5/index_ma20/index_ma60：上证指数对应均线值，数据不可用时填 null。
 - volatility_30d：近 30 日日均波动率（%），数据不可用时填 null。
@@ -137,6 +154,24 @@ def _get_stage1_max_tool_rounds() -> int:
 def _stage1_rss_enabled() -> bool:
     raw = os.getenv("PIXIU_STAGE1_ENABLE_RSS", "")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _select_stage1_tools(tools: list) -> dict[str, list]:
+    """Split Stage 1 tools into blocking and enrichment allowlists."""
+    selected = {"blocking": [], "enrichment": []}
+    for tool in tools:
+        name = getattr(tool, "name", "")
+        if name in _STAGE1_BLOCKING_TOOL_NAMES:
+            selected["blocking"].append(tool)
+        elif name in _STAGE1_ENRICHMENT_TOOL_NAMES:
+            selected["enrichment"].append(tool)
+    return selected
+
+
+def is_degraded_market_context(memo: MarketContextMemo | None) -> bool:
+    if memo is None:
+        return True
+    return memo.raw_summary.startswith(_DEGRADED_SUMMARY_PREFIX)
 
 
 class MarketAnalyst:
@@ -333,8 +368,12 @@ async def _run_market_context_once(state: dict) -> dict:
             "transport": "stdio",
         }
     mcp_client = MultiServerMCPClient(servers)
-    tools = await mcp_client.get_tools()
-    analyst = MarketAnalyst(mcp_tools=tools)
+    selected_tools = _select_stage1_tools(await mcp_client.get_tools())
+    blocking_tools = selected_tools["blocking"]
+    enrichment_tools = selected_tools["enrichment"]
+    if not blocking_tools:
+        raise RuntimeError("No Stage 1 blocking tools available")
+    analyst = MarketAnalyst(mcp_tools=[*blocking_tools, *enrichment_tools])
     memo = await analyst.analyze()
     logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
     return {"market_context": memo}

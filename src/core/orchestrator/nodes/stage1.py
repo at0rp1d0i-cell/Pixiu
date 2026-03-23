@@ -18,17 +18,28 @@ def _today_str() -> str:
 
 def _can_reuse_market_context(state: AgentState) -> bool:
     """Reuse same-day Stage 1 output after round 0 to avoid repeated slow MCP work."""
+    from src.agents.market_analyst import is_degraded_market_context
+
     memo = state.market_context
     if memo is None:
         return False
     if state.current_round <= 0:
         return False
+    if is_degraded_market_context(memo):
+        return False
     return memo.date == _today_str()
+
+
+def _stage1_requires_blocking_success() -> bool:
+    from .. import config as _config
+
+    return _config.MAX_ROUNDS > 1
 
 
 def market_context_node(state: AgentState) -> MarketContextOutput:
     """Stage 1: MarketAnalyst + LiteratureMiner，生成 MarketContextMemo。"""
     from src.agents.market_analyst import market_context_node as _market_node
+    from src.agents.market_analyst import is_degraded_market_context
     from .. import config as _config
     from src.factor_pool.pool import get_factor_pool
 
@@ -61,6 +72,8 @@ def market_context_node(state: AgentState) -> MarketContextOutput:
         result = _market_node(dict(state))
         market_analyst_ms = round((perf_counter() - market_started) * 1000.0, 2)
         memo: MarketContextMemo = result.get("market_context")
+        if is_degraded_market_context(memo) and _stage1_requires_blocking_success():
+            raise RuntimeError("Stage 1 blocking core degraded; aborting evolve/experiment run")
 
         try:
             from src.agents.literature_miner import LiteratureMiner
@@ -105,6 +118,8 @@ def market_context_node(state: AgentState) -> MarketContextOutput:
             },
         )
         logger.error("[Stage 1] 失败: %s (%.2f ms)", e, stage_elapsed_ms)
+        if _stage1_requires_blocking_success():
+            raise
         return {
             "last_error": str(e),
             "error_stage": "market_context",

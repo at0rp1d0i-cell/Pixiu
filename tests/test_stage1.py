@@ -158,6 +158,20 @@ def test_market_context_node_timeout_falls_back_to_empty_memo():
     assert "timeout" in memo.raw_summary.lower()
 
 
+def test_market_context_node_converts_blocking_tool_error_to_degraded_memo():
+    from src.agents.market_analyst import market_context_node
+
+    with patch(
+        "src.agents.market_analyst._run_market_context_once",
+        side_effect=RuntimeError("No Stage 1 blocking tools available"),
+    ):
+        result = market_context_node({"active_islands": ["momentum"]})
+
+    memo = result["market_context"]
+    assert isinstance(memo, MarketContextMemo)
+    assert "No Stage 1 blocking tools available" in memo.raw_summary
+
+
 def test_run_market_context_once_uses_akshare_only_by_default():
     from src.agents.market_analyst import _run_market_context_once
 
@@ -166,14 +180,13 @@ def test_run_market_context_once_uses_akshare_only_by_default():
 
     with patch.dict("os.environ", {}, clear=True):
         with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
-            with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
-                result = asyncio.run(_run_market_context_once({}))
+            with pytest.raises(RuntimeError, match="No Stage 1 blocking tools available"):
+                asyncio.run(_run_market_context_once({}))
 
     servers = mock_ctor.call_args.args[0]
     assert "akshare" in servers
     assert "rss" not in servers
     assert "tushare" not in servers
-    assert isinstance(result["market_context"], MarketContextMemo)
 
 
 def test_run_market_context_once_includes_rss_when_opted_in():
@@ -184,12 +197,34 @@ def test_run_market_context_once_includes_rss_when_opted_in():
 
     with patch.dict("os.environ", {"PIXIU_STAGE1_ENABLE_RSS": "1"}, clear=True):
         with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
-            with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
+            with pytest.raises(RuntimeError, match="No Stage 1 blocking tools available"):
                 asyncio.run(_run_market_context_once({}))
 
     servers = mock_ctor.call_args.args[0]
     assert "akshare" in servers
     assert "rss" in servers
+
+
+def test_run_market_context_once_includes_tushare_when_token_present():
+    from src.agents.market_analyst import _run_market_context_once
+
+    tool = MagicMock()
+    tool.name = "get_moneyflow_hsgt"
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[tool])
+
+    with patch.dict("os.environ", {"TUSHARE_TOKEN": "test-token"}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
+            with patch("src.agents.market_analyst.build_researcher_llm") as mock_builder:
+                mock_chat = MagicMock()
+                mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+                mock_builder.return_value = mock_chat
+                with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
+                    result = asyncio.run(_run_market_context_once({}))
+
+    servers = mock_ctor.call_args.args[0]
+    assert "tushare" in servers
+    assert isinstance(result["market_context"], MarketContextMemo)
 
 
 def test_stage1_node_reuses_same_day_market_context_after_round_zero():
@@ -207,6 +242,59 @@ def test_stage1_node_reuses_same_day_market_context_after_round_zero():
     mock_market_node.assert_not_called()
 
 
+def test_stage1_node_does_not_reuse_degraded_same_day_market_context():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    degraded = _make_market_memo().model_copy(
+        update={"raw_summary": "市场数据获取失败：Stage 1 timeout after 60.0s"}
+    )
+    state = AgentState(current_round=1, market_context=degraded)
+
+    with patch(
+        "src.agents.market_analyst.market_context_node",
+        return_value={"market_context": _make_market_memo()},
+    ) as mock_market_node:
+        with patch("src.factor_pool.pool.get_factor_pool", return_value=MagicMock()):
+            with patch(
+                "src.agents.literature_miner.LiteratureMiner.retrieve_insights",
+                new=AsyncMock(return_value=[]),
+            ):
+                market_context_node(state)
+
+    mock_market_node.assert_called_once()
+
+
+def test_stage1_node_raises_in_strict_mode_when_blocking_core_is_degraded():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    degraded = _make_market_memo().model_copy(
+        update={"raw_summary": "市场数据获取失败：Stage 1 timeout after 60.0s"}
+    )
+    state = AgentState(current_round=0)
+
+    with patch("src.core.orchestrator.config.MAX_ROUNDS", 2):
+        with patch(
+            "src.agents.market_analyst.market_context_node",
+            return_value={"market_context": degraded},
+        ):
+            with pytest.raises(RuntimeError, match="blocking core degraded"):
+                market_context_node(state)
+
+
+def test_stage1_node_raises_in_strict_mode_when_market_analyst_raises():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    state = AgentState(current_round=0)
+
+    with patch("src.core.orchestrator.config.MAX_ROUNDS", 2):
+        with patch(
+            "src.agents.market_analyst.market_context_node",
+            side_effect=RuntimeError("No Stage 1 blocking tools available"),
+        ):
+            with pytest.raises(RuntimeError, match="No Stage 1 blocking tools available"):
+                market_context_node(state)
+
+
 def test_stage1_node_queries_literature_for_suggested_islands_only():
     from src.core.orchestrator.nodes.stage1 import market_context_node
 
@@ -220,6 +308,34 @@ def test_stage1_node_queries_literature_for_suggested_islands_only():
 
     assert result["market_context"].suggested_islands == ["momentum"]
     mock_retrieve.assert_awaited_once_with(active_islands=["momentum"])
+
+
+def test_select_stage1_tools_uses_allowlists():
+    from src.agents.market_analyst import _select_stage1_tools
+
+    def _tool(name: str):
+        tool = MagicMock()
+        tool.name = name
+        return tool
+
+    tools = [
+        _tool("get_moneyflow_hsgt"),
+        _tool("get_margin_data"),
+        _tool("get_news"),
+        _tool("get_market_hot_topics"),
+        _tool("unknown_tool"),
+    ]
+
+    selected = _select_stage1_tools(tools)
+
+    assert [tool.name for tool in selected["blocking"]] == [
+        "get_moneyflow_hsgt",
+        "get_margin_data",
+    ]
+    assert [tool.name for tool in selected["enrichment"]] == [
+        "get_news",
+        "get_market_hot_topics",
+    ]
 
 
 # ─────────────────────────────────────────────────────────
