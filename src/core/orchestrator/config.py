@@ -16,4 +16,4 @@ ACTIVE_ISLANDS: list[str] = os.getenv(
 REPORT_EVERY_N_ROUNDS: int = int(os.getenv("REPORT_EVERY_N_ROUNDS", "5"))
 MAX_CONCURRENT_BACKTESTS: int = int(os.getenv("MAX_CONCURRENT_BACKTESTS", "2"))
 
-REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
+REPORTS_DIR = Path(__file__).resolve().parents[3] / "data" / "reports"
