@@ -77,6 +77,25 @@ ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于
     3. 如果假设难以用单行公式表达，选择最核心部分用合法公式近似，hypothesis 字段描述完整逻辑
   - risk_factors: 字符串数组（可能失败的原因）
   - market_context_date: 字符串（今日日期，格式 YYYY-MM-DD）
+  - applicable_regimes: 字符串数组，声明该因子适用的市场环境，**必填**（至少一项）
+  - invalid_regimes: 字符串数组，声明该因子失效的市场环境，**必填**（至少一项）
+
+合法的 regime 标签（仅限以下值，其他值会被 Validator 拒绝）：
+  - "bull_trend"       — 趋势上涨市
+  - "bear_trend"       — 趋势下跌市
+  - "high_volatility"  — 高波动市
+  - "range_bound"      — 震荡盘整市
+  - "structural_break" — 结构性断裂（黑天鹅/政策突变）
+
+示例：applicable_regimes: ["bull_trend", "high_volatility"]，invalid_regimes: ["range_bound"]
+
+⚠️ 生成公式前的强制检查：
+1. 不要假设 Stage 3 会替你自动补 Max(..., 1e-8)、+1 或其他“保护壳”
+2. Div/Mod/Log/Sqrt 只有在公式本身能满足当前 canonical 数学安全约束时才能使用；如果无法确保，换一个更稳健的表达
+3. applicable_regimes 和 invalid_regimes 必须至少各填写一个，使用上述合法标签
+4. Ref 的偏移量必须为正整数（Ref($close, 5) 表示 5 天前）
+
+违反以上任何一条，因子将被 Validator 直接拒绝。
 """
 
 ALPHA_RESEARCHER_USER_TEMPLATE = """

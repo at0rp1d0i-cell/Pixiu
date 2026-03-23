@@ -14,7 +14,7 @@ from src.formula.capabilities import get_runtime_formula_capabilities
 pytestmark = pytest.mark.unit
 
 _TEST_ALLOWED_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$amount", "$factor", "$roe"}
-_TEST_APPROVED_OPERATORS = {"Mean", "Ref", "Log", "Corr", "If", "Gt", "Abs", "Std", "Div", "Sub"}
+_TEST_APPROVED_OPERATORS = {"Mean", "Ref", "Log", "Corr", "If", "Gt", "Abs", "Std", "Div", "Sub", "Max"}
 
 
 def _make_note(**kwargs) -> FactorResearchNote:
@@ -123,13 +123,15 @@ def test_validator_rejects_if_with_wrong_arity():
     assert "If" in reason or "参数数量" in reason
 
 
-def test_validator_log_without_protection():
-    """Log() 参数未添加 +1 保护应被拒绝"""
+def test_validator_log_with_unsafe_domain_is_rejected_without_rewrite():
+    """Log() 参数未满足严格正值域时应被拒绝，而不是被自动改写。"""
     note = _make_note(proposed_formula="Log($close - Ref($close, 5))")
+    original_formula = note.proposed_formula
     v = _make_validator()
     passed, reason = v.validate(note)
     assert not passed
     assert "Log" in reason
+    assert note.proposed_formula == original_formula
 
 
 def test_validator_accepts_positive_ratio_log():
@@ -138,6 +140,28 @@ def test_validator_accepts_positive_ratio_log():
     v = _make_validator()
     passed, reason = v.validate(note)
     assert passed, reason
+
+
+def test_validator_rejects_div_denominator_with_zero_risk_without_rewrite():
+    """危险分母应被拒绝，而不是被 Stage 3 自动补保护壳。"""
+    note = _make_note(proposed_formula="Div($close, Std($close, 5))")
+    original_formula = note.proposed_formula
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "数学安全" in reason or "division by zero" in reason
+    assert note.proposed_formula == original_formula
+
+
+def test_validator_rejects_infix_division_with_zero_risk_without_rewrite():
+    """中缀除法同样应 fail-closed，而不是被自动改写。"""
+    note = _make_note(proposed_formula="Mean($close, 5) / Std($close, 20)")
+    original_formula = note.proposed_formula
+    v = _make_validator()
+    passed, reason = v.validate(note)
+    assert not passed
+    assert "数学安全" in reason or "division by zero" in reason
+    assert note.proposed_formula == original_formula
 
 
 def test_validator_accepts_corr_with_window():
