@@ -141,6 +141,51 @@ def test_market_analyst_injects_context_skill_into_system_prompt():
     assert "<!-- SKILL:MARKET_ANALYST_CONTEXT_FRAMING -->" in system_message.content
 
 
+def test_market_analyst_forces_final_json_when_tool_rounds_exhausted():
+    from src.agents.market_analyst import MarketAnalyst
+
+    tool_intent_response = MagicMock()
+    tool_intent_response.tool_calls = [
+        {"name": "get_market_hot_topics", "args": {"top_n": 20}, "id": "call_1"}
+    ]
+    tool_intent_response.content = "现在让我获取市场热点话题："
+
+    final_json_response = MagicMock()
+    final_json_response.tool_calls = []
+    final_json_response.content = """{
+        "date": "2026-03-23",
+        "northbound": null,
+        "macro_signals": [],
+        "hot_themes": ["测试主题"],
+        "historical_insights": [],
+        "suggested_islands": ["momentum"],
+        "market_regime": "range_bound",
+        "raw_summary": "测试摘要"
+    }"""
+
+    llm_with_tools = MagicMock()
+    llm_with_tools.bind_tools = MagicMock(return_value=llm_with_tools)
+    llm_with_tools.ainvoke = AsyncMock(return_value=tool_intent_response)
+
+    llm_no_tools = MagicMock()
+    llm_no_tools.ainvoke = AsyncMock(return_value=final_json_response)
+
+    mock_tool = MagicMock()
+    mock_tool.name = "get_market_hot_topics"
+    mock_tool.ainvoke = AsyncMock(return_value='{"data": []}')
+
+    with patch("src.agents.market_analyst.build_researcher_llm", side_effect=[llm_with_tools, llm_no_tools]):
+        with patch("src.agents.market_analyst._get_stage1_max_tool_rounds", return_value=1):
+            analyst = MarketAnalyst(mcp_tools=[mock_tool])
+            memo = asyncio.run(analyst.analyze())
+
+    assert isinstance(memo, MarketContextMemo)
+    assert memo.raw_summary == "测试摘要"
+    assert memo.suggested_islands == ["momentum"]
+    assert llm_with_tools.ainvoke.await_count == 1
+    assert llm_no_tools.ainvoke.await_count == 1
+
+
 def test_market_context_node_timeout_falls_back_to_empty_memo():
     from src.agents.market_analyst import market_context_node
 

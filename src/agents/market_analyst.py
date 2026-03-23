@@ -235,6 +235,15 @@ class MarketAnalyst:
                 return first["text"]
         return str(result)
 
+    @staticmethod
+    def _contains_json_payload(content: str) -> bool:
+        """Best-effort check: whether response content contains a JSON object block."""
+        if not isinstance(content, str):
+            return False
+        if not content.strip():
+            return False
+        return re.search(r'\{.*\}', content, re.DOTALL) is not None
+
     async def analyze(self) -> MarketContextMemo:
         """执行 ReAct 循环生成今日 MarketContextMemo。"""
         system_content = MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())
@@ -266,9 +275,15 @@ class MarketAnalyst:
         else:
             used_all_rounds = True
 
-        # 如果工具轮次用完 LLM 还在调工具，追加一轮无工具调用让它输出 JSON
-        if used_all_rounds and not response.content.strip():
-            logger.info("[MarketAnalyst] 工具轮次用尽（max=%d），追加 final call", max_tool_rounds)
+        # 工具轮次耗尽后，若响应仍是工具意图或无 JSON，则强制收尾一次 JSON-only 响应。
+        if used_all_rounds and (
+            bool(getattr(response, "tool_calls", None))
+            or not self._contains_json_payload(getattr(response, "content", ""))
+        ):
+            logger.info(
+                "[MarketAnalyst] 工具轮次用尽（max=%d），追加 final call 强制 JSON 收尾",
+                max_tool_rounds,
+            )
             messages.append(HumanMessage(
                 content="工具调用轮次已用完。请根据已获取的数据，直接输出 MarketContextMemo JSON。"
             ))
