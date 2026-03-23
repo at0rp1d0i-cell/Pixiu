@@ -18,6 +18,8 @@ pytestmark = pytest.mark.unit
         "download_stk_limit_data.py",
         "download_margin_history.py",
         "convert_daily_basic_to_qlib.py",
+        "experiment_preflight.py",
+        "run_experiment_harness.py",
         "reset_experiment_state.py",
     ],
 )
