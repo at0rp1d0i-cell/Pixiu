@@ -5,11 +5,11 @@ Sources:
   - tests/test_market_context.py
   - tests/test_regime_detector.py
 """
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import asyncio
 import math
+import sys
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -187,6 +187,8 @@ def test_run_market_context_once_uses_akshare_only_by_default():
     assert "akshare" in servers
     assert "rss" not in servers
     assert "tushare" not in servers
+    assert servers["akshare"]["command"] == sys.executable
+    assert isinstance(servers["akshare"]["env"], dict)
 
 
 def test_run_market_context_once_includes_rss_when_opted_in():
@@ -224,6 +226,8 @@ def test_run_market_context_once_includes_tushare_when_token_present():
 
     servers = mock_ctor.call_args.args[0]
     assert "tushare" in servers
+    assert servers["tushare"]["command"] == sys.executable
+    assert servers["tushare"]["env"].get("TUSHARE_TOKEN") == "test-token"
     assert isinstance(result["market_context"], MarketContextMemo)
 
 

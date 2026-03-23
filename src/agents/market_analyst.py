@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import sys
 from datetime import date
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -154,6 +155,16 @@ def _get_stage1_max_tool_rounds() -> int:
 def _stage1_rss_enabled() -> bool:
     raw = os.getenv("PIXIU_STAGE1_ENABLE_RSS", "")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_stage1_stdio_server(server_path: str) -> dict[str, object]:
+    """Build stdio server config with explicit env forwarding for child MCP processes."""
+    return {
+        "command": sys.executable,
+        "args": [server_path],
+        "transport": "stdio",
+        "env": dict(os.environ),
+    }
 
 
 def _select_stage1_tools(tools: list) -> dict[str, list]:
@@ -346,27 +357,13 @@ async def _run_market_context_once(state: dict) -> dict:
     """Execute one market-context fetch attempt without outer timeout handling."""
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
-    mcp_server_path = MCP_SERVER_PATH
-
     servers: dict = {
-        "akshare": {
-            "command": "python",
-            "args": [mcp_server_path],
-            "transport": "stdio",
-        },
+        "akshare": _build_stage1_stdio_server(MCP_SERVER_PATH),
     }
     if _stage1_rss_enabled():
-        servers["rss"] = {
-            "command": "python",
-            "args": [RSS_SERVER_PATH],
-            "transport": "stdio",
-        }
+        servers["rss"] = _build_stage1_stdio_server(RSS_SERVER_PATH)
     if os.getenv("TUSHARE_TOKEN"):
-        servers["tushare"] = {
-            "command": "python",
-            "args": [TUSHARE_SERVER_PATH],
-            "transport": "stdio",
-        }
+        servers["tushare"] = _build_stage1_stdio_server(TUSHARE_SERVER_PATH)
     mcp_client = MultiServerMCPClient(servers)
     selected_tools = _select_stage1_tools(await mcp_client.get_tools())
     blocking_tools = selected_tools["blocking"]
