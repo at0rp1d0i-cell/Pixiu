@@ -372,7 +372,13 @@ def test_batch_notes_carry_exploration_subspace():
             {
                 "note_id": "a", "island": "momentum", "iteration": 1,
                 "hypothesis": "动量1", "economic_intuition": "趋势",
-                "proposed_formula": "Ref($close, 5) / Ref($close, 20) - 1",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
                 "risk_factors": [], "market_context_date": "2026-03-08"
             }
         ],
@@ -527,6 +533,8 @@ def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     assert mock_chat.ainvoke.await_count == 2
     assert researcher.last_generation_diagnostics["local_retry_count"] == 1
     assert "重试硬约束" in captured_user_messages[1]
+    assert "FormulaSketch recipe 无效" in captured_user_messages[1]
+    assert "InvalidRecipe" not in captured_user_messages[1]
 
 
 def test_factor_algebra_rejects_free_form_only_path_and_retries():
@@ -594,6 +602,9 @@ def test_factor_algebra_rejects_free_form_only_path_and_retries():
     assert batch.notes[0].note_id == "recipe_after_retry"
     assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
     assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    sample_reason = researcher.last_generation_diagnostics["sample_rejections"][0]["reason"]
+    assert "FormulaSketch recipe 无效" in sample_reason
+    assert "missing_formula_recipe" in sample_reason
 
 
 def test_non_factor_algebra_subspace_keeps_free_form_path():

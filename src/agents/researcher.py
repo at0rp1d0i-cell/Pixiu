@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 _SKILL_LOADER = SkillLoader()
 _MAX_STAGE2_REJECTION_SAMPLES = 5
 _MAX_LOCAL_RETRY = 1
-_FACTOR_ALGEBRA_RECIPE_ONLY_FALLBACK = "InvalidRecipe(missing_formula_recipe)"
+_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
+_FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -402,15 +403,25 @@ class AlphaResearcher:
         if recipe_payload is None:
             recipe_payload = rendered_note.pop("recipe", None)
         if not isinstance(recipe_payload, dict):
-            rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_ONLY_FALLBACK
+            rendered_note["status"] = f"{_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX}missing_formula_recipe"
+            rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA
             return rendered_note
 
         try:
             recipe = FormulaRecipe(**recipe_payload)
             rendered_note["proposed_formula"] = render_formula_recipe(recipe)
-        except Exception:
-            rendered_note["proposed_formula"] = "InvalidRecipe(invalid_formula_recipe)"
+        except Exception as exc:
+            rendered_note["status"] = f"{_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX}{exc}"
+            rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA
         return rendered_note
+
+    @staticmethod
+    def _factor_algebra_recipe_rejection_reason(note: FactorResearchNote) -> str | None:
+        status = note.status or ""
+        if not status.startswith(_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX):
+            return None
+        detail = status.removeprefix(_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX).strip() or "invalid_formula_recipe"
+        return f"FormulaSketch recipe 无效：{detail}"
 
     def _try_symbolic_mutation_batch(
         self,
@@ -532,6 +543,22 @@ class AlphaResearcher:
         novelty_filter = NoveltyFilter(pool=self.factor_pool) if self.factor_pool is not None else None
 
         for note in notes:
+            recipe_reason = self._factor_algebra_recipe_rejection_reason(note)
+            if recipe_reason is not None:
+                rejection_counts["validator"] += 1
+                subspace = _note_subspace_value(note)
+                rejection_counts_by_filter_and_subspace["validator"][subspace] += 1
+                if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                    sample_rejections.append(
+                        {
+                            "note_id": note.note_id,
+                            "filter": "validator",
+                            "reason": recipe_reason,
+                            "exploration_subspace": subspace,
+                        }
+                    )
+                continue
+
             passed, reason = validator.validate(note)
             if not passed:
                 rejection_counts["validator"] += 1
