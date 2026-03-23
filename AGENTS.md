@@ -15,6 +15,12 @@ Before making architectural decisions, read these in order:
 
 Do not treat `docs/archive/` as the source of truth for current implementation.
 
+## Repo-local Codex Workflow
+
+This repository also carries repo-local Codex workflow skills under `/.codex/skills/`.
+
+When the task involves external system semantics, experiment-mainline validation, runtime concessions, or worker delegation quality, check `/.codex/README.md` first and use the relevant repo-local skill before proceeding.
+
 ## Project State
 
 Pixiu v2 — LLM-native alpha research OS for A-shares.
