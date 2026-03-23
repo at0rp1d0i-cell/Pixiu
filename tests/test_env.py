@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
+import src.core.env as env_module
 from src.core.env import (
     apply_resolved_env,
     clear_localhost_proxy_env,
+    get_default_repo_env_path,
     load_dotenv_if_available,
     resolve_layered_env,
 )
@@ -21,6 +23,32 @@ def test_load_dotenv_if_available_reads_explicit_file(tmp_path: Path, monkeypatc
     load_dotenv_if_available(dotenv_path)
 
     assert __import__("os").environ.get("TUSHARE_TOKEN") == "test-token"
+
+
+def test_load_dotenv_if_available_no_arg_uses_layered_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    runtime_env_path = tmp_path / "runtime.env"
+    runtime_env_path.write_text("A=runtime-a\nB=runtime-b\n", encoding="utf-8")
+    repo_env_path = tmp_path / ".env"
+    repo_env_path.write_text("B=repo-b\nC=repo-c\n", encoding="utf-8")
+
+    monkeypatch.setattr(env_module, "get_default_runtime_env_path", lambda **kwargs: runtime_env_path)
+    monkeypatch.setattr(env_module, "get_default_repo_env_path", lambda: repo_env_path)
+
+    monkeypatch.setenv("A", "process-a")
+    monkeypatch.delenv("B", raising=False)
+    monkeypatch.delenv("C", raising=False)
+
+    load_dotenv_if_available()
+
+    assert __import__("os").environ.get("A") == "process-a"
+    assert __import__("os").environ.get("B") == "runtime-b"
+    assert __import__("os").environ.get("C") == "repo-c"
+
+
+def test_get_default_repo_env_path_is_not_cwd_dependent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    expected = Path(env_module.__file__).resolve().parents[2] / ".env"
+    assert get_default_repo_env_path() == expected
 
 
 def test_clear_localhost_proxy_env_only_removes_local_proxy_values(monkeypatch: pytest.MonkeyPatch):

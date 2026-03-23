@@ -22,10 +22,21 @@ class ResolvedEnv:
 
 
 def load_dotenv_if_available(dotenv_path: Optional[str | Path] = None) -> None:
-    try:
-        from dotenv import load_dotenv
+    if dotenv_path is not None:
+        try:
+            from dotenv import load_dotenv
 
-        load_dotenv(dotenv_path=dotenv_path)
+            load_dotenv(dotenv_path=dotenv_path)
+        except ImportError:
+            pass
+        return
+
+    try:
+        resolve_and_apply_layered_env(
+            process_env=os.environ,
+            target_env=os.environ,
+            repo_env_path=get_default_repo_env_path(),
+        )
     except ImportError:
         pass
 
@@ -33,6 +44,10 @@ def load_dotenv_if_available(dotenv_path: Optional[str | Path] = None) -> None:
 def get_default_runtime_env_path(*, home: str | Path | None = None) -> Path:
     base = Path(home).expanduser() if home is not None else Path.home()
     return base / ".config" / "pixiu" / "runtime.env"
+
+
+def get_default_repo_env_path() -> Path:
+    return Path(__file__).resolve().parents[2] / ".env"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
