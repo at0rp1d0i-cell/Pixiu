@@ -1,5 +1,7 @@
 """Unit tests for Chroma runtime helpers."""
 
+import importlib
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -37,7 +39,7 @@ def test_build_default_chroma_embedding_function_is_not_default_embedding_subcla
             return ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
 
     monkeypatch.setattr(chroma_runtime, "bootstrap_onnx_runtime", lambda: None)
-    monkeypatch.setitem(__import__("sys").modules, "onnxruntime", _FakeOrt)
+    monkeypatch.setattr(chroma_runtime, "_import_onnxruntime", lambda: _FakeOrt)
 
     embedding_function = chroma_runtime.build_default_chroma_embedding_function()
 
@@ -85,3 +87,33 @@ def test_bootstrap_onnx_runtime_preloads_nvidia_runtime_libs(tmp_path, monkeypat
         "libcublasLt.so.12",
         "libcublas.so.12",
     ]
+
+
+def test_should_quiet_onnxruntime_import_defaults_to_wsl(monkeypatch):
+    monkeypatch.delenv("PIXIU_SUPPRESS_ONNXRUNTIME_IMPORT_WARNING", raising=False)
+    monkeypatch.setattr(chroma_runtime, "_is_wsl_runtime", lambda: True)
+    assert chroma_runtime._should_quiet_onnxruntime_import() is True
+
+
+def test_should_quiet_onnxruntime_import_respects_explicit_env_override(monkeypatch):
+    monkeypatch.setenv("PIXIU_SUPPRESS_ONNXRUNTIME_IMPORT_WARNING", "off")
+    monkeypatch.setattr(chroma_runtime, "_is_wsl_runtime", lambda: True)
+    assert chroma_runtime._should_quiet_onnxruntime_import() is False
+
+
+def test_import_onnxruntime_uses_suppressed_import_path_when_enabled(monkeypatch):
+    calls: list[str] = []
+
+    @contextmanager
+    def _fake_suppress():
+        calls.append("suppress")
+        yield
+
+    monkeypatch.setattr(chroma_runtime, "_should_quiet_onnxruntime_import", lambda: True)
+    monkeypatch.setattr(chroma_runtime, "_suppress_stderr_fd", _fake_suppress)
+    monkeypatch.setattr(importlib, "import_module", lambda name: {"name": name})
+
+    module = chroma_runtime._import_onnxruntime()
+
+    assert module == {"name": "onnxruntime"}
+    assert calls == ["suppress"]

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ctypes
+import importlib
 import logging
+import os
 import sysconfig
+from contextlib import contextmanager
 from pathlib import Path
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
@@ -13,6 +16,45 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 logger = logging.getLogger(__name__)
 
 _ONNX_RUNTIME_BOOTSTRAPPED = False
+
+
+def _is_wsl_runtime() -> bool:
+    if os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"):
+        return True
+    proc_version = Path("/proc/version")
+    try:
+        return "microsoft" in proc_version.read_text(encoding="utf-8").lower()
+    except OSError:
+        return False
+
+
+def _should_quiet_onnxruntime_import() -> bool:
+    raw = os.getenv("PIXIU_SUPPRESS_ONNXRUNTIME_IMPORT_WARNING", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return _is_wsl_runtime()
+
+
+@contextmanager
+def _suppress_stderr_fd():
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    stderr_fd = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(stderr_fd, 2)
+        os.close(stderr_fd)
+        os.close(devnull_fd)
+
+
+def _import_onnxruntime():
+    if not _should_quiet_onnxruntime_import():
+        return importlib.import_module("onnxruntime")
+    with _suppress_stderr_fd():
+        return importlib.import_module("onnxruntime")
 
 
 def _candidate_nvidia_library_dirs() -> list[Path]:
@@ -146,7 +188,7 @@ def build_default_chroma_embedding_function() -> EmbeddingFunction[Documents]:
     """Build the default Chroma embedding function with stable provider order."""
     bootstrap_onnx_runtime()
 
-    import onnxruntime as ort
+    ort = _import_onnxruntime()
 
     preferred_providers = _select_preferred_onnx_providers(
         ort.get_available_providers()
