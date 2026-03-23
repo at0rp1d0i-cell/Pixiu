@@ -37,6 +37,7 @@ def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
             "hypotheses": result.get("hypotheses", []),
             "strategy_specs": result.get("strategy_specs", []),
             "subspace_generated": result.get("subspace_generated", {}),
+            "stage2_diagnostics": result.get("stage2_diagnostics", {}),
             **timing_update,
         }
     except Exception as e:
@@ -45,7 +46,8 @@ def hypothesis_gen_node(state: AgentState) -> HypothesisGenOutput:
         timing_update = merge_stage_timing(state, "hypothesis_gen", elapsed_ms)
         return {
             "research_notes": [], "hypotheses": [], "strategy_specs": [],
-            "subspace_generated": {}, "last_error": str(e), "error_stage": "hypothesis_gen",
+            "subspace_generated": {}, "stage2_diagnostics": {},
+            "last_error": str(e), "error_stage": "hypothesis_gen",
             **timing_update,
         }
 

@@ -10,8 +10,9 @@ import json
 import logging
 import re
 import uuid
+from collections import Counter
 from datetime import date
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -36,6 +37,8 @@ from src.hypothesis.mutation import SymbolicMutator, try_all_mutations, build_mu
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
+_MAX_STAGE2_REJECTION_SAMPLES = 5
+_MAX_LOCAL_RETRY = 1
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -143,6 +146,7 @@ class AlphaResearcher:
         self.registry = registry or SubspaceRegistry.get_default_registry(capabilities=self.capabilities)
         self.factor_pool = factor_pool
         self._llm = None
+        self.last_generation_diagnostics: dict[str, Any] = {}
 
     def _get_llm(self):
         if self._llm is None:
@@ -203,15 +207,6 @@ class AlphaResearcher:
         else:
             hint_text = "不限定探索方法，自由发挥。"
 
-        user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
-            island=self.island,
-            island_description=island_info.get("description", ""),
-            subspace_hint=hint_text,
-            market_context=mkt_ctx,
-            feedback_section=fb,
-            failed_factors_section=failed_section,
-        )
-
         # 加载 Skill 文档（Type A/B 硬约束 + Type C 条件注入 + 子空间推理框架）
         _state_proxy = {
             "current_iteration": iteration,
@@ -238,12 +233,75 @@ class AlphaResearcher:
             )
 
         llm = self._get_llm()
-        response = await llm.ainvoke([
-            SystemMessage(content=system_content),
-            HumanMessage(content=user_msg),
-        ])
+        local_rejection_feedback = "无"
+        total_generated_count = 0
+        local_retry_count = 0
+        rejection_counts = Counter()
+        sample_rejections: list[dict[str, str]] = []
 
-        return self._parse_batch(response.content, iteration, subspace_hint)
+        for attempt in range(_MAX_LOCAL_RETRY + 1):
+            user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
+                island=self.island,
+                island_description=island_info.get("description", ""),
+                subspace_hint=hint_text,
+                market_context=mkt_ctx,
+                feedback_section=fb,
+                failed_factors_section=failed_section,
+            )
+            if attempt > 0:
+                user_msg += (
+                    "\n\n## 本地预筛拒绝反馈（重试约束）\n"
+                    f"{local_rejection_feedback}\n"
+                )
+
+            response = await llm.ainvoke([
+                SystemMessage(content=system_content),
+                HumanMessage(content=user_msg),
+            ])
+
+            parsed_batch = self._parse_batch(response.content, iteration, subspace_hint)
+            approved_notes, diagnostics = self._local_prescreen_notes(parsed_batch.notes)
+
+            total_generated_count += diagnostics["generated_count"]
+            rejection_counts.update(diagnostics["rejection_counts_by_filter"])
+            for sample in diagnostics["sample_rejections"]:
+                if len(sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
+                    break
+                sample_rejections.append(sample)
+
+            if approved_notes or diagnostics["generated_count"] == 0:
+                self.last_generation_diagnostics = {
+                    "generated_count": total_generated_count,
+                    "delivered_count": len(approved_notes),
+                    "local_retry_count": local_retry_count,
+                    "rejection_counts_by_filter": dict(rejection_counts),
+                    "sample_rejections": sample_rejections,
+                }
+                return parsed_batch.model_copy(update={"notes": approved_notes})
+
+            if attempt < _MAX_LOCAL_RETRY:
+                local_retry_count += 1
+                local_rejection_feedback = self._build_local_rejection_feedback(
+                    diagnostics.get("sample_rejections", [])
+                )
+                logger.info(
+                    "[AlphaResearcher] 本地预筛全拒绝，触发重试: island=%s, attempt=%d",
+                    self.island,
+                    attempt + 1,
+                )
+
+        self.last_generation_diagnostics = {
+            "generated_count": total_generated_count,
+            "delivered_count": 0,
+            "local_retry_count": local_retry_count,
+            "rejection_counts_by_filter": dict(rejection_counts),
+            "sample_rejections": sample_rejections,
+        }
+        return AlphaResearcherBatch(
+            island=self.island,
+            notes=[],
+            generation_rationale="本地预筛后无可用候选",
+        )
 
     def _parse_batch(self, content: str, iteration: int,
                      subspace_hint: Optional[ExplorationSubspace] = None) -> AlphaResearcherBatch:
@@ -379,6 +437,60 @@ class AlphaResearcher:
 
         return constraints_text
 
+    def _local_prescreen_notes(
+        self, notes: list[FactorResearchNote]
+    ) -> tuple[list[FactorResearchNote], dict[str, Any]]:
+        """Stage 2 本地预筛：复用 Stage 3 的 canonical validator/novelty 规则。"""
+        from src.agents.prefilter import NoveltyFilter, Validator
+
+        approved_notes: list[FactorResearchNote] = []
+        rejection_counts = Counter()
+        sample_rejections: list[dict[str, str]] = []
+
+        validator = Validator(
+            allowed_fields=set(self.capabilities.available_fields),
+            approved_operators=set(self.capabilities.approved_operators),
+        )
+        novelty_filter = NoveltyFilter(pool=self.factor_pool) if self.factor_pool is not None else None
+
+        for note in notes:
+            passed, reason = validator.validate(note)
+            if not passed:
+                rejection_counts["validator"] += 1
+                if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                    sample_rejections.append(
+                        {"note_id": note.note_id, "filter": "validator", "reason": reason}
+                    )
+                continue
+
+            if novelty_filter is not None:
+                passed, reason = novelty_filter.check(note)
+                if not passed:
+                    rejection_counts["novelty"] += 1
+                    if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                        sample_rejections.append(
+                            {"note_id": note.note_id, "filter": "novelty", "reason": reason}
+                        )
+                    continue
+
+            approved_notes.append(note)
+
+        return approved_notes, {
+            "generated_count": len(notes),
+            "delivered_count": len(approved_notes),
+            "rejection_counts_by_filter": dict(rejection_counts),
+            "sample_rejections": sample_rejections,
+        }
+
+    @staticmethod
+    def _build_local_rejection_feedback(sample_rejections: list[dict[str, str]]) -> str:
+        if not sample_rejections:
+            return "本地预筛未通过，但无拒绝样本。请更换思路并避免高风险算子组合。"
+        lines = []
+        for idx, item in enumerate(sample_rejections[:3], start=1):
+            lines.append(f"{idx}. [{item.get('filter', 'unknown')}] {item.get('reason', '')}")
+        return "\n".join(lines)
+
 
 # ====================================================
 # LangGraph 节点：hypothesis_gen_node
@@ -418,6 +530,14 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     active_islands = state.get("active_islands", list(ISLANDS.keys()))
     context: Optional[MarketContextMemo] = state.get("market_context")
     iteration: int = state.get("iteration", 0)
+    factor_pool = state.get("factor_pool")
+    if factor_pool is None:
+        try:
+            from src.factor_pool.pool import get_factor_pool
+            factor_pool = get_factor_pool()
+        except Exception as e:
+            logger.debug("Stage 2 无法获取 factor pool，降级为无池模式: %s", e)
+            factor_pool = None
 
     # ── Scheduler 分配 ──
     scheduler = SubspaceScheduler()
@@ -439,13 +559,17 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     assignments = _build_island_subspace_assignments(allocations, active_islands)
 
     # ── 并行生成（按 island 分组，每组带 subspace hint） ──
+    researchers = [
+        AlphaResearcher(island=island, factor_pool=factor_pool)
+        for island, _ in assignments
+    ]
     tasks = [
-        AlphaResearcher(island=island).generate_batch(
+        researcher.generate_batch(
             context=context,
             iteration=iteration,
             subspace_hint=subspace,
         )
-        for island, subspace in assignments
+        for researcher, (_, subspace) in zip(researchers, assignments)
     ]
 
     batches: list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -455,8 +579,23 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     subspace_results: dict[ExplorationSubspace, list[int, int]] = {
         s: [0, 0] for s in ExplorationSubspace
     }
+    stage2_rejection_counts = Counter()
+    stage2_sample_rejections: list[dict[str, str]] = []
+    stage2_generated_count = 0
+    stage2_delivered_count = 0
+    stage2_retry_count = 0
 
-    for (island, subspace), batch in zip(assignments, batches):
+    for (island, subspace), researcher, batch in zip(assignments, researchers, batches):
+        diagnostics = researcher.last_generation_diagnostics or {}
+        stage2_generated_count += int(diagnostics.get("generated_count", 0))
+        stage2_delivered_count += int(diagnostics.get("delivered_count", 0))
+        stage2_retry_count += int(diagnostics.get("local_retry_count", 0))
+        stage2_rejection_counts.update(diagnostics.get("rejection_counts_by_filter", {}))
+        for item in diagnostics.get("sample_rejections", []):
+            if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
+                break
+            stage2_sample_rejections.append(item)
+
         if isinstance(batch, Exception):
             logger.warning("AlphaResearcher[%s/%s] 失败（跳过）: %s", island, subspace.value, batch)
         else:
@@ -478,6 +617,13 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         "strategy_specs": strategy_specs,
         "scheduler_state": scheduler_state.model_dump(),
         "subspace_generated": {s.value: v[0] for s, v in subspace_results.items()},
+        "stage2_diagnostics": {
+            "generated_count": stage2_generated_count,
+            "delivered_count": stage2_delivered_count,
+            "local_retry_count": stage2_retry_count,
+            "rejection_counts_by_filter": dict(stage2_rejection_counts),
+            "sample_rejections": stage2_sample_rejections,
+        },
     }
 
 

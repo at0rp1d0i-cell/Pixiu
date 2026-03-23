@@ -63,6 +63,7 @@ class HypothesisGenOutput(TypedDict, total=False):
     hypotheses: list[Hypothesis]
     strategy_specs: list[StrategySpec]
     subspace_generated: dict[str, int]
+    stage2_diagnostics: dict[str, Any]
     stage_timings: StageTimings
     stage_step_timings: StageStepTimings
     last_error: str
@@ -255,6 +256,7 @@ class LoopControlOutput(TypedDict):
     research_notes: list[FactorResearchNote]
     approved_notes: list[FactorResearchNote]
     subspace_generated: dict[str, int]
+    stage2_diagnostics: dict[str, Any]
     stage1_reliability: dict[str, Any]
     filtered_count: int
     prefilter_diagnostics: PrefilterDiagnostics

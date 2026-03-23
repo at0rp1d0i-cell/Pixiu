@@ -35,7 +35,7 @@ def test_alpha_researcher_batch_schema():
         iteration=1,
         hypothesis="价格动量因子假设",
         economic_intuition="动量效应....",
-        proposed_formula="Ref($close, -5) / Ref($close, -20) - 1",
+        proposed_formula="Ref($close, 5) / Ref($close, 20) - 1",
         risk_factors=["市场反转"],
         market_context_date="2026-03-08",
     )
@@ -62,7 +62,7 @@ def test_alpha_researcher_returns_batch():
                 "iteration": 1,
                 "hypothesis": "5日收益率动量",
                 "economic_intuition": "趋势延续效应",
-                "proposed_formula": "Ref($close, -5) / Ref($close, -20) - 1",
+                "proposed_formula": "Ref($close, 5) / Ref($close, 20) - 1",
                 "risk_factors": ["市场反转"],
                 "market_context_date": "2026-03-08"
             },
@@ -72,7 +72,7 @@ def test_alpha_researcher_returns_batch():
                 "iteration": 1,
                 "hypothesis": "成交量放大动量",
                 "economic_intuition": "量价背离后续跟进",
-                "proposed_formula": "($volume / Mean($volume, 20) - 1) * ($close / Ref($close, -5) - 1)",
+                "proposed_formula": "($volume / Mean($volume, 20) - 1) * ($close / Ref($close, 5) - 1)",
                 "risk_factors": ["假突破"],
                 "market_context_date": "2026-03-08"
             }
@@ -107,7 +107,7 @@ def test_alpha_researcher_batch_diversity():
             {
                 "note_id": "a", "island": "momentum", "iteration": 1,
                 "hypothesis": "动量1", "economic_intuition": "趋势",
-                "proposed_formula": "Ref($close, -5) / Ref($close, -20) - 1",
+                "proposed_formula": "Ref($close, 5) / Ref($close, 20) - 1",
                 "risk_factors": [], "market_context_date": "2026-03-08"
             },
             {
@@ -342,7 +342,7 @@ def test_batch_notes_carry_exploration_subspace():
             {
                 "note_id": "a", "island": "momentum", "iteration": 1,
                 "hypothesis": "动量1", "economic_intuition": "趋势",
-                "proposed_formula": "Ref($close, -5) / Ref($close, -20) - 1",
+                "proposed_formula": "Ref($close, 5) / Ref($close, 20) - 1",
                 "risk_factors": [], "market_context_date": "2026-03-08"
             }
         ],
@@ -362,6 +362,202 @@ def test_batch_notes_carry_exploration_subspace():
             ))
 
     assert batch.notes[0].exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA
+
+
+def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [
+            {
+                "note_id": "safe", "island": "momentum", "iteration": 1,
+                "hypothesis": "safe", "economic_intuition": "safe",
+                "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+                "risk_factors": [], "market_context_date": "2026-03-08",
+                "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "unsafe", "island": "momentum", "iteration": 1,
+                "hypothesis": "unsafe", "economic_intuition": "unsafe",
+                "proposed_formula": "Div($close, Std($close, 5))",
+                "risk_factors": [], "market_context_date": "2026-03-08",
+                "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "mixed"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "safe"
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("validator", 0) >= 1
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+
+
+def test_alpha_researcher_local_prescreen_retries_once_on_full_reject():
+    from src.agents.researcher import AlphaResearcher
+
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad", "island": "momentum", "iteration": 1,
+            "hypothesis": "bad", "economic_intuition": "bad",
+            "proposed_formula": "Div($close, Std($close, 5))",
+            "risk_factors": [], "market_context_date": "2026-03-08",
+            "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "first"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good", "island": "momentum", "iteration": 1,
+            "hypothesis": "good", "economic_intuition": "good",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [], "market_context_date": "2026-03-08",
+            "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "second"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[first, second])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert mock_chat.ainvoke.await_count == 2
+
+
+def test_alpha_researcher_local_prescreen_no_retry_when_partial_pass():
+    from src.agents.researcher import AlphaResearcher
+
+    mixed = MagicMock()
+    mixed.content = '''{
+        "notes": [
+            {
+                "note_id": "good", "island": "momentum", "iteration": 1,
+                "hypothesis": "good", "economic_intuition": "good",
+                "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+                "risk_factors": [], "market_context_date": "2026-03-08",
+                "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "bad", "island": "momentum", "iteration": 1,
+                "hypothesis": "bad", "economic_intuition": "bad",
+                "proposed_formula": "Div($close, Std($close, 5))",
+                "risk_factors": [], "market_context_date": "2026-03-08",
+                "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "mixed"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mixed)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+    assert mock_chat.ainvoke.await_count == 1
+
+
+def test_alpha_researcher_local_novelty_rejects_duplicate_formula():
+    from src.agents.researcher import AlphaResearcher
+
+    duplicate = MagicMock()
+    duplicate.content = '''{
+        "notes": [{
+            "note_id": "dup", "island": "momentum", "iteration": 1,
+            "hypothesis": "dup", "economic_intuition": "dup",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [], "market_context_date": "2026-03-08",
+            "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "dup"
+    }'''
+    mock_pool = MagicMock()
+    mock_pool.get_island_factors.return_value = [
+        {"formula": "Mean($close, 5) - Mean($close, 20)", "factor_id": "existing"}
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[duplicate, duplicate])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+            batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert len(batch.notes) == 0
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("novelty", 0) >= 1
+
+
+def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics():
+    from src.agents.researcher import hypothesis_gen_node
+
+    sentinel_pool = object()
+    captured_pools = []
+
+    with patch("src.factor_pool.pool.get_factor_pool", return_value=sentinel_pool):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                captured_pools.append(kwargs.get("factor_pool"))
+                instance = MagicMock()
+                note = FactorResearchNote(
+                    note_id=f"{island}_x",
+                    island=island,
+                    iteration=1,
+                    hypothesis="test",
+                    economic_intuition="test",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-08",
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                instance.last_generation_diagnostics = {
+                    "generated_count": 1,
+                    "delivered_count": 1,
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": {},
+                    "sample_rejections": [],
+                }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {"active_islands": ["momentum"], "market_context": None, "iteration": 1}
+            )
+
+    assert captured_pools
+    assert all(pool is sentinel_pool for pool in captured_pools)
+    assert "stage2_diagnostics" in result
+    assert result["stage2_diagnostics"]["generated_count"] >= 1
 
 
 def test_alpha_researcher_injects_market_regime_skill_from_context():

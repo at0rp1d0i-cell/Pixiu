@@ -251,6 +251,7 @@ class ExperimentLogger:
             "round": round_n,
             "timestamp": datetime.now().isoformat(),
             "subspace_generated": dict(state.subspace_generated) if state.subspace_generated else {},
+            "stage2": dict(state.stage2_diagnostics) if state.stage2_diagnostics else {},
             "hypotheses_count": len(state.hypotheses),
             "notes_count": len(state.research_notes),
             "approved_notes_count": len(state.approved_notes),

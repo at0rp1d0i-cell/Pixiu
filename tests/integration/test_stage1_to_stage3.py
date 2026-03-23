@@ -165,6 +165,7 @@ class TestE2EStage1ToStage3:
         assert len(state_after_s2.research_notes) > 0
         assert len(state_after_s2.hypotheses) == len(state_after_s2.research_notes)
         assert len(state_after_s2.strategy_specs) == len(state_after_s2.research_notes)
+        assert "stage2_diagnostics" in stage2_result
 
         # 验证 exploration_subspace 溯源
         notes_with_subspace = [
