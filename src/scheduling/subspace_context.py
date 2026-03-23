@@ -64,7 +64,7 @@ def build_factor_algebra_context(
     lines.append(f"- 最大嵌套深度: {registry.composition_constraints.max_nesting_depth}")
     lines.append(f"- 最大算子总数: {registry.composition_constraints.max_total_operators}")
     lines.append("- 时间变换可嵌套（如 Mean(Ref($close, 1), 5)）")
-    lines.append("- 截面算子用于横截面排名/标准化")
+    lines.append("- 归一化仅使用运行时批准的时序算子（如 Rank(expr, N)、Quantile(expr, N, qscore)）")
     lines.append(f"- 当前 Island: {island}，请围绕此方向构造因子")
 
     # 禁止模式（来自历史失败，使用局部 effective_forbidden，不修改 registry）
@@ -105,10 +105,10 @@ def build_symbolic_mutation_context(
     # 变异算子
     lines.append("\n### 可用变异算子")
     operator_desc = {
-        MutationOperator.ADD_OPERATOR: "添加算子 — 在现有公式上叠加新的运算（如加 Rank、加 Std）",
+        MutationOperator.ADD_OPERATOR: "添加算子 — 在现有公式上叠加新的运算（如加 Rank(expr, N)、加 Std）",
         MutationOperator.REMOVE_OPERATOR: "移除算子 — 简化公式，去掉冗余运算",
         MutationOperator.SWAP_HORIZON: "交换时间窗口 — 将 N 日改为 M 日（如 5→20、20→60）",
-        MutationOperator.CHANGE_NORMALIZATION: "改变归一化 — 切换标准化方式（zscore/rank/minmax）",
+        MutationOperator.CHANGE_NORMALIZATION: "改变归一化 — 在运行时批准的归一化形式间切换（Rank/Quantile）",
         MutationOperator.ALTER_INTERACTION: "改变交互项 — 修改因子间的组合方式（乘→除、加→减）",
     }
     for op in MutationOperator:

@@ -97,6 +97,8 @@ ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于
 2. Div/Mod/Log/Sqrt 只有在公式本身能满足当前 canonical 数学安全约束时才能使用；如果无法确保，换一个更稳健的表达
 3. applicable_regimes 和 invalid_regimes 必须至少各填写一个，使用上述合法标签
 4. Ref 的偏移量必须为正整数（Ref($close, 5) 表示 5 天前）
+5. Rank 必须写成 Rank(expr, N)，禁止 Rank(expr)
+6. 归一化仅允许 Rank(expr, N) 或 Quantile(expr, N, qscore)；禁止 Zscore/MinMax/Neutralize/Demean
 
 违反以上任何一条，因子将被 Validator 直接拒绝。
 """
@@ -265,6 +267,11 @@ class AlphaResearcher:
                 user_msg += (
                     "\n\n## 本地预筛拒绝反馈（重试约束）\n"
                     f"{local_rejection_feedback}\n"
+                    "\n## 重试硬约束\n"
+                    "- Rank 必须写成 Rank(expr, N)，禁止 Rank(expr)\n"
+                    "- 归一化仅允许 Rank(expr, N) 或 Quantile(expr, N, qscore)\n"
+                    "- 禁止 Zscore/MinMax/Neutralize/Demean\n"
+                    "- 避免重复提交与本地预筛已拒绝原因相同的模式\n"
                 )
 
             response = await llm.ainvoke([
@@ -498,10 +505,11 @@ class AlphaResearcher:
     @staticmethod
     def _build_local_rejection_feedback(sample_rejections: list[dict[str, str]]) -> str:
         if not sample_rejections:
-            return "本地预筛未通过，但无拒绝样本。请更换思路并避免高风险算子组合。"
+            return "本地预筛未通过，但无拒绝样本。请更换思路并避免重复提交已被本地预筛拒绝的模式。"
         lines = []
         for idx, item in enumerate(sample_rejections[:3], start=1):
             lines.append(f"{idx}. [{item.get('filter', 'unknown')}] {item.get('reason', '')}")
+        lines.append("请避免重复提交与上述拒绝原因相同的公式模式。")
         return "\n".join(lines)
 
 

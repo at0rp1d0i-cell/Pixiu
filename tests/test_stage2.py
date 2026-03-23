@@ -250,6 +250,29 @@ def test_alpha_researcher_system_prompt_injects_runtime_operator_block():
     assert "可用算子" in system_message.content
     assert "Ref($field, N)" in system_message.content
     assert "Ref($field, -N)" not in system_message.content
+    assert "Rank(expr, N)" in system_message.content
+    assert "禁止 Rank(expr)" in system_message.content
+    assert "Zscore/MinMax/Neutralize/Demean" in system_message.content
+
+
+def test_stage2_subspace_context_avoids_legacy_cross_section_and_normalization_wording():
+    from src.schemas.exploration import SubspaceRegistry
+    from src.scheduling.subspace_context import (
+        build_factor_algebra_context,
+        build_symbolic_mutation_context,
+    )
+
+    registry = SubspaceRegistry.get_default_registry()
+    factor_algebra = build_factor_algebra_context(registry=registry, island="momentum", pool=None)
+    symbolic_mutation = build_symbolic_mutation_context(
+        registry=registry,
+        factor_pool=None,
+        island="momentum",
+    )
+
+    assert "截面算子用于横截面排名/标准化" not in factor_algebra
+    assert "zscore/rank/minmax" not in symbolic_mutation
+    assert "Rank(expr, N)" in symbolic_mutation
 
 
 def test_alpha_researcher_composed_prompt_avoids_legacy_skill_contracts():
@@ -405,6 +428,7 @@ def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():
 def test_alpha_researcher_local_prescreen_retries_once_on_full_reject():
     from src.agents.researcher import AlphaResearcher
 
+    captured_user_messages = []
     first = MagicMock()
     first.content = '''{
         "notes": [{
@@ -428,9 +452,15 @@ def test_alpha_researcher_local_prescreen_retries_once_on_full_reject():
         "generation_rationale": "second"
     }'''
 
+    async def capture_ainvoke(messages):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
     with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
         mock_chat = MagicMock()
-        mock_chat.ainvoke = AsyncMock(side_effect=[first, second])
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
         mock_builder.return_value = mock_chat
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
             researcher = AlphaResearcher(island="momentum")
@@ -440,6 +470,11 @@ def test_alpha_researcher_local_prescreen_retries_once_on_full_reject():
     assert batch.notes[0].note_id == "good"
     assert researcher.last_generation_diagnostics["local_retry_count"] == 1
     assert mock_chat.ainvoke.await_count == 2
+    assert len(captured_user_messages) == 2
+    assert "重试硬约束" in captured_user_messages[1]
+    assert "Rank(expr, N)" in captured_user_messages[1]
+    assert "禁止 Rank(expr)" in captured_user_messages[1]
+    assert "Zscore/MinMax/Neutralize/Demean" in captured_user_messages[1]
 
 
 def test_alpha_researcher_local_prescreen_no_retry_when_partial_pass():
