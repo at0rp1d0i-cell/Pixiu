@@ -10,10 +10,12 @@ import os
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.schemas.state import AgentState
+
+from src.llm.usage_ledger import get_run_usage_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,56 @@ class ExperimentLogger:
     def __init__(self, run_id: str, runs_dir: Optional[Path] = None) -> None:
         self.run_id = run_id
         self._base_dir: Path = (runs_dir or _DEFAULT_RUNS_DIR) / run_id
+        self._last_llm_usage_run_id: str | None = None
+        self._last_llm_usage_cumulative: dict[str, Any] | None = None
         try:
             self._base_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning(
                 "[ExperimentLogger] 无法创建目录 %s: %s", self._base_dir, e
             )
+
+    def _build_llm_usage_payload(self) -> dict[str, Any]:
+        cumulative = get_run_usage_snapshot()
+        ledger_run_id = str(cumulative.get("run_id") or self.run_id)
+
+        keys = (
+            "calls",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "estimated_cost_usd",
+        )
+
+        previous = self._last_llm_usage_cumulative
+        if self._last_llm_usage_run_id != ledger_run_id:
+            previous = None
+
+        round_usage: dict[str, Any] = {}
+        for key in keys:
+            current_value = cumulative.get(key, 0)
+            previous_value = previous.get(key, 0) if previous else 0
+            if key == "estimated_cost_usd":
+                round_usage[key] = round(
+                    max(0.0, float(current_value) - float(previous_value)),
+                    8,
+                )
+            else:
+                round_usage[key] = max(0, int(current_value) - int(previous_value))
+
+        self._last_llm_usage_run_id = ledger_run_id
+        self._last_llm_usage_cumulative = {
+            key: cumulative.get(key, 0) for key in keys
+        }
+
+        return {
+            "run_id": ledger_run_id,
+            "round": round_usage,
+            "cumulative": {
+                key: cumulative.get(key, 0) for key in keys
+            },
+            "by_model_cumulative": cumulative.get("by_model", {}),
+        }
 
     def snapshot(
         self,
@@ -191,6 +237,7 @@ class ExperimentLogger:
             "failed_check_counts": dict(failed_check_counts),
             "sample_failures": sample_failures,
         }
+        llm_usage_payload = self._build_llm_usage_payload()
 
         payload = {
             "round": round_n,
@@ -212,6 +259,7 @@ class ExperimentLogger:
             "factor_pool_size": factor_pool_size,
             "scheduler_weights": scheduler_weights,
             "scheduler_state": state.scheduler_state or {},
+            "llm_usage": llm_usage_payload,
             "timings": {
                 "stages_ms": dict(state.stage_timings),
                 "stage_steps_ms": {

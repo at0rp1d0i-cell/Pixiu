@@ -431,6 +431,8 @@ class TestLoopControlSnapshotWritten:
             assert data["timings"]["stages_ms"]["loop_control"] >= 0.0
             assert data["timings"]["stage_steps_ms"]["market_context"]["market_analyst_ms"] == 900.0
             assert data["timings"]["round_total_ms"] >= 2100.0
+            assert data["llm_usage"]["round"]["calls"] == 0
+            assert data["llm_usage"]["cumulative"]["total_tokens"] == 0
             assert set(data["scheduler_weights"]) == {
                 "factor_algebra",
                 "symbolic_mutation",

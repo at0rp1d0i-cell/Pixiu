@@ -6,6 +6,7 @@ Sources:
   - tests/test_api_state_store.py
   - tests/test_orchestrator_state_store.py
 """
+import sqlite3
 import pytest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -69,6 +70,11 @@ def test_write_snapshot_and_get_snapshot(tmp_path):
         approved_notes_count=2,
         backtest_reports_count=1,
         verdicts_count=1,
+        llm_calls=4,
+        llm_prompt_tokens=800,
+        llm_completion_tokens=120,
+        llm_total_tokens=920,
+        llm_estimated_cost_usd=0.0123,
         awaiting_human_approval=True,
         updated_at=datetime.now(UTC),
     )
@@ -79,12 +85,20 @@ def test_write_snapshot_and_get_snapshot(tmp_path):
     assert got.run_id == run.run_id
     assert got.approved_notes_count == 2
     assert got.awaiting_human_approval is True
+    assert got.llm_calls == 4
+    assert got.llm_total_tokens == 920
+    assert got.llm_estimated_cost_usd == pytest.approx(0.0123)
 
     updated_snapshot = RunSnapshot(
         run_id=run.run_id,
         approved_notes_count=3,
         backtest_reports_count=2,
         verdicts_count=2,
+        llm_calls=6,
+        llm_prompt_tokens=900,
+        llm_completion_tokens=200,
+        llm_total_tokens=1100,
+        llm_estimated_cost_usd=0.02,
         awaiting_human_approval=False,
         updated_at=datetime.now(UTC) + timedelta(seconds=1),
     )
@@ -95,6 +109,54 @@ def test_write_snapshot_and_get_snapshot(tmp_path):
     assert got2.approved_notes_count == 3
     assert got2.backtest_reports_count == 2
     assert got2.awaiting_human_approval is False
+    assert got2.llm_calls == 6
+    assert got2.llm_total_tokens == 1100
+    assert got2.llm_estimated_cost_usd == pytest.approx(0.02)
+
+
+def test_state_store_migrates_existing_run_snapshots_table(tmp_path):
+    db_path = tmp_path / "state_store.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE run_snapshots (
+            run_id TEXT PRIMARY KEY,
+            approved_notes_count INTEGER NOT NULL,
+            backtest_reports_count INTEGER NOT NULL,
+            verdicts_count INTEGER NOT NULL,
+            awaiting_human_approval INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            version TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = StateStore(db_path)
+    run = store.create_run(mode="single")
+    store.write_snapshot(
+        RunSnapshot(
+            run_id=run.run_id,
+            approved_notes_count=1,
+            backtest_reports_count=1,
+            verdicts_count=1,
+            llm_calls=2,
+            llm_prompt_tokens=100,
+            llm_completion_tokens=20,
+            llm_total_tokens=120,
+            llm_estimated_cost_usd=0.0012,
+            awaiting_human_approval=False,
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+    got = store.get_snapshot(run.run_id)
+    assert got is not None
+    assert got.llm_calls == 2
+    assert got.llm_total_tokens == 120
+    assert got.llm_estimated_cost_usd == pytest.approx(0.0012)
 
 
 def test_append_and_list_artifacts_and_reports_order(tmp_path):
@@ -218,6 +280,7 @@ def test_api_status_reads_latest_run_and_snapshot(tmp_path, monkeypatch):
     assert payload["current_stage"] == "report"
     assert payload["backtest_reports_count"] == 1
     assert payload["awaiting_human_approval"] is True
+    assert payload["llm_total_tokens"] == 0
 
 
 def test_api_status_returns_idle_with_error_when_store_read_fails(monkeypatch):
@@ -589,3 +652,35 @@ def test_orchestrator_writes_state_store_snapshot_and_report_artifact(tmp_path, 
     assert reports[0].ref_id == final_state.cio_report.report_id
     assert reports[0].path.endswith(".md")
     assert (tmp_path / "reports" / run.run_id / f"{final_state.cio_report.report_id}.md").exists()
+
+
+def test_control_plane_snapshot_writes_llm_usage_counters(tmp_path, monkeypatch):
+    store = StateStore(tmp_path / "state_store.sqlite")
+    run = store.create_run(mode="single")
+    orchestrator_runtime.set_current_run_id(run.run_id)
+    monkeypatch.setattr(orchestrator_control_plane, "get_state_store", lambda: store)
+
+    with patch(
+        "src.core.orchestrator.control_plane.get_run_usage_snapshot",
+        return_value={
+            "run_id": run.run_id,
+            "calls": 3,
+            "prompt_tokens": 450,
+            "completion_tokens": 150,
+            "total_tokens": 600,
+            "estimated_cost_usd": 0.0075,
+            "by_model": {},
+        },
+    ):
+        orchestrator_control_plane._write_snapshot(
+            AgentState(current_round=1),
+            stage="market_context",
+        )
+
+    snapshot = store.get_snapshot(run.run_id)
+    assert snapshot is not None
+    assert snapshot.llm_calls == 3
+    assert snapshot.llm_prompt_tokens == 450
+    assert snapshot.llm_completion_tokens == 150
+    assert snapshot.llm_total_tokens == 600
+    assert snapshot.llm_estimated_cost_usd == pytest.approx(0.0075)

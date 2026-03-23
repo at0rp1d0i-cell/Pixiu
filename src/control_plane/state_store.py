@@ -74,6 +74,11 @@ class StateStore:
                     approved_notes_count INTEGER NOT NULL,
                     backtest_reports_count INTEGER NOT NULL,
                     verdicts_count INTEGER NOT NULL,
+                    llm_calls INTEGER NOT NULL DEFAULT 0,
+                    llm_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    llm_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    llm_total_tokens INTEGER NOT NULL DEFAULT 0,
+                    llm_estimated_cost_usd REAL NOT NULL DEFAULT 0,
                     awaiting_human_approval INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -81,6 +86,7 @@ class StateStore:
                 )
                 """
             )
+            self._ensure_snapshot_columns(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS artifact_records (
@@ -105,6 +111,25 @@ class StateStore:
                 )
                 """
             )
+
+    @staticmethod
+    def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(run_snapshots)").fetchall()
+        }
+        required_columns = {
+            "llm_calls": "INTEGER NOT NULL DEFAULT 0",
+            "llm_prompt_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "llm_completion_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "llm_total_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "llm_estimated_cost_usd": "REAL NOT NULL DEFAULT 0",
+        }
+        for column_name, column_def in required_columns.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE run_snapshots ADD COLUMN {column_name} {column_def}"
+                )
 
     def create_run(self, mode: str) -> RunRecord:
         record = RunRecord(
@@ -186,14 +211,21 @@ class StateStore:
                 """
                 INSERT INTO run_snapshots (
                     run_id, approved_notes_count, backtest_reports_count,
-                    verdicts_count, awaiting_human_approval, updated_at,
+                    verdicts_count, llm_calls, llm_prompt_tokens,
+                    llm_completion_tokens, llm_total_tokens, llm_estimated_cost_usd,
+                    awaiting_human_approval, updated_at,
                     created_at, version
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     approved_notes_count = excluded.approved_notes_count,
                     backtest_reports_count = excluded.backtest_reports_count,
                     verdicts_count = excluded.verdicts_count,
+                    llm_calls = excluded.llm_calls,
+                    llm_prompt_tokens = excluded.llm_prompt_tokens,
+                    llm_completion_tokens = excluded.llm_completion_tokens,
+                    llm_total_tokens = excluded.llm_total_tokens,
+                    llm_estimated_cost_usd = excluded.llm_estimated_cost_usd,
                     awaiting_human_approval = excluded.awaiting_human_approval,
                     updated_at = excluded.updated_at,
                     version = excluded.version
@@ -203,6 +235,11 @@ class StateStore:
                     snapshot.approved_notes_count,
                     snapshot.backtest_reports_count,
                     snapshot.verdicts_count,
+                    snapshot.llm_calls,
+                    snapshot.llm_prompt_tokens,
+                    snapshot.llm_completion_tokens,
+                    snapshot.llm_total_tokens,
+                    snapshot.llm_estimated_cost_usd,
                     int(snapshot.awaiting_human_approval),
                     _iso(snapshot.updated_at),
                     _iso(snapshot.created_at),
@@ -362,6 +399,11 @@ class StateStore:
             approved_notes_count=row["approved_notes_count"],
             backtest_reports_count=row["backtest_reports_count"],
             verdicts_count=row["verdicts_count"],
+            llm_calls=row["llm_calls"],
+            llm_prompt_tokens=row["llm_prompt_tokens"],
+            llm_completion_tokens=row["llm_completion_tokens"],
+            llm_total_tokens=row["llm_total_tokens"],
+            llm_estimated_cost_usd=row["llm_estimated_cost_usd"],
             awaiting_human_approval=bool(row["awaiting_human_approval"]),
             updated_at=_dt(row["updated_at"]),
             created_at=_dt(row["created_at"]),

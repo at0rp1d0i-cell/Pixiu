@@ -10,6 +10,7 @@ from typing import Optional
 
 from . import config, runtime
 from src.control_plane.state_store import get_state_store as _get_state_store
+from src.llm.usage_ledger import get_run_usage_snapshot
 from src.schemas.control_plane import ArtifactRecord, RunSnapshot
 from src.schemas.state import AgentState
 
@@ -54,11 +55,17 @@ def _write_snapshot(state: AgentState, stage: str, awaiting_human_approval: Opti
     if not run_id:
         return
     try:
+        llm_usage = get_run_usage_snapshot(run_id=run_id)
         snapshot = RunSnapshot(
             run_id=run_id,
             approved_notes_count=len(state.approved_notes),
             backtest_reports_count=len(state.backtest_reports),
             verdicts_count=len(state.critic_verdicts),
+            llm_calls=llm_usage["calls"],
+            llm_prompt_tokens=llm_usage["prompt_tokens"],
+            llm_completion_tokens=llm_usage["completion_tokens"],
+            llm_total_tokens=llm_usage["total_tokens"],
+            llm_estimated_cost_usd=llm_usage["estimated_cost_usd"],
             awaiting_human_approval=(
                 state.awaiting_human_approval
                 if awaiting_human_approval is None

@@ -8,6 +8,34 @@ from langchain_openai import ChatOpenAI
 
 from src.core.env import load_dotenv_if_available
 from .settings import get_llm_profile_settings
+from .usage_ledger import UsageLedgerCallback, get_usage_ledger_callback
+
+
+def _ensure_usage_callback(kwargs: dict[str, Any]) -> None:
+    usage_callback = get_usage_ledger_callback()
+
+    callback_manager = kwargs.get("callback_manager")
+    if callback_manager is not None:
+        handlers = getattr(callback_manager, "handlers", None)
+        if isinstance(handlers, list) and not any(
+            isinstance(handler, UsageLedgerCallback) for handler in handlers
+        ):
+            try:
+                callback_manager.add_handler(usage_callback, inherit=True)
+            except TypeError:
+                callback_manager.add_handler(usage_callback)
+
+    callbacks = kwargs.get("callbacks")
+    if callbacks is None:
+        kwargs["callbacks"] = [usage_callback]
+        return
+
+    if isinstance(callbacks, tuple):
+        callbacks = list(callbacks)
+    if isinstance(callbacks, list):
+        if not any(isinstance(cb, UsageLedgerCallback) for cb in callbacks):
+            callbacks.append(usage_callback)
+        kwargs["callbacks"] = callbacks
 
 
 def get_researcher_llm_kwargs(
@@ -42,6 +70,8 @@ def get_researcher_llm_kwargs(
     for key, value in overrides.items():
         if value is not None:
             kwargs[key] = value
+
+    _ensure_usage_callback(kwargs)
     return kwargs
 
 

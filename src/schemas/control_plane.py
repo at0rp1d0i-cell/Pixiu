@@ -19,6 +19,11 @@ class RunSnapshot(PixiuBase):
     approved_notes_count: int = 0
     backtest_reports_count: int = 0
     verdicts_count: int = 0
+    llm_calls: int = 0
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_total_tokens: int = 0
+    llm_estimated_cost_usd: float = 0.0
     awaiting_human_approval: bool = False
     updated_at: datetime
 

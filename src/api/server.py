@@ -62,6 +62,11 @@ def get_status():
             "approved_notes_count": snapshot.approved_notes_count if snapshot else 0,
             "backtest_reports_count": snapshot.backtest_reports_count if snapshot else 0,
             "verdicts_count": snapshot.verdicts_count if snapshot else 0,
+            "llm_calls": snapshot.llm_calls if snapshot else 0,
+            "llm_prompt_tokens": snapshot.llm_prompt_tokens if snapshot else 0,
+            "llm_completion_tokens": snapshot.llm_completion_tokens if snapshot else 0,
+            "llm_total_tokens": snapshot.llm_total_tokens if snapshot else 0,
+            "llm_estimated_cost_usd": snapshot.llm_estimated_cost_usd if snapshot else 0.0,
             "last_error": run.last_error,
         }
     except Exception as e:

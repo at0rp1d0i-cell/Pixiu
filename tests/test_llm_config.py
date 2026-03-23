@@ -96,3 +96,48 @@ def test_build_researcher_llm_passes_through_shared_kwargs():
     assert kwargs['api_key'] == 'test-key'
     assert kwargs['temperature'] == 0.5
     assert result is instance
+
+
+def test_get_researcher_llm_kwargs_injects_usage_ledger_callback_by_default():
+    from src.llm.openai_compat import get_researcher_llm_kwargs
+    from src.llm.usage_ledger import UsageLedgerCallback
+
+    with patch('src.llm.openai_compat.load_dotenv_if_available'):
+        with patch.dict(
+            'os.environ',
+            {
+                'RESEARCHER_MODEL': 'deepseek-chat',
+                'RESEARCHER_BASE_URL': 'https://api.deepseek.com',
+                'RESEARCHER_API_KEY': 'test-key',
+            },
+            clear=True,
+        ):
+            kwargs = get_researcher_llm_kwargs(temperature=0.2)
+
+    assert any(isinstance(cb, UsageLedgerCallback) for cb in kwargs["callbacks"])
+
+
+def test_get_researcher_llm_kwargs_preserves_existing_callbacks():
+    from src.llm.openai_compat import get_researcher_llm_kwargs
+    from src.llm.usage_ledger import UsageLedgerCallback
+
+    custom_callback = object()
+    with patch('src.llm.openai_compat.load_dotenv_if_available'):
+        with patch.dict(
+            'os.environ',
+            {
+                'RESEARCHER_MODEL': 'deepseek-chat',
+                'RESEARCHER_BASE_URL': 'https://api.deepseek.com',
+                'RESEARCHER_API_KEY': 'test-key',
+            },
+            clear=True,
+        ):
+            kwargs = get_researcher_llm_kwargs(
+                temperature=0.2,
+                callbacks=[custom_callback],
+            )
+
+    assert custom_callback in kwargs["callbacks"]
+    assert sum(
+        1 for cb in kwargs["callbacks"] if isinstance(cb, UsageLedgerCallback)
+    ) == 1
