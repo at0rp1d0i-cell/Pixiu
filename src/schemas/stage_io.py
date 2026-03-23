@@ -14,7 +14,7 @@ TypedDict 子类保持返回类型明确且 IDE 可导航，同时与 LangGraph
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from typing_extensions import TypedDict
 
 from src.schemas.market_context import MarketContextMemo
@@ -255,6 +255,7 @@ class LoopControlOutput(TypedDict):
     research_notes: list[FactorResearchNote]
     approved_notes: list[FactorResearchNote]
     subspace_generated: dict[str, int]
+    stage1_reliability: dict[str, Any]
     filtered_count: int
     prefilter_diagnostics: PrefilterDiagnostics
     exploration_results: list[ExplorationResult]

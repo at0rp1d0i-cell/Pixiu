@@ -31,6 +31,7 @@ class ExperimentLogger:
         self._base_dir: Path = (runs_dir or _DEFAULT_RUNS_DIR) / run_id
         self._last_llm_usage_run_id: str | None = None
         self._last_llm_usage_cumulative: dict[str, Any] | None = None
+        self._last_llm_call_event_count: int = 0
         try:
             self._base_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
@@ -53,6 +54,7 @@ class ExperimentLogger:
         previous = self._last_llm_usage_cumulative
         if self._last_llm_usage_run_id != ledger_run_id:
             previous = None
+            self._last_llm_call_event_count = 0
 
         round_usage: dict[str, Any] = {}
         for key in keys:
@@ -70,6 +72,9 @@ class ExperimentLogger:
         self._last_llm_usage_cumulative = {
             key: cumulative.get(key, 0) for key in keys
         }
+        cumulative_call_events = list(cumulative.get("call_events", []))
+        round_call_events = cumulative_call_events[self._last_llm_call_event_count :]
+        self._last_llm_call_event_count = len(cumulative_call_events)
 
         return {
             "run_id": ledger_run_id,
@@ -78,6 +83,8 @@ class ExperimentLogger:
                 key: cumulative.get(key, 0) for key in keys
             },
             "by_model_cumulative": cumulative.get("by_model", {}),
+            "call_events_round": round_call_events,
+            "call_events_cumulative_count": len(cumulative_call_events),
         }
 
     def snapshot(
@@ -174,6 +181,7 @@ class ExperimentLogger:
             "rejection_counts_by_filter": dict(prefilter_diag.get("rejection_counts_by_filter", {})),
             "sample_rejections": list(prefilter_diag.get("sample_rejections", [])),
         }
+        stage1_reliability = dict(getattr(state, "stage1_reliability", {}) or {})
 
         execution_error_count = sum(
             1 for report in state.backtest_reports
@@ -248,6 +256,7 @@ class ExperimentLogger:
             "approved_notes_count": len(state.approved_notes),
             "prefilter_passed_count": prefilter_summary["approved_count"],
             "filtered_count": state.filtered_count,
+            "stage1_reliability": stage1_reliability,
             "prefilter": prefilter_summary,
             "verdicts": verdicts_summary,
             "verdicts_passed": verdicts_passed,

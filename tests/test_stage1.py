@@ -231,7 +231,7 @@ def test_market_analyst_collects_stage1_reliability_diagnostics():
     assert diagnostics["tool_errors_total"] == 1
     assert diagnostics["finalization_forced"] is True
     assert diagnostics["degraded"] is False
-    assert diagnostics["degrade_reason"] == "测试摘要"
+    assert diagnostics["degrade_reason"] is None
     assert diagnostics["enrichment_tools_used"] == ["get_market_hot_topics"]
     assert diagnostics["tool_stats"]["get_market_hot_topics"]["calls"] == 1
     assert diagnostics["tool_stats"]["get_market_hot_topics"]["errors"] == 1

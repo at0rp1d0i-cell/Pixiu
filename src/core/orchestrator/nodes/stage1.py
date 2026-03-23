@@ -76,6 +76,8 @@ def _normalize_stage1_reliability(
     base["degraded"] = bool(degraded)
     if degraded:
         base["degrade_reason"] = degrade_reason
+    else:
+        base["degrade_reason"] = None
     return base
 
 

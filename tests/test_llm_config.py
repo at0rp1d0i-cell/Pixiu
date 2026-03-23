@@ -59,6 +59,9 @@ def test_get_researcher_llm_kwargs_applies_profile_defaults():
     assert kwargs['top_p'] == 1.0
     assert kwargs['request_timeout'] == 30
     assert kwargs['max_retries'] == 1
+    assert kwargs["metadata"]["llm_profile"] == "alignment_checker"
+    assert kwargs["metadata"]["agent_role"] == "alignment_checker"
+    assert kwargs["metadata"]["provider"] == "openai_compatible"
 
 
 def test_get_researcher_llm_kwargs_loads_dotenv_first():

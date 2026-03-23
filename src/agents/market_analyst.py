@@ -408,7 +408,11 @@ class MarketAnalyst:
             "tool_errors_total": tool_errors_total,
             "finalization_forced": finalization_forced,
             "degraded": is_degraded_market_context(memo),
-            "degrade_reason": _extract_degrade_reason(getattr(memo, "raw_summary", None)),
+            "degrade_reason": (
+                _extract_degrade_reason(getattr(memo, "raw_summary", None))
+                if is_degraded_market_context(memo)
+                else None
+            ),
             "tool_stats": tool_stats_payload,
             "sample_failures": sample_failures,
         }

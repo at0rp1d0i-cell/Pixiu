@@ -206,6 +206,7 @@ class TestLoopControlNode:
         state = state.model_copy(update={
             "research_notes": [note],
             "approved_notes": [note],
+            "stage1_reliability": {"tool_calls_total": 2},
             "prefilter_diagnostics": {"input_count": 1, "approved_count": 1},
             "backtest_reports": [_make_report(2.0)],
             "critic_verdicts": [_make_verdict(True)],
@@ -216,6 +217,7 @@ class TestLoopControlNode:
 
         assert result["research_notes"] == []
         assert result["approved_notes"] == []
+        assert result["stage1_reliability"] == {}
         assert result["prefilter_diagnostics"] == {}
         assert result["backtest_reports"] == []
         assert result["critic_verdicts"] == []
@@ -379,6 +381,28 @@ class TestLoopControlSnapshotWritten:
                 backtest_reports=[failed_report],
                 critic_verdicts=[failed_verdict],
             ).model_copy(update={
+                "stage1_reliability": {
+                    "blocking_required": True,
+                    "blocking_tools_expected": ["get_moneyflow_hsgt", "get_margin_data"],
+                    "blocking_tools_used": ["get_moneyflow_hsgt"],
+                    "enrichment_tools_used": ["get_market_hot_topics"],
+                    "tool_calls_total": 2,
+                    "tool_timeouts_total": 1,
+                    "tool_errors_total": 0,
+                    "finalization_forced": True,
+                    "degraded": False,
+                    "degrade_reason": None,
+                    "tool_stats": {
+                        "get_moneyflow_hsgt": {
+                            "calls": 1,
+                            "timeouts": 0,
+                            "errors": 0,
+                            "avg_latency_ms": 120.0,
+                            "max_latency_ms": 120.0,
+                        }
+                    },
+                    "sample_failures": [],
+                },
                 "stage_timings": {
                     "market_context": 1200.0,
                     "hypothesis_gen": 600.0,
@@ -419,6 +443,9 @@ class TestLoopControlSnapshotWritten:
             assert "subspace_generated" in data
             assert "verdicts" in data
             assert data["prefilter"]["input_count"] == 12
+            assert data["stage1_reliability"]["blocking_required"] is True
+            assert data["stage1_reliability"]["tool_calls_total"] == 2
+            assert data["stage1_reliability"]["finalization_forced"] is True
             assert data["prefilter"]["rejection_counts_by_filter"]["validator"] == 4
             assert data["execution"]["backtest_reports_count"] == 1
             assert data["execution"]["execution_error_count"] == 0
@@ -433,6 +460,8 @@ class TestLoopControlSnapshotWritten:
             assert data["timings"]["round_total_ms"] >= 2100.0
             assert data["llm_usage"]["round"]["calls"] == 0
             assert data["llm_usage"]["cumulative"]["total_tokens"] == 0
+            assert data["llm_usage"]["call_events_round"] == []
+            assert data["llm_usage"]["call_events_cumulative_count"] == 0
             assert set(data["scheduler_weights"]) == {
                 "factor_algebra",
                 "symbolic_mutation",

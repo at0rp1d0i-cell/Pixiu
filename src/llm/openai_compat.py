@@ -11,6 +11,13 @@ from src.core.env import load_dotenv_if_available
 from .settings import get_llm_profile_settings
 from .usage_ledger import UsageLedgerCallback, get_usage_ledger_callback
 
+_ROLE_BY_PROFILE = {
+    "market_analyst": "market_analyst",
+    "researcher": "alpha_researcher",
+    "alignment_checker": "alignment_checker",
+    "exploration_agent": "exploration_agent",
+}
+
 
 def _ensure_runtime_metadata(kwargs: dict[str, Any], *, profile: str | None) -> None:
     existing_metadata = kwargs.get("metadata")
@@ -20,6 +27,8 @@ def _ensure_runtime_metadata(kwargs: dict[str, Any], *, profile: str | None) -> 
 
     if profile and "llm_profile" not in metadata:
         metadata["llm_profile"] = profile
+    if profile and "agent_role" not in metadata:
+        metadata["agent_role"] = _ROLE_BY_PROFILE.get(profile, profile)
     if "provider" not in metadata:
         metadata["provider"] = "openai_compatible"
     if "model" not in metadata and kwargs.get("model"):

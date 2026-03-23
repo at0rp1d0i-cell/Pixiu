@@ -339,7 +339,15 @@ def reset_usage_ledger(run_id: str | None = None) -> None:
             _RUN_LEDGER.clear()
             _CALL_CONTEXTS.clear()
         else:
-            _RUN_LEDGER.pop(run_id, None)
+            resolved_run_id = _resolve_run_id(run_id)
+            _RUN_LEDGER.pop(resolved_run_id, None)
+            stale_contexts = [
+                callback_run_id
+                for callback_run_id, context in _CALL_CONTEXTS.items()
+                if context.get("resolved_run_id") == resolved_run_id
+            ]
+            for callback_run_id in stale_contexts:
+                _CALL_CONTEXTS.pop(callback_run_id, None)
 
 
 @dataclass(slots=True)
@@ -361,8 +369,10 @@ class UsageLedgerCallback(BaseCallbackHandler):
         callback_run_id = _to_optional_str(run_id)
         if callback_run_id is None:
             return
+        resolved_run_id = _resolve_run_id()
         with _LOCK:
             _CALL_CONTEXTS[callback_run_id] = {
+                "resolved_run_id": resolved_run_id,
                 "started_at": time.perf_counter(),
                 "tags": list(tags or []),
                 "metadata": dict(metadata or {}),
@@ -394,7 +404,7 @@ class UsageLedgerCallback(BaseCallbackHandler):
                 latency_ms = (time.perf_counter() - float(started_at)) * 1000.0
 
         usage = extract_usage_from_llm_result(response)
-        resolved_run_id = _resolve_run_id()
+        resolved_run_id = str(context.get("resolved_run_id")) if context else _resolve_run_id()
         call_event = _build_call_event(
             run_id=resolved_run_id,
             callback_run_id=callback_run_id,
@@ -444,7 +454,7 @@ class UsageLedgerCallback(BaseCallbackHandler):
             if isinstance(started_at, (int, float)):
                 latency_ms = (time.perf_counter() - float(started_at)) * 1000.0
 
-        resolved_run_id = _resolve_run_id()
+        resolved_run_id = str(context.get("resolved_run_id")) if context else _resolve_run_id()
         call_event = _build_call_event(
             run_id=resolved_run_id,
             callback_run_id=callback_run_id,

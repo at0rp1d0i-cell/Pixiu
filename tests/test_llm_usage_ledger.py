@@ -192,7 +192,26 @@ def test_experiment_logger_emits_round_and_cumulative_llm_usage(tmp_path):
             "total_tokens": 250,
             "estimated_cost_usd": 0.003,
             "by_model": {},
-            "call_events": [],
+            "call_events": [
+                {
+                    "call_id": "c1",
+                    "run_id": "run-123",
+                    "stage": "market_context",
+                    "round": 0,
+                    "agent_role": "market_analyst",
+                    "llm_profile": "market_analyst",
+                    "provider": "openai_compatible",
+                    "model": "gpt-test",
+                    "prompt_tokens": 200,
+                    "completion_tokens": 50,
+                    "total_tokens": 250,
+                    "latency_ms": 123.4,
+                    "success": True,
+                    "error_class": None,
+                    "error_message": None,
+                    "timestamp": "2026-03-23T14:00:00+00:00",
+                }
+            ],
         },
         {
             "run_id": "run-123",
@@ -202,7 +221,44 @@ def test_experiment_logger_emits_round_and_cumulative_llm_usage(tmp_path):
             "total_tokens": 800,
             "estimated_cost_usd": 0.009,
             "by_model": {},
-            "call_events": [],
+            "call_events": [
+                {
+                    "call_id": "c1",
+                    "run_id": "run-123",
+                    "stage": "market_context",
+                    "round": 0,
+                    "agent_role": "market_analyst",
+                    "llm_profile": "market_analyst",
+                    "provider": "openai_compatible",
+                    "model": "gpt-test",
+                    "prompt_tokens": 200,
+                    "completion_tokens": 50,
+                    "total_tokens": 250,
+                    "latency_ms": 123.4,
+                    "success": True,
+                    "error_class": None,
+                    "error_message": None,
+                    "timestamp": "2026-03-23T14:00:00+00:00",
+                },
+                {
+                    "call_id": "c2",
+                    "run_id": "run-123",
+                    "stage": "hypothesis_gen",
+                    "round": 1,
+                    "agent_role": "alpha_researcher",
+                    "llm_profile": "researcher",
+                    "provider": "openai_compatible",
+                    "model": "gpt-test",
+                    "prompt_tokens": 420,
+                    "completion_tokens": 130,
+                    "total_tokens": 550,
+                    "latency_ms": 456.7,
+                    "success": True,
+                    "error_class": None,
+                    "error_message": None,
+                    "timestamp": "2026-03-23T14:01:00+00:00",
+                },
+            ],
         },
     ]
 
@@ -217,6 +273,10 @@ def test_experiment_logger_emits_round_and_cumulative_llm_usage(tmp_path):
 
     assert payload_1["llm_usage"]["round"]["total_tokens"] == 250
     assert payload_1["llm_usage"]["cumulative"]["total_tokens"] == 250
+    assert payload_1["llm_usage"]["call_events_cumulative_count"] == 1
+    assert len(payload_1["llm_usage"]["call_events_round"]) == 1
     assert payload_2["llm_usage"]["round"]["total_tokens"] == 550
     assert payload_2["llm_usage"]["cumulative"]["total_tokens"] == 800
     assert payload_2["llm_usage"]["run_id"] == "run-123"
+    assert payload_2["llm_usage"]["call_events_cumulative_count"] == 2
+    assert [event["call_id"] for event in payload_2["llm_usage"]["call_events_round"]] == ["c2"]
