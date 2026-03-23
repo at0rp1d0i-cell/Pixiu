@@ -186,6 +186,59 @@ def test_market_analyst_forces_final_json_when_tool_rounds_exhausted():
     assert llm_no_tools.ainvoke.await_count == 1
 
 
+def test_market_analyst_collects_stage1_reliability_diagnostics():
+    from src.agents.market_analyst import MarketAnalyst
+
+    tool_intent_response = MagicMock()
+    tool_intent_response.tool_calls = [
+        {"name": "get_market_hot_topics", "args": {"top_n": 20}, "id": "call_1"}
+    ]
+    tool_intent_response.content = "现在让我获取市场热点话题："
+
+    final_json_response = MagicMock()
+    final_json_response.tool_calls = []
+    final_json_response.content = """{
+        "date": "2026-03-23",
+        "northbound": null,
+        "macro_signals": [],
+        "hot_themes": ["测试主题"],
+        "historical_insights": [],
+        "suggested_islands": ["momentum"],
+        "market_regime": "range_bound",
+        "raw_summary": "测试摘要"
+    }"""
+
+    llm_with_tools = MagicMock()
+    llm_with_tools.bind_tools = MagicMock(return_value=llm_with_tools)
+    llm_with_tools.ainvoke = AsyncMock(return_value=tool_intent_response)
+
+    llm_no_tools = MagicMock()
+    llm_no_tools.ainvoke = AsyncMock(return_value=final_json_response)
+
+    mock_tool = MagicMock()
+    mock_tool.name = "get_market_hot_topics"
+    mock_tool.ainvoke = AsyncMock(side_effect=RuntimeError("hot topics temporarily unavailable"))
+
+    with patch("src.agents.market_analyst.build_researcher_llm", side_effect=[llm_with_tools, llm_no_tools]):
+        with patch("src.agents.market_analyst._get_stage1_max_tool_rounds", return_value=1):
+            analyst = MarketAnalyst(mcp_tools=[mock_tool])
+            memo = asyncio.run(analyst.analyze())
+            diagnostics = analyst.get_reliability_diagnostics()
+
+    assert isinstance(memo, MarketContextMemo)
+    assert diagnostics["tool_calls_total"] == 1
+    assert diagnostics["tool_timeouts_total"] == 0
+    assert diagnostics["tool_errors_total"] == 1
+    assert diagnostics["finalization_forced"] is True
+    assert diagnostics["degraded"] is False
+    assert diagnostics["degrade_reason"] == "测试摘要"
+    assert diagnostics["enrichment_tools_used"] == ["get_market_hot_topics"]
+    assert diagnostics["tool_stats"]["get_market_hot_topics"]["calls"] == 1
+    assert diagnostics["tool_stats"]["get_market_hot_topics"]["errors"] == 1
+    assert diagnostics["sample_failures"][0]["tool"] == "get_market_hot_topics"
+    assert diagnostics["sample_failures"][0]["kind"] == "error"
+
+
 def test_market_context_node_timeout_falls_back_to_empty_memo():
     from src.agents.market_analyst import market_context_node
 
@@ -267,13 +320,30 @@ def test_run_market_context_once_includes_tushare_when_token_present():
                 mock_chat.bind_tools = MagicMock(return_value=mock_chat)
                 mock_builder.return_value = mock_chat
                 with patch("src.agents.market_analyst.MarketAnalyst.analyze", new=AsyncMock(return_value=_make_market_memo())):
-                    result = asyncio.run(_run_market_context_once({}))
+                    with patch(
+                        "src.agents.market_analyst.MarketAnalyst.get_reliability_diagnostics",
+                        return_value={
+                            "tool_calls_total": 1,
+                            "tool_errors_total": 0,
+                            "tool_timeouts_total": 0,
+                            "blocking_tools_used": ["get_moneyflow_hsgt"],
+                            "enrichment_tools_used": [],
+                            "finalization_forced": False,
+                            "degraded": False,
+                            "degrade_reason": None,
+                            "tool_stats": {},
+                            "sample_failures": [],
+                        },
+                    ):
+                        result = asyncio.run(_run_market_context_once({}))
 
     servers = mock_ctor.call_args.args[0]
     assert "tushare" in servers
     assert servers["tushare"]["command"] == sys.executable
     assert servers["tushare"]["env"].get("TUSHARE_TOKEN") == "test-token"
     assert isinstance(result["market_context"], MarketContextMemo)
+    assert result["stage1_reliability"]["blocking_tools_expected"] == ["get_moneyflow_hsgt"]
+    assert result["stage1_reliability"]["tool_calls_total"] == 1
 
 
 def test_stage1_node_reuses_same_day_market_context_after_round_zero():
@@ -357,6 +427,32 @@ def test_stage1_node_queries_literature_for_suggested_islands_only():
 
     assert result["market_context"].suggested_islands == ["momentum"]
     mock_retrieve.assert_awaited_once_with(active_islands=["momentum"])
+    assert result["stage1_reliability"]["blocking_required"] is True
+
+
+def test_stage1_node_marks_blocking_required_false_for_single_round_mode():
+    from src.core.orchestrator.nodes.stage1 import market_context_node
+
+    memo = _make_market_memo()
+    state = AgentState(current_round=0)
+
+    with patch("src.core.orchestrator.config.MAX_ROUNDS", 1):
+        with patch(
+            "src.agents.market_analyst.market_context_node",
+            return_value={
+                "market_context": memo,
+                "stage1_reliability": {"tool_calls_total": 0},
+            },
+        ):
+            with patch("src.factor_pool.pool.get_factor_pool", return_value=MagicMock()):
+                with patch(
+                    "src.agents.literature_miner.LiteratureMiner.retrieve_insights",
+                    new=AsyncMock(return_value=[]),
+                ):
+                    result = market_context_node(state)
+
+    assert result["stage1_reliability"]["blocking_required"] is False
+    assert result["stage1_reliability"]["degraded"] is False
 
 
 def test_select_stage1_tools_uses_allowlists():

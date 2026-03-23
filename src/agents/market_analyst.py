@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from datetime import date
+from time import perf_counter
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
@@ -98,6 +99,7 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
 
 _DEFAULT_STAGE1_TIMEOUT_SEC = 60.0
 _DEFAULT_STAGE1_MAX_TOOL_ROUNDS = 3
+_MAX_STAGE1_SAMPLE_FAILURES = 5
 
 
 def _today_str() -> str:
@@ -185,6 +187,31 @@ def is_degraded_market_context(memo: MarketContextMemo | None) -> bool:
     return memo.raw_summary.startswith(_DEGRADED_SUMMARY_PREFIX)
 
 
+def _extract_degrade_reason(summary: str | None) -> str | None:
+    if not summary:
+        return None
+    if summary.startswith(_DEGRADED_SUMMARY_PREFIX):
+        return summary[len(_DEGRADED_SUMMARY_PREFIX):].strip()
+    return summary
+
+
+def _empty_stage1_reliability() -> dict:
+    return {
+        "blocking_required": False,
+        "blocking_tools_expected": [],
+        "blocking_tools_used": [],
+        "enrichment_tools_used": [],
+        "tool_calls_total": 0,
+        "tool_timeouts_total": 0,
+        "tool_errors_total": 0,
+        "finalization_forced": False,
+        "degraded": False,
+        "degrade_reason": None,
+        "tool_stats": {},
+        "sample_failures": [],
+    }
+
+
 class MarketAnalyst:
     """Stage 1 市场上下文分析师。
 
@@ -195,11 +222,16 @@ class MarketAnalyst:
         self.tools = {t.name: t for t in mcp_tools}
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
+        self._last_reliability_diagnostics: dict = _empty_stage1_reliability()
 
     _TOOL_CALL_TIMEOUT_SEC = 15.0
 
-    async def _invoke_tool_call(self, call: dict) -> ToolMessage:
+    async def _invoke_tool_call(self, call: dict) -> tuple[ToolMessage, dict]:
         """Invoke one MCP tool call and normalize it into a ToolMessage."""
+        started = perf_counter()
+        tool_name = str(call.get("name", "unknown_tool"))
+        failed_kind: str | None = None
+        failed_message: str | None = None
         tool = self.tools.get(call["name"])
         if tool:
             try:
@@ -209,15 +241,34 @@ class MarketAnalyst:
                 )
             except TimeoutError:
                 raw_result = f"工具调用超时（{self._TOOL_CALL_TIMEOUT_SEC}s）: {call['name']}"
+                failed_kind = "timeout"
+                failed_message = raw_result
                 logger.warning("[MarketAnalyst] 工具 %s 超时（%.0fs）", call["name"], self._TOOL_CALL_TIMEOUT_SEC)
             except Exception as e:
                 raw_result = f"工具调用失败: {e}"
+                failed_kind = "error"
+                failed_message = str(e)
         else:
             raw_result = f"工具不存在: {call['name']}"
+            failed_kind = "error"
+            failed_message = raw_result
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 2)
+        trace = {
+            "tool": tool_name,
+            "latency_ms": elapsed_ms,
+            "timed_out": failed_kind == "timeout",
+            "errored": failed_kind is not None,
+        }
+        if failed_kind is not None:
+            trace["failure"] = {
+                "tool": tool_name,
+                "kind": failed_kind,
+                "message": failed_message or raw_result,
+            }
         return ToolMessage(
             content=self._extract_tool_text(raw_result),
             tool_call_id=call["id"],
-        )
+        ), trace
 
     @staticmethod
     def _extract_tool_text(result) -> str:
@@ -246,6 +297,15 @@ class MarketAnalyst:
 
     async def analyze(self) -> MarketContextMemo:
         """执行 ReAct 循环生成今日 MarketContextMemo。"""
+        tool_stats: dict[str, dict[str, float | int]] = {}
+        blocking_tools_used: set[str] = set()
+        enrichment_tools_used: set[str] = set()
+        sample_failures: list[dict[str, str]] = []
+        tool_calls_total = 0
+        tool_timeouts_total = 0
+        tool_errors_total = 0
+        finalization_forced = False
+
         system_content = MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())
         skill_context = self.skill_loader.load_for_agent("market_analyst")
         if skill_context:
@@ -268,10 +328,46 @@ class MarketAnalyst:
             if not getattr(response, "tool_calls", None):
                 break
 
-            tool_messages = await asyncio.gather(
+            tool_results = await asyncio.gather(
                 *(self._invoke_tool_call(call) for call in response.tool_calls)
             )
-            messages.extend(tool_messages)
+            for tool_message, trace in tool_results:
+                messages.append(tool_message)
+                tool_name = trace["tool"]
+                stats = tool_stats.setdefault(
+                    tool_name,
+                    {
+                        "calls": 0,
+                        "timeouts": 0,
+                        "errors": 0,
+                        "latency_total_ms": 0.0,
+                        "max_latency_ms": 0.0,
+                    },
+                )
+                stats["calls"] += 1
+                tool_calls_total += 1
+                latency_ms = float(trace.get("latency_ms", 0.0))
+                stats["latency_total_ms"] += latency_ms
+                stats["max_latency_ms"] = max(float(stats["max_latency_ms"]), latency_ms)
+                if trace.get("timed_out"):
+                    stats["timeouts"] += 1
+                    tool_timeouts_total += 1
+                if trace.get("errored"):
+                    stats["errors"] += 1
+                    tool_errors_total += 1
+                if tool_name in _STAGE1_BLOCKING_TOOL_NAMES:
+                    blocking_tools_used.add(tool_name)
+                elif tool_name in _STAGE1_ENRICHMENT_TOOL_NAMES:
+                    enrichment_tools_used.add(tool_name)
+                failure = trace.get("failure")
+                if isinstance(failure, dict) and len(sample_failures) < _MAX_STAGE1_SAMPLE_FAILURES:
+                    sample_failures.append(
+                        {
+                            "tool": str(failure.get("tool", tool_name)),
+                            "kind": str(failure.get("kind", "error")),
+                            "message": str(failure.get("message", "")),
+                        }
+                    )
         else:
             used_all_rounds = True
 
@@ -280,6 +376,7 @@ class MarketAnalyst:
             bool(getattr(response, "tool_calls", None))
             or not self._contains_json_payload(getattr(response, "content", ""))
         ):
+            finalization_forced = True
             logger.info(
                 "[MarketAnalyst] 工具轮次用尽（max=%d），追加 final call 强制 JSON 收尾",
                 max_tool_rounds,
@@ -290,7 +387,35 @@ class MarketAnalyst:
             llm_no_tools = build_researcher_llm(profile="market_analyst")
             response = await llm_no_tools.ainvoke(messages)
 
-        return self._parse_memo(response.content)
+        memo = self._parse_memo(response.content)
+        tool_stats_payload: dict[str, dict[str, float | int]] = {}
+        for tool_name, stats in tool_stats.items():
+            calls = int(stats["calls"])
+            avg_latency = round(float(stats["latency_total_ms"]) / calls, 2) if calls > 0 else 0.0
+            tool_stats_payload[tool_name] = {
+                "calls": calls,
+                "timeouts": int(stats["timeouts"]),
+                "errors": int(stats["errors"]),
+                "avg_latency_ms": avg_latency,
+                "max_latency_ms": round(float(stats["max_latency_ms"]), 2),
+            }
+        self._last_reliability_diagnostics = {
+            **_empty_stage1_reliability(),
+            "blocking_tools_used": sorted(blocking_tools_used),
+            "enrichment_tools_used": sorted(enrichment_tools_used),
+            "tool_calls_total": tool_calls_total,
+            "tool_timeouts_total": tool_timeouts_total,
+            "tool_errors_total": tool_errors_total,
+            "finalization_forced": finalization_forced,
+            "degraded": is_degraded_market_context(memo),
+            "degrade_reason": _extract_degrade_reason(getattr(memo, "raw_summary", None)),
+            "tool_stats": tool_stats_payload,
+            "sample_failures": sample_failures,
+        }
+        return memo
+
+    def get_reliability_diagnostics(self) -> dict:
+        return dict(self._last_reliability_diagnostics)
 
     def _parse_memo(self, content: str) -> MarketContextMemo:
         """解析 LLM JSON 输出为 MarketContextMemo。降级时返回空 Memo。"""
@@ -387,8 +512,12 @@ async def _run_market_context_once(state: dict) -> dict:
         raise RuntimeError("No Stage 1 blocking tools available")
     analyst = MarketAnalyst(mcp_tools=[*blocking_tools, *enrichment_tools])
     memo = await analyst.analyze()
+    reliability = analyst.get_reliability_diagnostics()
+    reliability["blocking_tools_expected"] = sorted(
+        [getattr(tool, "name", "") for tool in blocking_tools if getattr(tool, "name", "")]
+    )
     logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
-    return {"market_context": memo}
+    return {"market_context": memo, "stage1_reliability": reliability}
 
 
 async def _market_context_async(state: dict) -> dict:
@@ -400,15 +529,29 @@ async def _market_context_async(state: dict) -> dict:
         return await asyncio.wait_for(_run_market_context_once(state), timeout=timeout_sec)
     except TimeoutError:
         logger.warning("[Stage 1] MarketAnalyst 超时（%.1fs），使用空上下文", timeout_sec)
+        reason = f"Stage 1 timeout after {timeout_sec:.1f}s"
         return {
             "market_context": _empty_memo(
-                f"Stage 1 timeout after {timeout_sec:.1f}s",
+                reason,
                 active_islands=active_islands,
-            )
+            ),
+            "stage1_reliability": {
+                **_empty_stage1_reliability(),
+                "degraded": True,
+                "degrade_reason": reason,
+            },
         }
     except Exception as e:
         logger.warning("[Stage 1] MarketAnalyst 失败，使用空上下文: %s", e)
-        return {"market_context": _empty_memo(str(e), active_islands=active_islands)}
+        reason = str(e)
+        return {
+            "market_context": _empty_memo(reason, active_islands=active_islands),
+            "stage1_reliability": {
+                **_empty_stage1_reliability(),
+                "degraded": True,
+                "degrade_reason": reason,
+            },
+        }
 
 
 def market_context_node(state: dict) -> MarketContextOutput:
