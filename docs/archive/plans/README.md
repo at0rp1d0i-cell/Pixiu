@@ -16,3 +16,9 @@
 - 正在被工程团队频繁引用的运行手册
 
 这些应该留在 `docs/plans/`。
+
+## Recently Archived (2026-03-23)
+
+- `2026-03-22-product-positioning-design.md`
+- `2026-03-19-data-capability-alignment-design.md`
+- `2026-03-19-data-capability-alignment-implementation.md`

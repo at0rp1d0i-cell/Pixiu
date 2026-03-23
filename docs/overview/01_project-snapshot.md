@@ -5,14 +5,15 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-23
 
 ## 1. What Pixiu Is
 
-Pixiu 应当同时用两句话理解：
+Pixiu 应当按三层语言理解：
 
-- 对外：一个专属于 LLM 的金融研究团队
-- 对内：一个面向 A 股市场的 `alpha research OS`
+- 系统本体：一个面向 A 股市场的 `alpha research OS`
+- 对内运行隐喻：一支 `LLM-native` 量化研究团队
+- 对外产品隐喻：一个 A 股 `alpha 私人农场`，前台收机会，后台跑研究
 
 它的目标不是先做投顾外壳，而是先形成一套可持续生成、筛选、执行、淘汰和沉淀 alpha hypotheses 的研究基础设施。
 

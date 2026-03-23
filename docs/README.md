@@ -4,6 +4,19 @@
 
 如果你不知道该先读什么，就从这里开始，不要直接在 `docs/` 里扫文件名。
 
+## Truth Hierarchy
+
+- `L1`: `docs/overview/`（项目真相与默认阅读入口）
+- `L2`: `docs/design/`（当前有效设计）
+- `L3`: `docs/plans/`（当前执行计划与工程债，不承载长期产品真相）
+- `L4`: `docs/futures/` `docs/reference/` `docs/research/`（前瞻与支持材料）
+- `L5`: `docs/archive/`（历史归档）
+
+## Numbering Rule
+
+- 编号只在**同一目录内**表示阅读顺序。
+- 不存在跨目录的全局编号阅读链。
+
 ## Default Reading Path
 
 ### 15 分钟理解项目
@@ -32,27 +45,12 @@
 
 1. `docs/futures/README.md`
 
-## Two-layer Model
-
-Pixiu 的文档系统采用双层结构：
-
-- 上层：人类优先
-  - `docs/README.md`
-  - `docs/overview/`
-- 下层：实现与维护
-  - `docs/design/`
-  - `docs/plans/`
-  - `docs/futures/`
-  - `docs/reference/`
-  - `docs/research/`
-  - `docs/archive/`
-
 ## After the Main Path
 
 - `docs/design/`
   - 当前有效设计，只有在你已经读完 `overview` 后再进入
 - `docs/plans/`
-  - 当前执行计划和工程债
+  - 当前执行计划和工程债（会变化，不作为长期真相）
 - `docs/futures/`
   - 前瞻但非当前运行时的设计
 

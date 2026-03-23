@@ -1,10 +1,12 @@
 # Product Positioning Design
 
-Status: active
+Status: archived
 Owner: coordinator
-Last Reviewed: 2026-03-22
+Last Reviewed: 2026-03-23
 
 Purpose: Define Pixiu's current product positioning, user-facing metaphor, and commercialization direction without changing the system's first-principles architecture.
+
+Archive Note: This draft is preserved for decision history. Current product-language truth has been folded into `docs/overview/01_project-snapshot.md` and `docs/overview/03_architecture-overview.md`.
 
 ---
 

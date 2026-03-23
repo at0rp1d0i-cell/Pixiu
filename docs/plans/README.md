@@ -2,6 +2,8 @@
 
 `docs/plans/` 用来放“会变化的执行文档”，而不是长期架构真相。
 
+本目录不再承载产品定位真相；产品口径以 `docs/overview/` 为准。
+
 ## 适合放在这里的文件
 
 - `current_implementation_plan.md`
@@ -29,7 +31,11 @@
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 
-已被 `refactor-roadmap` / `data-capability-platform-refactor-*` 吸收的旧 data-capability 对齐稿，已从 active 列表移除，当前仅保留历史上下文用途。
+本轮硬收缩已从 active surface 移除并归档：
+
+- `2026-03-22-product-positioning-design.md`
+- `2026-03-19-data-capability-alignment-design.md`
+- `2026-03-19-data-capability-alignment-implementation.md`
 
 ## 已归档
 
@@ -52,6 +58,9 @@
 - `2026-03-19-multi-agent-skills-expansion-design.md`
 - `2026-03-19-skills-expansion-implementation.md`
 - `2026-03-19-tushare-p1-expansion-implementation.md`
+- `2026-03-22-product-positioning-design.md`
+- `2026-03-19-data-capability-alignment-design.md`
+- `2026-03-19-data-capability-alignment-implementation.md`
 
 ## 不适合放在这里的内容
 
@@ -68,3 +77,4 @@
 - 推荐统一收纳在 `docs/plans/`，并使用带语义的文件名。
 - 当计划完成或失效时，应移动到 `docs/archive/plans/` 或删除，而不是长期堆积。
 - `docs/plans/` 中的文档应该少而硬；如果只是背景说明，优先进入 `docs/futures/`、`docs/research/` 或 `docs/reference/`。
+- 编号规则在本目录不适用；本目录按时间语义组织。

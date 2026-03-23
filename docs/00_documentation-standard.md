@@ -5,7 +5,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-23
 
 ## 1. Design Goal
 
@@ -115,6 +115,12 @@ Pixiu 的文档系统采用双层结构：
 ### `futures/`
 
 - 可编号，但只在需要建立阅读顺序时使用
+
+### Numbering Scope Rule
+
+- 编号语义只在**同一目录内**有效。
+- 不允许把不同目录下的编号拼成一条全局阅读链。
+- 跨目录阅读路径必须由目录入口文档（如 `docs/README.md`、各子目录 `README.md`）显式声明。
 
 ## 5. Canonical Metadata Header
 

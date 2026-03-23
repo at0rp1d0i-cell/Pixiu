@@ -5,7 +5,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-18
+Last Reviewed: 2026-03-23
 
 ## 1. First-principles Definition
 
@@ -13,7 +13,13 @@ Pixiu 的第一性定义是：
 
 > 一个面向 A 股市场的 `alpha research OS`，负责持续生成、收缩、执行、淘汰并沉淀 alpha hypotheses。
 
-对外它仍然可以被描述为“专属于 LLM 的金融研究团队”，但在系统边界上，它首先是研究基础设施，而不是投顾壳。
+产品和架构的语言分层如下：
+
+- 系统本体：`alpha research OS`
+- 对内运行隐喻：`LLM-native quant research team`
+- 对外产品隐喻：`A 股 alpha 私人农场（前台收机会，后台跑研究）`
+
+在系统边界上，它首先是研究基础设施，而不是投顾壳。
 
 ## 2. Architecture Direction
 

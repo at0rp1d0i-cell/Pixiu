@@ -24,6 +24,7 @@
 
 ## Rules
 
+- 编号只在 `overview/` 目录内表达阅读顺序，不承诺跨目录顺序。
 - `overview` 只保留高层真相和阅读顺序。
 - 大段实现细节应进入 `docs/design/`。
 - 当前执行计划应进入 `docs/plans/`。
