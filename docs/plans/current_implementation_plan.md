@@ -2,7 +2,7 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-22
+Last Reviewed: 2026-03-23
 
 > 更新时间：2026-03-22
 > 来源：`docs/overview/05_spec-execution-audit.md`、`docs/design/25_stage-45-golden-path.md`
@@ -26,7 +26,9 @@ Last Reviewed: 2026-03-22
 - [x] 约定 `async enrichment` 只影响下一轮，不做同轮 late merge
 - [x] 约定实验模式下 `blocking core timeout` 为红灯，不再静默积累统计
 - [x] 增加显式 reset 工具：`scripts/reset_experiment_state.py`
-- [ ] 将 `doctor` 收口为分层自检：blocking / core optional / enrichment / data plane
+- [x] 将 `doctor` 收口为分层自检：blocking / core optional / enrichment / data plane
+- [x] 建立显式 experiment harness：`doctor(core) -> preflight -> single -> evolve 2 rounds -> optional long run`
+- [ ] 收口 worktree-safe env truth：共享 `runtime.env` + source tracing
 - [ ] 收口 Stage 1 默认工具 allowlist 与数据源边界
 - [ ] 收口 Stage 3 `fail-closed` 数学安全真相到 prompt / tests / runtime
 - [ ] 仅在 Phase 0 完成后，重跑 `single -> evolve 2 rounds -> longer rounds`

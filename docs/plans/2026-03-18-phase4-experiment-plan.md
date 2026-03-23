@@ -2,7 +2,7 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-20
+Last Reviewed: 2026-03-23
 
 > 创建：2026-03-18
 > 阶段：Phase 4A（数据上线）→ Phase 4B（受控实验）→ Phase 4C（MiroFish 接入 Go/No-Go）
@@ -11,7 +11,17 @@ Last Reviewed: 2026-03-20
 
 ## 背景
 
-Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O TypedDicts、当前 smoke/unit 基线 527 passed, 26 deselected）。当前最大缺口是：
+这份文档继续保留在 `docs/plans/`，但口径已经更新为**当前可执行的 Phase 4B 实验手册**，而不是早期“直接上 50 轮”的设想稿。
+
+当前 Phase 4B 的核心现实不是“数据源已经齐全，可以直接长跑”，而是：
+
+- Stage 1 已明确采用 `blocking core + async enrichment`
+- 实验模式下 `blocking core timeout / degraded` 属于红灯
+- Stage 3 数学安全必须按 `fail-closed` 口径执行
+- 实验入口已经收口为显式 harness，而不是手工拼接命令
+- 错误实验会污染 `control_plane_state / experiment_runs / artifacts`，因此 reset discipline 也是实验设计的一部分
+
+当前仍需关注的缺口有：
 
 - `NARRATIVE_MINING` 子空间缺乏新闻/公告数据支撑
 - regime 特征层缺乏融资余额、市场宽度、涨停池等特征量（这些特征将通过 `FACTOR_ALGEBRA` 和 `NARRATIVE_MINING` 的 prompt context 注入，不作为独立子空间追踪）
@@ -26,13 +36,18 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 | RSS MCP（公告/政策/财经新闻）| Stage 1 当前直连；Stage 2 `NARRATIVE_MINING` 目标态直连 | 新增 MCP server；当前由 `MarketAnalyst` 消费并通过 `MarketContextMemo` 间接影响 Stage 2，Researcher 工具化升级后再开放直连 |
 | AKShare 扩展（融资余额、市场宽度、涨停池、行业轮动速度）| `FACTOR_ALGEBRA` / `NARRATIVE_MINING`（通过 prompt context 注入，不作为独立子空间追踪）| 扩展现有 AKShare MCP 工具集 |
 
-**Phase 4B** 是数据上线后、MiroFish 正式集成前的受控实验窗口，目标是建立 baseline、验证新数据的实际价值，并为 Phase 4C 的 Go/No-Go 提供数据依据。
+**Phase 4B** 仍然是数据上线后、MiroFish 正式集成前的受控实验窗口，但当前目标要分成两层：
+
+1. 先恢复实验可信度
+2. 再在可信入口上建立 baseline，并为 Phase 4C 的 Go/No-Go 提供数据依据
 
 ---
 
 ## 1. 实验目标
 
-本次实验需回答两个核心问题：
+本次实验需回答三个核心问题：
+
+**Q0 — 入口可信度**：系统是否能在当前 harness discipline 下稳定完成 `single -> evolve 2 rounds`，且不触发 Stage 1/doctor 红灯？
 
 **Q1 — 假设质量**：新数据是否提升了 Stage 3 通过率和最终 Sharpe 分布？
 
@@ -42,39 +57,54 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 
 ## 2. 实验设计
 
-### 2.1 轮次安排
+### 2.1 执行分期
 
-建议：50 轮完整观测窗口。
+Phase 4B 不再默认从 50 轮起跑，而改为**三级推进**：
 
-需要明确：
+| 分期 | 目标 | 默认入口 | 是否必须 |
+|------|------|---------|---------|
+| Gate 0 | 环境与数据真相自检 | `scripts/doctor.py --mode core` + `scripts/experiment_preflight.py` | 必须 |
+| Gate 1 | 最小可信实验 | `scripts/run_experiment_harness.py`（默认不加 `--long-run`） | 必须 |
+| Gate 2 | 扩展观测窗口 | `scripts/run_experiment_harness.py --long-run` 或显式长轮次 evolve | 仅在 Gate 1 全绿后 |
 
-- 当前运行时会在 `_entrypoints.py` 中把 CLI `--rounds` 同步写入模块级 `MAX_ROUNDS`，因此实验脚本仍应把 `--rounds` 视为主入口参数；若额外设置同名环境变量，必须保持一致
-- `WARM_START_THRESHOLD=30` 表示需要累计约 30 个通过假设后，子空间调度器才真正进入自适应阶段
+当前默认观察窗口应该是：
 
-推荐分期：
+- `single`
+- `evolve 2 rounds`
 
-- 前 10 轮：cold start / transition
-- 第 11-50 轮：主要观测期
-- 如果 Round 10 结束后 `sum(scheduler_state.total_passed.values()) < 30`，则顺延 cold start，直到达到 `WARM_START_THRESHOLD`
+只有这两个阶段连续通过，才允许进入更长的观察窗口。
 
-每轮完成后自动记录快照，不人工干预中间过程。预计每轮耗时 5–15 分钟（取决于 LLM 并发和 Stage 4 回测耗时）。
+### 2.2 长轮次窗口
 
-### 2.2 冷启动分期
+长轮次仍然保留，但不再是默认起手动作。
+
+推荐顺序：
+
+1. `single`
+2. `evolve 2 rounds`
+3. 如稳定，再进入 `10-20` 轮中等窗口
+4. 只有中等窗口稳定，才考虑 `20+` 轮扩展窗口
+
+`WARM_START_THRESHOLD=30` 仍然成立，因此对 Thompson Sampling 的收敛判断不能建立在 2 轮或 10 轮短跑上。短跑阶段回答的是“入口和链路是否可信”，不是“调度器是否已经收敛”。
+
+### 2.3 冷启动分期
 
 由于当前 FactorPool 尚无历史积累，无法建立真正的历史 baseline：
 
 | 分期 | 轮次 | 说明 |
 |------|------|------|
-| Cold start / transition | Round 1–10 | FailureConstraint Filter D 仍偏弱，Thompson Sampling 多数情况下尚未达到 `WARM_START_THRESHOLD=30` |
-| 主要观测期 | Round 11–50 | 若累计通过数已达到阈值，则开始观测调度器的方向性偏好；否则延后进入 |
+| Gate 1 | `single + evolve 2 rounds` | 只验证链路可信，不对调度器做统计结论 |
+| Early observation | 约 10 轮 | 观察 Stage 3 通过率、Stage 4 稳定性和基本写回 |
+| Main observation | `20+` 轮 | 只有在累计通过数接近或超过 `WARM_START_THRESHOLD=30` 时，才开始讨论调度器方向性偏好 |
 
-### 2.3 控制变量
+### 2.4 控制变量
 
 实验期间以下参数**不得修改**：
 
 - `MAX_ROUNDS`、`ACTIVE_ISLANDS`（island 集合不变）
 - Stage 3 所有硬 gate 阈值（`THRESHOLDS` 单例，`src/schemas/thresholds.py`）
 - LLM 模型配置（`RESEARCHER_*` 环境变量）
+- Stage 1 `blocking core + async enrichment` 边界
 - 不合并任何影响 Stage 2 prompt 或 Stage 3 过滤逻辑的代码变更
 
 ---
@@ -119,57 +149,22 @@ Phase 3 已完成全部模块化收口（orchestrator 包拆分、Stage I/O Type
 
 ---
 
-## 4. 需要新增的结构化日志
+## 4. 当前实验工件真相
 
-当前各 Stage 缺乏足够的结构化日志供实验分析。在不修改核心逻辑的前提下，在以下位置添加 `logger.info` 调用：
+当前 Phase 4B 优先依赖**结构化工件**，而不是追加大量临时日志：
 
-**`src/agents/researcher.py`（Stage 2）**
+- `scripts/doctor.py`
+  - 回答 blocking/core optional/enrichment/data-plane 的健康状态
+- `scripts/experiment_preflight.py`
+  - 回答 profile/env/doctor 是否允许进入实验
+- `scripts/run_experiment_harness.py`
+  - 固化 `doctor(core) -> single -> evolve 2 rounds -> optional long run`
+- `data/experiment_runs/{run_id}/round_*.json`
+  - 记录每轮结构化诊断摘要
+- `data/artifacts/`
+  - 保存运行期产物
 
-```python
-# 每个子空间生成完成后
-logger.info(
-    "[Stage 2][%s/%s] 生成假设: %d 个",
-    island_name, subspace_name, count
-)
-```
-
-**`src/agents/prefilter.py`（Stage 3）**
-
-```python
-# 过滤链执行完成后
-logger.info(
-    "[Stage 3][%s] 通过: %d / 总计: %d (通过率: %.1f%%)",
-    island_name, passed, total, passed / total * 100 if total else 0
-)
-```
-
-**`src/core/orchestrator/nodes/stage5.py`（Stage 5）**
-
-```python
-# CriticVerdict 批量写入后
-logger.info(
-    "[Stage 5][%s] Critic 通过: %d / %d, 平均 Sharpe: %.2f",
-    island_name, passed, total, avg_sharpe
-)
-```
-
-**`src/core/orchestrator/nodes/`（loop_control 节点）**
-
-```python
-# 每轮结束，loop_control 节点触发前
-logger.info(
-    "[Loop Control] Round %d 完成: subspace_generated=%s, filtered=%d, "
-    "approved=%d, verdicts_passed=%d",
-    current_round, subspace_generated, filtered_count,
-    len(approved_notes), verdicts_passed
-)
-```
-
-日志过滤规则（监控时使用）：
-
-```bash
-grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]" logs/phase4b_experiment.log
-```
+日志仍然有价值，但当前优先级低于 round JSON、preflight 输出和 harness 摘要。
 
 ---
 
@@ -179,6 +174,8 @@ grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]" logs/phase4b_expe
 
 | 条件 | 阈值 | 可能原因 |
 |------|------|---------|
+| `doctor(core)` blocking fail | 任意一次 | 数据/环境/API 真相不成立，不应启动实验 |
+| Stage 1 blocking core timeout / degraded | 任意一次 | 当前轮市场上下文不可用，实验统计会被污染 |
 | Stage 3 通过率连续为 0 | 连续 3 轮 | 数据源断连、LLM 输出格式异常、Stage 2 prompt 退化 |
 | FactorPool 无新增有效因子 | 连续 5 轮 | Stage 4 执行错误、Critic 评分系统性偏低 |
 | 未捕获异常率过高 | 任意阶段 > 50% | 新 MCP 工具兼容性问题、schema 不对齐 |
@@ -190,12 +187,17 @@ grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]" logs/phase4b_expe
 
 ## 6. 实验后决策框架
 
-实验 50 轮完成后，基于采集数据做出以下决策：
+实验决策不再只在“50 轮完成后”做，而是分层决策：
+
+- Gate 1 之后：判断入口是否可信
+- 中等窗口后：判断是否值得进入扩展窗口
+- 扩展窗口后：判断 MiroFish Go/No-Go
 
 注意：`WARM_START_THRESHOLD=30`，Thompson Sampling 在积累约 30 个通过假设前处于近似均匀探索阶段。50 轮实验中不应默认“第 10 轮后自动收敛”，因此判断应基于实际达到阈值后的观测窗口。
 
 | 决策问题 | 判断标准 | 结论为是 → | 结论为否 → |
 |---------|---------|-----------|-----------|
+| 入口已经可信了吗？ | `doctor(core)` 通过，`single -> evolve 2 rounds` 无红灯，且 round 工件可追溯 | 进入中等窗口 | 继续修 Stage 1 / Stage 3 / env truth / doctor，不上长轮次 |
 | 新数据有实质价值吗？ | `NARRATIVE_MINING` 子空间或注入新 AKShare regime 数据的 `FACTOR_ALGEBRA` 子空间的 Stage 3 通过率 > 其余子空间均值 | 继续扩展对应数据源 | 先诊断子空间 prompt，可能是信号到假设的转化链问题 |
 | Thompson Sampling 开始显著偏向吗？ | 某子空间 Thompson Sampling 权重 > 0.4，且该状态出现在达到 `WARM_START_THRESHOLD` 之后 | 说明有明显优势子空间，可重点投入该方向 | 继续均匀探索或降低阈值后重测 |
 | NARRATIVE_MINING 值得接入 MiroFish 吗？ | `NARRATIVE_MINING` 子空间通过率 > 25% 且通过假设平均 Sharpe 均值 > 3.0（高于系统硬 gate 2.67，表明新数据产出质量更优假设）| 进入 Phase 4C：接入 MiroFish NarrativePrediction schema | 先优化 NARRATIVE_MINING 子空间 prompt，延迟 MiroFish 接入 |
@@ -224,10 +226,6 @@ grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]" logs/phase4b_expe
 }
 ```
 
-### 日志 tag 修正
-注意：现有代码使用 `[Loop Control]`（含空格），不是 `[LoopCtrl]`。
-grep 命令应使用：`grep -E "\[Stage 3\]|\[Stage 5\]|\[Loop Control\]"`
-
 ### 实验前基线快照
 在第 1 轮开始前，记录初始 FactorPool 状态（因子数、子空间分布）作为基线。
 
@@ -236,41 +234,35 @@ grep 命令应使用：`grep -E "\[Stage 3\]|\[Stage 5\]|\[Loop Control\]"`
 ## 7. 实验执行 SOP
 
 ```bash
-# Step 1：确认环境和测试全部通过
+# Step 0：必要时先看 reset 计划
+uv run python scripts/reset_experiment_state.py --dry-run
+
+# Step 1：如需清理失败运行痕迹，再执行 reset
+# 注意：默认不删除 data/factor_pool_db/
+uv run python scripts/reset_experiment_state.py
+
+# Step 2：确认默认测试入口通过
 uv run pytest -q tests -m "smoke or unit"
-# 预期：511 passed, 26 deselected
 
-# Step 2：确认 Phase 4A 前置项已验收
-# - RSS 源验证脚本通过
-# - RSS server / Stage 1 消费测试通过
-# - AKShare 扩展工具测试通过
+# Step 3：先跑 doctor(core)
+uv run python scripts/doctor.py --mode core
 
-# Step 3：建立日志目录
-mkdir -p logs
+# Step 4：跑 preflight，确认 profile/env/doctor 真相
+uv run python scripts/experiment_preflight.py --json
 
-# Step 4：后台启动实验
-# 注意：关闭人工审批门
-# 实验期间设置环境变量 REPORT_EVERY_N_ROUNDS=999（大于总轮次），避免触发 CIOReport 生成和人工审批中断
-# `--rounds` 是当前主入口；如同时设置 MAX_ROUNDS，应与之保持一致
-MAX_ROUNDS=50 REPORT_EVERY_N_ROUNDS=999 uv run pixiu run --mode evolve --rounds 50 \
-  > logs/phase4b_experiment.log 2>&1 &
+# Step 5：跑最小可信实验
+uv run python scripts/run_experiment_harness.py --json
 
-# Step 5：实时监控关键 Stage 日志
-tail -f logs/phase4b_experiment.log | grep -E "\[Stage 2\]|\[Stage 3\]|\[Stage 5\]|\[Loop Control\]"
-
-# Step 6：实验结束后查看 FactorPool
-uv run pixiu factors --top 20
-
-# Step 7：手动统计 subspace_origin 分布
-# 在 Python REPL 中：
-pool = get_factor_pool()
-# 前提：Stage 5 已把 note 传入 pool.register_factor(..., note=note)
-factors = pool.get_passed_factors()  # 返回 list[dict]
-from collections import Counter
-subspace_dist = Counter((f.get("subspace_origin") or "unknown") for f in factors)
-print(f"通过因子总数: {len(factors)}")
-print(f"子空间分布: {dict(subspace_dist)}")
+# Step 6：只有 Step 5 全绿，才允许长轮次
+uv run python scripts/run_experiment_harness.py --long-run --json
 ```
+
+执行约束：
+
+- 任何一步出现 blocking fail，都停止，不直接上长轮次
+- `reset` 是按需动作，不是每次实验默认前置
+- `factor_pool_db` 默认保留，因为通过因子是知识资产
+- 长轮次只在 `single + evolve 2 rounds` 已可信时启动
 
 ---
 
@@ -278,11 +270,12 @@ print(f"子空间分布: {dict(subspace_dist)}")
 
 | 产出物 | 说明 | 用途 |
 |--------|------|------|
-| 50 轮完整日志 | `logs/phase4b_experiment.log` | 事后分析原始数据 |
-| FactorPool 快照 | ChromaDB 持久化（`data/factor_pool_db/`）| 每个因子含 `subspace_origin` 可追溯 |
-| Thompson Sampling 权重历史 | 从 `AgentState.scheduler_state` 每轮提取 | 可视化子空间竞争演化过程 |
-| island × subspace Stage 3 通过率矩阵 | 从日志聚合 | 发现当前 regime 下的有效信号组合 |
-| MiroFish 接入 Go/No-Go 备忘录 | 基于第 6 节决策框架填写 | Phase 4C 启动依据 |
+| preflight JSON | `scripts/experiment_preflight.py --json` 输出 | 判断当前 profile/env/doctor 是否可信 |
+| harness JSON | `scripts/run_experiment_harness.py --json` 输出 | 判断最小实验是否真正通过 |
+| round snapshots | `data/experiment_runs/{run_id}/round_*.json` | 结构化分析各轮 Stage 结果 |
+| FactorPool 快照 | `data/factor_pool_db/` | 保留通过因子与知识资产 |
+| 中等/长窗口统计摘要 | 基于 round JSON 聚合 | 判断是否值得继续扩展窗口 |
+| MiroFish Go/No-Go 备忘录 | 基于第 6 节决策框架填写 | Phase 4C 启动依据 |
 
 ---
 
@@ -294,7 +287,9 @@ Phase 4A（当前）
   └── 扩展 AKShare MCP 工具集（融资余额/宽度/涨停池/轮动速度）
 
 Phase 4B（本计划）
-  └── 50 轮受控实验，建立 baseline，验证新数据价值
+  ├── Gate 0：doctor/preflight/harness 入口可信化
+  ├── Gate 1：single + evolve 2 rounds
+  └── Gate 2：中等/长窗口观测，建立 baseline，验证新数据价值
 
 Phase 4C（Go/No-Go 后）
   ├── MiroFish NarrativePrediction schema + MiroFishAdapter
