@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 from unittest.mock import patch
 
 import pytest
@@ -70,6 +71,7 @@ def test_usage_callback_records_run_scoped_usage(monkeypatch):
     monkeypatch.setattr(usage_ledger, "_resolve_run_id", lambda run_id=None: "run-usage-test")
 
     callback = usage_ledger.get_usage_ledger_callback()
+    callback_run_id = uuid4()
     result = _make_llm_result(
         llm_output={
             "model_name": "gpt-test",
@@ -81,11 +83,26 @@ def test_usage_callback_records_run_scoped_usage(monkeypatch):
         }
     )
 
+    callback.on_llm_start(
+        serialized={"id": ["langchain", "chat_models", "openai.ChatOpenAI"]},
+        prompts=["hello"],
+        run_id=callback_run_id,
+        parent_run_id=None,
+        tags=["stage:hypothesis_gen"],
+        metadata={
+            "stage": "hypothesis_gen",
+            "round": 2,
+            "agent_role": "alpha_researcher",
+            "llm_profile": "researcher",
+            "provider": "openai_compatible",
+            "model": "gpt-test",
+        },
+    )
     callback.on_llm_end(
         response=result,
-        run_id="ignored-by-ledger",
+        run_id=callback_run_id,
         parent_run_id=None,
-        tags=None,
+        tags=["stage:hypothesis_gen"],
     )
 
     snapshot = usage_ledger.get_run_usage_snapshot(run_id="run-usage-test")
@@ -95,6 +112,69 @@ def test_usage_callback_records_run_scoped_usage(monkeypatch):
     assert snapshot["total_tokens"] == 1500
     assert snapshot["estimated_cost_usd"] == pytest.approx(0.02)
     assert snapshot["by_model"]["gpt-test"]["total_tokens"] == 1500
+    assert len(snapshot["call_events"]) == 1
+
+    event = snapshot["call_events"][0]
+    assert event["call_id"] == str(callback_run_id)
+    assert event["run_id"] == "run-usage-test"
+    assert event["stage"] == "hypothesis_gen"
+    assert event["round"] == 2
+    assert event["agent_role"] == "alpha_researcher"
+    assert event["llm_profile"] == "researcher"
+    assert event["provider"] == "openai_compatible"
+    assert event["model"] == "gpt-test"
+    assert event["total_tokens"] == 1500
+    assert event["success"] is True
+    assert event["error_class"] is None
+
+    usage_ledger.reset_usage_ledger()
+
+
+def test_usage_callback_records_error_call_event(monkeypatch):
+    usage_ledger.reset_usage_ledger()
+    monkeypatch.setattr(usage_ledger, "_resolve_run_id", lambda run_id=None: "run-error-test")
+
+    callback = usage_ledger.get_usage_ledger_callback()
+    callback_run_id = uuid4()
+
+    callback.on_llm_start(
+        serialized={"id": ["langchain", "chat_models", "openai.ChatOpenAI"]},
+        prompts=["hello"],
+        run_id=callback_run_id,
+        parent_run_id=None,
+        tags=["stage:market_context"],
+        metadata={
+            "stage": "market_context",
+            "round": 0,
+            "agent_role": "market_analyst",
+            "llm_profile": "market_analyst",
+            "provider": "openai_compatible",
+            "model": "gpt-test",
+        },
+    )
+    callback.on_llm_error(
+        RuntimeError("upstream timeout"),
+        run_id=callback_run_id,
+        parent_run_id=None,
+        tags=["stage:market_context"],
+    )
+
+    snapshot = usage_ledger.get_run_usage_snapshot(run_id="run-error-test")
+    assert snapshot["calls"] == 1
+    assert snapshot["total_tokens"] == 0
+    assert len(snapshot["call_events"]) == 1
+
+    event = snapshot["call_events"][0]
+    assert event["run_id"] == "run-error-test"
+    assert event["stage"] == "market_context"
+    assert event["round"] == 0
+    assert event["agent_role"] == "market_analyst"
+    assert event["llm_profile"] == "market_analyst"
+    assert event["provider"] == "openai_compatible"
+    assert event["model"] == "gpt-test"
+    assert event["success"] is False
+    assert event["error_class"] == "RuntimeError"
+    assert event["error_message"] == "upstream timeout"
 
     usage_ledger.reset_usage_ledger()
 
@@ -112,6 +192,7 @@ def test_experiment_logger_emits_round_and_cumulative_llm_usage(tmp_path):
             "total_tokens": 250,
             "estimated_cost_usd": 0.003,
             "by_model": {},
+            "call_events": [],
         },
         {
             "run_id": "run-123",
@@ -121,6 +202,7 @@ def test_experiment_logger_emits_round_and_cumulative_llm_usage(tmp_path):
             "total_tokens": 800,
             "estimated_cost_usd": 0.009,
             "by_model": {},
+            "call_events": [],
         },
     ]
 

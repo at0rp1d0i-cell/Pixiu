@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import threading
+import time
+from datetime import UTC, datetime
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from langchain_core.outputs import LLMResult
 _DEFAULT_RUN_ID = "default"
 _LOCK = threading.Lock()
 _RUN_LEDGER: dict[str, dict[str, Any]] = {}
+_CALL_CONTEXTS: dict[str, dict[str, Any]] = {}
 
 
 def _safe_int(value: Any) -> int:
@@ -66,6 +69,7 @@ def _empty_snapshot(run_id: str) -> dict[str, Any]:
         "total_tokens": 0,
         "estimated_cost_usd": 0.0,
         "by_model": {},
+        "call_events": [],
     }
 
 
@@ -191,6 +195,80 @@ def _estimate_cost_usd(prompt_tokens: int, completion_tokens: int) -> float:
     )
 
 
+def _to_optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _to_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _extract_tag_value(tags: list[str] | None, prefix: str) -> str | None:
+    if not tags:
+        return None
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        if tag.startswith(prefix):
+            value = tag[len(prefix):].strip()
+            if value:
+                return value
+    return None
+
+
+def _now_iso_utc() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _build_call_event(
+    *,
+    run_id: str,
+    callback_run_id: str | None,
+    model_name: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    success: bool,
+    error: BaseException | None,
+    latency_ms: float | None,
+    tags: list[str] | None,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = metadata or {}
+    stage = _to_optional_str(metadata.get("stage")) or _extract_tag_value(tags, "stage:")
+    llm_profile = _to_optional_str(metadata.get("llm_profile")) or _extract_tag_value(tags, "profile:")
+    provider = _to_optional_str(metadata.get("provider")) or "openai_compatible"
+    agent_role = _to_optional_str(metadata.get("agent_role"))
+
+    return {
+        "call_id": callback_run_id or f"call-{int(time.time() * 1000)}",
+        "run_id": run_id,
+        "stage": stage,
+        "round": _to_optional_int(metadata.get("round")),
+        "agent_role": agent_role,
+        "llm_profile": llm_profile,
+        "provider": provider,
+        "model": _to_optional_str(model_name) or _to_optional_str(metadata.get("model")),
+        "prompt_tokens": _safe_int(prompt_tokens),
+        "completion_tokens": _safe_int(completion_tokens),
+        "total_tokens": _safe_int(total_tokens),
+        "latency_ms": round(max(0.0, latency_ms), 3) if latency_ms is not None else None,
+        "success": bool(success),
+        "error_class": type(error).__name__ if error is not None else None,
+        "error_message": str(error) if error is not None else None,
+        "timestamp": _now_iso_utc(),
+    }
+
+
 def record_usage(
     *,
     prompt_tokens: int,
@@ -199,6 +277,7 @@ def record_usage(
     model_name: str | None = None,
     calls: int = 1,
     run_id: str | None = None,
+    call_event: Mapping[str, Any] | None = None,
 ) -> None:
     resolved_run_id = _resolve_run_id(run_id)
     prompt_tokens = _safe_int(prompt_tokens)
@@ -220,6 +299,8 @@ def record_usage(
             _safe_float(aggregate["estimated_cost_usd"]) + incremental_cost,
             8,
         )
+        if call_event is not None:
+            aggregate.setdefault("call_events", []).append(dict(call_event))
 
         if model_name:
             by_model = aggregate["by_model"]
@@ -256,6 +337,7 @@ def reset_usage_ledger(run_id: str | None = None) -> None:
     with _LOCK:
         if run_id is None:
             _RUN_LEDGER.clear()
+            _CALL_CONTEXTS.clear()
         else:
             _RUN_LEDGER.pop(run_id, None)
 
@@ -263,6 +345,29 @@ def reset_usage_ledger(run_id: str | None = None) -> None:
 @dataclass(slots=True)
 class UsageLedgerCallback(BaseCallbackHandler):
     """LangChain callback handler that records usage metadata per run."""
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any],
+        prompts: list[str],
+        *,
+        run_id: Any,
+        parent_run_id: Any = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        del prompts, parent_run_id, kwargs
+        callback_run_id = _to_optional_str(run_id)
+        if callback_run_id is None:
+            return
+        with _LOCK:
+            _CALL_CONTEXTS[callback_run_id] = {
+                "started_at": time.perf_counter(),
+                "tags": list(tags or []),
+                "metadata": dict(metadata or {}),
+                "serialized": dict(serialized or {}),
+            }
 
     def on_llm_end(
         self,
@@ -273,14 +378,94 @@ class UsageLedgerCallback(BaseCallbackHandler):
         tags: list[str] | None = None,
         **kwargs: Any,
     ) -> Any:
-        del run_id, parent_run_id, tags, kwargs
+        del parent_run_id, kwargs
+        callback_run_id = _to_optional_str(run_id)
+        with _LOCK:
+            context = _CALL_CONTEXTS.pop(callback_run_id, None) if callback_run_id else None
+
+        context_tags = list(tags or [])
+        context_metadata = {}
+        latency_ms: float | None = None
+        if context:
+            context_tags = list(context.get("tags") or context_tags)
+            context_metadata = dict(context.get("metadata") or {})
+            started_at = context.get("started_at")
+            if isinstance(started_at, (int, float)):
+                latency_ms = (time.perf_counter() - float(started_at)) * 1000.0
+
         usage = extract_usage_from_llm_result(response)
+        resolved_run_id = _resolve_run_id()
+        call_event = _build_call_event(
+            run_id=resolved_run_id,
+            callback_run_id=callback_run_id,
+            model_name=usage["model_name"],
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+            success=True,
+            error=None,
+            latency_ms=latency_ms,
+            tags=context_tags,
+            metadata=context_metadata,
+        )
         record_usage(
             prompt_tokens=usage["prompt_tokens"],
             completion_tokens=usage["completion_tokens"],
             total_tokens=usage["total_tokens"],
             model_name=usage["model_name"],
             calls=1,
+            run_id=resolved_run_id,
+            call_event=call_event,
+        )
+
+    def on_llm_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: Any,
+        parent_run_id: Any = None,
+        tags: list[str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        del parent_run_id, kwargs
+        callback_run_id = _to_optional_str(run_id)
+        with _LOCK:
+            context = _CALL_CONTEXTS.pop(callback_run_id, None) if callback_run_id else None
+
+        context_tags = list(tags or [])
+        context_metadata = {}
+        latency_ms: float | None = None
+        model_name: str | None = None
+        if context:
+            context_tags = list(context.get("tags") or context_tags)
+            context_metadata = dict(context.get("metadata") or {})
+            model_name = _to_optional_str(context_metadata.get("model"))
+            started_at = context.get("started_at")
+            if isinstance(started_at, (int, float)):
+                latency_ms = (time.perf_counter() - float(started_at)) * 1000.0
+
+        resolved_run_id = _resolve_run_id()
+        call_event = _build_call_event(
+            run_id=resolved_run_id,
+            callback_run_id=callback_run_id,
+            model_name=model_name,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            success=False,
+            error=error,
+            latency_ms=latency_ms,
+            tags=context_tags,
+            metadata=context_metadata,
+        )
+        record_usage(
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            model_name=model_name,
+            calls=1,
+            run_id=resolved_run_id,
+            call_event=call_event,
         )
 
 
@@ -289,4 +474,3 @@ _LEDGER_CALLBACK = UsageLedgerCallback()
 
 def get_usage_ledger_callback() -> UsageLedgerCallback:
     return _LEDGER_CALLBACK
-

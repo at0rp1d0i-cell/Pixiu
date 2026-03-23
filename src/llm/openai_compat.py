@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -9,6 +10,22 @@ from langchain_openai import ChatOpenAI
 from src.core.env import load_dotenv_if_available
 from .settings import get_llm_profile_settings
 from .usage_ledger import UsageLedgerCallback, get_usage_ledger_callback
+
+
+def _ensure_runtime_metadata(kwargs: dict[str, Any], *, profile: str | None) -> None:
+    existing_metadata = kwargs.get("metadata")
+    metadata: dict[str, Any] = {}
+    if isinstance(existing_metadata, Mapping):
+        metadata = dict(existing_metadata)
+
+    if profile and "llm_profile" not in metadata:
+        metadata["llm_profile"] = profile
+    if "provider" not in metadata:
+        metadata["provider"] = "openai_compatible"
+    if "model" not in metadata and kwargs.get("model"):
+        metadata["model"] = kwargs["model"]
+
+    kwargs["metadata"] = metadata
 
 
 def _ensure_usage_callback(kwargs: dict[str, Any]) -> None:
@@ -71,6 +88,7 @@ def get_researcher_llm_kwargs(
         if value is not None:
             kwargs[key] = value
 
+    _ensure_runtime_metadata(kwargs, profile=profile)
     _ensure_usage_callback(kwargs)
     return kwargs
 
