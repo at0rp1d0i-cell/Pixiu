@@ -920,18 +920,18 @@ async def _hypothesis_gen_async(state: dict) -> dict:
                 factor_gene_diagnostics = {}
             for note in batch.notes:
                 source_note_id = note.note_id
-                final_note_id = _make_unique_note_id(
-                    source_note_id,
-                    used_note_ids=stage2_emitted_note_ids,
-                    fallback_prefix=f"{note.island}_{_today_str()}",
-                )
-                if final_note_id != source_note_id:
-                    note.note_id = final_note_id
-                stage2_emitted_note_ids.add(final_note_id)
-                all_notes.append(note)
                 factor_gene_payload = factor_gene_diagnostics.get(source_note_id)
                 if isinstance(factor_gene_payload, dict):
+                    final_note_id = _make_unique_note_id(
+                        source_note_id,
+                        used_note_ids=stage2_emitted_note_ids,
+                        fallback_prefix=f"{note.island}_{_today_str()}",
+                    )
+                    if final_note_id != source_note_id:
+                        note.note_id = final_note_id
+                    stage2_emitted_note_ids.add(final_note_id)
                     stage2_factor_gene_by_note_id[final_note_id] = factor_gene_payload
+                all_notes.append(note)
             subspace_results[subspace][0] += len(batch.notes)  # generated
 
     logger.info(

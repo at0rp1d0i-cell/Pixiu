@@ -1458,6 +1458,59 @@ def test_hypothesis_gen_node_dedupes_cross_researcher_note_ids_for_factor_gene_d
     }
 
 
+def test_hypothesis_gen_node_non_factor_algebra_note_ids_remain_unchanged_under_collision():
+    from src.agents.researcher import hypothesis_gen_node
+
+    assignments = [
+        ("momentum", ExplorationSubspace.CROSS_MARKET),
+        ("volatility", ExplorationSubspace.CROSS_MARKET),
+    ]
+
+    with patch("src.agents.researcher._build_island_subspace_assignments", return_value=assignments):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                instance = MagicMock()
+                note = FactorResearchNote(
+                    note_id="dup_non_factor",
+                    island=island,
+                    iteration=1,
+                    hypothesis="test",
+                    economic_intuition="test",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-24",
+                    exploration_subspace=ExplorationSubspace.CROSS_MARKET,
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                instance.last_generation_diagnostics = {
+                    "generated_count": 1,
+                    "delivered_count": 1,
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": {},
+                    "sample_rejections": [],
+                }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {
+                    "active_islands": ["momentum", "volatility"],
+                    "market_context": None,
+                    "iteration": 1,
+                }
+            )
+
+    emitted_note_ids = [note.note_id for note in result["research_notes"]]
+    assert emitted_note_ids == ["dup_non_factor", "dup_non_factor"]
+    assert "factor_gene_by_note_id" not in result["stage2_diagnostics"]
+
+
 def test_alpha_researcher_symbolic_path_runs_local_prescreen():
     from src.agents.researcher import AlphaResearcher
 
