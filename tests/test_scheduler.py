@@ -399,6 +399,19 @@ def test_allocate_honors_target_subspaces_env(monkeypatch: pytest.MonkeyPatch, s
     assert sum(alloc.quota for alloc in allocations) == subspace_scheduler.TOTAL_QUOTA
 
 
+def test_allocate_honors_stage2_total_quota_override(
+    monkeypatch: pytest.MonkeyPatch,
+    subspace_scheduler: SubspaceScheduler,
+):
+    monkeypatch.setenv("PIXIU_TARGET_SUBSPACES", "factor_algebra")
+    monkeypatch.setenv("PIXIU_STAGE2_TOTAL_QUOTA", "2")
+
+    allocations = subspace_scheduler.allocate(SchedulerState())
+
+    assert [alloc.subspace for alloc in allocations] == [ExplorationSubspace.FACTOR_ALGEBRA]
+    assert [alloc.quota for alloc in allocations] == [2]
+
+
 # ─────────────────────────────────────────────────────────
 # From test_scheduler_pool_integration.py
 # ─────────────────────────────────────────────────────────

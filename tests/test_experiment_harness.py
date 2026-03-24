@@ -46,6 +46,7 @@ class _FakeProfile:
     stage1_enrichment_enabled: bool = False
     run_single: bool = True
     run_preflight_evolve: bool = True
+    stage2_total_quota_override: int | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
         observed["ACTIVE_ISLANDS"] = os.environ.get("ACTIVE_ISLANDS", "")
         observed["PIXIU_TARGET_SUBSPACES"] = os.environ.get("PIXIU_TARGET_SUBSPACES", "")
         observed["PIXIU_STAGE1_CONTEXT_MODE"] = os.environ.get("PIXIU_STAGE1_CONTEXT_MODE", "")
+        observed["PIXIU_STAGE2_TOTAL_QUOTA"] = os.environ.get("PIXIU_STAGE2_TOTAL_QUOTA", "")
         observed["PIXIU_EXPERIMENT_PROFILE_KIND"] = os.environ.get("PIXIU_EXPERIMENT_PROFILE_KIND", "")
         observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] = os.environ.get("PIXIU_EXPERIMENT_PERSISTENCE_MODE", "")
         observed["PIXIU_STATE_STORE_PATH"] = os.environ.get("PIXIU_STATE_STORE_PATH", "")
@@ -241,6 +243,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
             persistence_mode="artifact_only",
             namespace="fast_feedback",
             stage1_enrichment_enabled=False,
+            stage2_total_quota_override=2,
             run_preflight_evolve=False,
         ),
         profile_path="dummy.json",
@@ -263,6 +266,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["ACTIVE_ISLANDS"] == "momentum"
     assert observed["PIXIU_TARGET_SUBSPACES"] == "factor_algebra"
     assert observed["PIXIU_STAGE1_CONTEXT_MODE"] == "frozen"
+    assert observed["PIXIU_STAGE2_TOTAL_QUOTA"] == "2"
     assert observed["PIXIU_EXPERIMENT_PROFILE_KIND"] == "fast_feedback"
     assert observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] == "artifact_only"
     assert "runtime_namespaces/fast_feedback" in observed["PIXIU_STATE_STORE_PATH"]
@@ -280,6 +284,7 @@ async def test_harness_restores_runtime_env_after_return(monkeypatch: pytest.Mon
     qlib_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ACTIVE_ISLANDS", "momentum,northbound")
     monkeypatch.setenv("PIXIU_TARGET_SUBSPACES", "cross_market")
+    monkeypatch.setenv("PIXIU_STAGE2_TOTAL_QUOTA", "9")
     monkeypatch.setenv("PIXIU_EXPERIMENT_RUNS_DIR", str(tmp_path / "runs_before"))
 
     def fake_resolve_profile_env_truth(profile, **kwargs):
@@ -318,6 +323,7 @@ async def test_harness_restores_runtime_env_after_return(monkeypatch: pytest.Mon
             persistence_mode="artifact_only",
             namespace="fast_feedback",
             stage1_enrichment_enabled=False,
+            stage2_total_quota_override=2,
             run_preflight_evolve=False,
         ),
         profile_path="dummy.json",
@@ -335,6 +341,7 @@ async def test_harness_restores_runtime_env_after_return(monkeypatch: pytest.Mon
     assert result.ok
     assert os.environ["ACTIVE_ISLANDS"] == "momentum,northbound"
     assert os.environ["PIXIU_TARGET_SUBSPACES"] == "cross_market"
+    assert os.environ["PIXIU_STAGE2_TOTAL_QUOTA"] == "9"
     assert os.environ["PIXIU_EXPERIMENT_RUNS_DIR"] == str(tmp_path / "runs_before")
     assert orchestrator_config.ACTIVE_ISLANDS == original_active
     assert orchestrator_config.REPORT_EVERY_N_ROUNDS == original_report_every

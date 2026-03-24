@@ -81,7 +81,7 @@ class SubspaceScheduler:
                 if subspace in enabled_subspaces
             }
 
-        quotas = self._distribute_quota(weights)
+        quotas = self._distribute_quota(weights, total_quota=self._resolve_total_quota())
 
         allocations = [
             SubspaceAllocation(
@@ -116,6 +116,17 @@ class SubspaceScheduler:
                 seen.add(subspace)
                 resolved.append(subspace)
         return resolved or None
+
+    @classmethod
+    def _resolve_total_quota(cls) -> int:
+        raw = os.getenv("PIXIU_STAGE2_TOTAL_QUOTA", "").strip()
+        if not raw:
+            return cls.TOTAL_QUOTA
+        try:
+            value = int(raw)
+        except ValueError:
+            return cls.TOTAL_QUOTA
+        return value if value > 0 else cls.TOTAL_QUOTA
 
     def update_state(
         self,
@@ -207,16 +218,21 @@ class SubspaceScheduler:
         return {s: w / total for s, w in raw_weights.items()}
 
     def _distribute_quota(
-        self, weights: Dict[ExplorationSubspace, float]
+        self,
+        weights: Dict[ExplorationSubspace, float],
+        *,
+        total_quota: int,
     ) -> Dict[ExplorationSubspace, int]:
         """
         分配配额：先给每个子空间 MIN_QUOTA，剩余按权重比例分配。
-        确保总和恒等于 TOTAL_QUOTA。
+        确保总和恒等于 total_quota。
         """
         quotas: Dict[ExplorationSubspace, int] = {}
         enabled_subspaces = list(weights.keys()) or list(ExplorationSubspace)
         min_total = sum(self.MIN_QUOTA[subspace] for subspace in enabled_subspaces)
-        remaining = self.TOTAL_QUOTA - min_total
+        if total_quota < min_total:
+            total_quota = min_total
+        remaining = total_quota - min_total
 
         # 先分配最低配额
         for subspace in enabled_subspaces:

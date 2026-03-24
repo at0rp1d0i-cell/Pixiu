@@ -46,6 +46,7 @@ def test_load_profile_parses_minimal_schema(tmp_path: Path):
                 "stage1_enrichment_enabled": False,
                 "run_single": True,
                 "run_preflight_evolve": True,
+                "stage2_total_quota_override": 3,
             }
         ),
         encoding="utf-8",
@@ -60,6 +61,7 @@ def test_load_profile_parses_minimal_schema(tmp_path: Path):
     assert profile.persistence_mode == "full"
     assert profile.stage1_enrichment_enabled is False
     assert profile.preflight_evolve_rounds == 2
+    assert profile.stage2_total_quota_override == 3
 
 
 def test_load_profile_missing_key_raises(tmp_path: Path):
@@ -199,6 +201,7 @@ def test_preflight_print_text_includes_runtime_truth_and_next_steps(capsys: pyte
             "target_islands": ["momentum"],
             "target_subspaces": ["factor_algebra"],
             "planned_phases": ["doctor", "single"],
+            "stage2_total_quota_override": 2,
             "write_scope": "artifact_only_scratch",
             "formal_writes_allowed": False,
             "state_store_path": "/tmp/state.sqlite",
@@ -210,6 +213,7 @@ def test_preflight_print_text_includes_runtime_truth_and_next_steps(capsys: pyte
     captured = capsys.readouterr().out
 
     assert "[Preflight] planned_phases: doctor, single" in captured
+    assert "[Preflight] stage2_total_quota_override: 2" in captured
     assert "[Preflight] formal_writes_allowed: False" in captured
     assert "[Preflight] market_context_path: /tmp/context.json" in captured
     assert "[Preflight] blocking_issues:" in captured
@@ -494,4 +498,42 @@ def test_load_profile_rejects_fast_feedback_full_persistence(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="fast_feedback profile cannot use persistence_mode=full"):
+        module.load_profile(profile_path)
+
+
+def test_load_profile_rejects_stage2_quota_below_subspace_minimum(tmp_path: Path):
+    module = _load_preflight_module()
+    profile_path = tmp_path / "invalid_fast_feedback_quota.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "doctor_mode": "fast_feedback",
+                "single_island": "momentum",
+                "preflight_evolve_rounds": 1,
+                "long_run_rounds": 5,
+                "require_reset_clean": False,
+                "qlib_data_dir": "data/qlib_bin",
+                "report_every_n_rounds": 1,
+                "max_rounds_env_override_allowed": False,
+                "human_gate_auto_action": "approve",
+                "profile_kind": "fast_feedback",
+                "target_islands": ["momentum"],
+                "target_subspaces": ["factor_algebra"],
+                "market_context_mode": "frozen",
+                "market_context_path": "config/experiments/context/fast_feedback_momentum.json",
+                "persistence_mode": "artifact_only",
+                "namespace": "fast_feedback",
+                "stage1_enrichment_enabled": False,
+                "run_single": True,
+                "run_preflight_evolve": False,
+                "stage2_total_quota_override": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="stage2_total_quota_override must be >= minimum quota required by target_subspaces",
+    ):
         module.load_profile(profile_path)

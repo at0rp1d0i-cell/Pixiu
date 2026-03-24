@@ -54,6 +54,7 @@ class ExperimentProfile:
     stage1_enrichment_enabled: bool = True
     run_single: bool = True
     run_preflight_evolve: bool = True
+    stage2_total_quota_override: int | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,11 @@ def load_profile(profile_path: str | Path = DEFAULT_PROFILE_PATH) -> ExperimentP
         stage1_enrichment_enabled=bool(payload.get("stage1_enrichment_enabled", True)),
         run_single=bool(payload.get("run_single", True)),
         run_preflight_evolve=bool(payload.get("run_preflight_evolve", True)),
+        stage2_total_quota_override=(
+            int(payload["stage2_total_quota_override"])
+            if payload.get("stage2_total_quota_override") is not None
+            else None
+        ),
     )
     _validate_profile(profile)
     return profile
@@ -188,6 +194,20 @@ def _validate_profile(profile: ExperimentProfile) -> None:
         raise ValueError("single_island must be included in target_islands")
     if not profile.run_single and not profile.run_preflight_evolve:
         raise ValueError("At least one of run_single or run_preflight_evolve must be enabled")
+    if profile.stage2_total_quota_override is not None:
+        if profile.stage2_total_quota_override <= 0:
+            raise ValueError("stage2_total_quota_override must be > 0")
+        from src.scheduling.subspace_scheduler import SubspaceScheduler
+
+        target_subspaces = profile.target_subspaces or [subspace.value for subspace in ExplorationSubspace]
+        required_minimum = sum(
+            SubspaceScheduler.MIN_QUOTA[ExplorationSubspace(subspace)]
+            for subspace in target_subspaces
+        )
+        if profile.stage2_total_quota_override < required_minimum:
+            raise ValueError(
+                "stage2_total_quota_override must be >= minimum quota required by target_subspaces"
+            )
     if profile.profile_kind == "fast_feedback" and profile.persistence_mode == "full":
         raise ValueError("fast_feedback profile cannot use persistence_mode=full")
     if profile.doctor_mode == "fast_feedback" and profile.market_context_mode == "live":
@@ -263,6 +283,7 @@ def _build_runtime_truth(
         "market_context_path": str(market_context_path),
         "persistence_mode": profile.persistence_mode,
         "stage1_enrichment_enabled": profile.stage1_enrichment_enabled,
+        "stage2_total_quota_override": profile.stage2_total_quota_override,
         "planned_phases": planned_phases,
         "formal_writes_allowed": formal_writes_allowed,
         "write_scope": write_scope,
@@ -326,6 +347,10 @@ def resolve_profile_env_truth(
     merged_env["PIXIU_EXPERIMENT_RUNS_DIR"] = str(runtime_truth["experiment_runs_dir"])
     merged_env["PIXIU_ARTIFACTS_DIR"] = str(runtime_truth["artifacts_dir"])
     merged_env["PIXIU_REPORTS_DIR"] = str(runtime_truth["reports_dir"])
+    if profile.stage2_total_quota_override is not None:
+        merged_env["PIXIU_STAGE2_TOTAL_QUOTA"] = str(profile.stage2_total_quota_override)
+    else:
+        merged_env.pop("PIXIU_STAGE2_TOTAL_QUOTA", None)
     merged_env["REPORT_EVERY_N_ROUNDS"] = str(profile.report_every_n_rounds)
     merged_env["PIXIU_HUMAN_GATE_AUTO_ACTION"] = profile.human_gate_auto_action
 
@@ -509,6 +534,7 @@ def _print_text(result: PreflightResult) -> None:
     print("[Preflight] target_islands:", ", ".join(result.runtime_truth["target_islands"]))
     print("[Preflight] target_subspaces:", ", ".join(result.runtime_truth["target_subspaces"]))
     print("[Preflight] planned_phases:", ", ".join(result.runtime_truth["planned_phases"]))
+    print("[Preflight] stage2_total_quota_override:", result.runtime_truth["stage2_total_quota_override"])
     print("[Preflight] write_scope:", result.runtime_truth["write_scope"])
     print("[Preflight] formal_writes_allowed:", result.runtime_truth["formal_writes_allowed"])
     print("[Preflight] state_store_path:", result.runtime_truth["state_store_path"])

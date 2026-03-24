@@ -185,6 +185,7 @@ Last Reviewed: 2026-03-23
   - `fast_feedback` profile 可用 `cached | frozen` Stage 1 context 启动
   - run 写面被重定向到 `data/runtime_namespaces/{namespace}/...`
   - 可只跑 `doctor + single`，并通过 `ACTIVE_ISLANDS` / `PIXIU_TARGET_SUBSPACES` 缩小验证范围
+  - 可通过 `PIXIU_STAGE2_TOTAL_QUOTA` 进一步压低 Stage 2 单轮配额，避免 fast feedback 被宽 batch 吞吐拖慢
 - `Why It Exists`:
   - 当前需要快速工程回路来验证 profile、contract、artifact、diagnostics 变化
   - 同时必须避免把 fast feedback 误当成 formal controlled run
@@ -198,6 +199,7 @@ Last Reviewed: 2026-03-23
   - `config/experiments/fast_feedback.json`
   - `ACTIVE_ISLANDS`
   - `PIXIU_TARGET_SUBSPACES`
+  - `PIXIU_STAGE2_TOTAL_QUOTA`
   - `PIXIU_STAGE1_CONTEXT_MODE`
   - `PIXIU_EXPERIMENT_NAMESPACE`
   - `PIXIU_EXPERIMENT_PERSISTENCE_MODE`
