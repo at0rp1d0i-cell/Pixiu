@@ -183,6 +183,15 @@ def _note_subspace_value(note: FactorResearchNote) -> str:
     return subspace.value if subspace is not None else "unknown"
 
 
+def _make_unique_note_id(candidate: Any, *, used_note_ids: set[str], fallback_prefix: str) -> str:
+    normalized = candidate.strip() if isinstance(candidate, str) else ""
+    base_note_id = normalized or f"{fallback_prefix}_{uuid.uuid4().hex[:8]}"
+    note_id = base_note_id
+    while note_id in used_note_ids:
+        note_id = f"{base_note_id}_{uuid.uuid4().hex[:8]}"
+    return note_id
+
+
 def _build_researcher_system_prompt(capabilities: FormulaCapabilities) -> str:
     return ALPHA_RESEARCHER_SYSTEM_PROMPT.format(
         available_fields_block=format_available_fields_for_prompt(capabilities),
@@ -424,16 +433,12 @@ class AlphaResearcher:
         for note_data in notes_data:
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
                 note_data = self._render_factor_algebra_recipe_into_note(note_data)
-            raw_note_id = note_data.get("note_id")
-            note_id = raw_note_id.strip() if isinstance(raw_note_id, str) else ""
-            if not note_id:
-                note_id = f"{self.island}_{_today_str()}_{uuid.uuid4().hex[:8]}"
-            if note_id in emitted_note_ids:
-                dedupe_seed = note_id
-                note_id = f"{dedupe_seed}_{uuid.uuid4().hex[:8]}"
-                while note_id in emitted_note_ids:
-                    note_id = f"{dedupe_seed}_{uuid.uuid4().hex[:8]}"
-            note_data["note_id"] = note_id
+            note_data["note_id"] = _make_unique_note_id(
+                note_data.get("note_id"),
+                used_note_ids=emitted_note_ids,
+                fallback_prefix=f"{self.island}_{_today_str()}",
+            )
+            note_id = str(note_data["note_id"])
             emitted_note_ids.add(note_id)
             note_data.setdefault("island", self.island)
             note_data.setdefault("iteration", iteration)
@@ -888,6 +893,7 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     stage2_rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
     stage2_sample_rejections: list[dict[str, str]] = []
     stage2_factor_gene_by_note_id: dict[str, dict[str, Any]] = {}
+    stage2_emitted_note_ids: set[str] = set()
     stage2_generated_count = 0
     stage2_delivered_count = 0
     stage2_retry_count = 0
@@ -901,9 +907,6 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         for filter_name, subspace_counts in diagnostics.get("rejection_counts_by_filter_and_subspace", {}).items():
             if isinstance(subspace_counts, dict):
                 stage2_rejection_counts_by_filter_and_subspace[filter_name].update(subspace_counts)
-        factor_gene_diagnostics = diagnostics.get(_FACTOR_GENE_DIAGNOSTICS_KEY)
-        if isinstance(factor_gene_diagnostics, dict):
-            stage2_factor_gene_by_note_id.update(factor_gene_diagnostics)
         for item in diagnostics.get("sample_rejections", []):
             if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
                 break
@@ -912,7 +915,23 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         if isinstance(batch, Exception):
             logger.warning("AlphaResearcher[%s/%s] 失败（跳过）: %s", island, subspace.value, batch)
         else:
-            all_notes.extend(batch.notes)
+            factor_gene_diagnostics = diagnostics.get(_FACTOR_GENE_DIAGNOSTICS_KEY)
+            if not isinstance(factor_gene_diagnostics, dict):
+                factor_gene_diagnostics = {}
+            for note in batch.notes:
+                source_note_id = note.note_id
+                final_note_id = _make_unique_note_id(
+                    source_note_id,
+                    used_note_ids=stage2_emitted_note_ids,
+                    fallback_prefix=f"{note.island}_{_today_str()}",
+                )
+                if final_note_id != source_note_id:
+                    note.note_id = final_note_id
+                stage2_emitted_note_ids.add(final_note_id)
+                all_notes.append(note)
+                factor_gene_payload = factor_gene_diagnostics.get(source_note_id)
+                if isinstance(factor_gene_payload, dict):
+                    stage2_factor_gene_by_note_id[final_note_id] = factor_gene_payload
             subspace_results[subspace][0] += len(batch.notes)  # generated
 
     logger.info(

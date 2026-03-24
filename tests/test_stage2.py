@@ -1391,6 +1391,73 @@ def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics()
     assert gene_diag["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
 
 
+def test_hypothesis_gen_node_dedupes_cross_researcher_note_ids_for_factor_gene_diagnostics():
+    from src.agents.researcher import hypothesis_gen_node
+
+    assignments = [
+        ("momentum", ExplorationSubspace.FACTOR_ALGEBRA),
+        ("volatility", ExplorationSubspace.FACTOR_ALGEBRA),
+    ]
+
+    with patch("src.agents.researcher._build_island_subspace_assignments", return_value=assignments):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                instance = MagicMock()
+                note = FactorResearchNote(
+                    note_id="dup_global",
+                    island=island,
+                    iteration=1,
+                    hypothesis="test",
+                    economic_intuition="test",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-24",
+                    exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                family_base = "$close" if island == "momentum" else "$volume"
+                instance.last_generation_diagnostics = {
+                    "generated_count": 1,
+                    "delivered_count": 1,
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": {},
+                    "sample_rejections": [],
+                    "factor_gene_by_note_id": {
+                        "dup_global": {
+                            "family_gene_key": f"factor_algebra|mean_spread|{family_base}|null|none|none",
+                            "variant_gene_key": "5|20|null|null",
+                        }
+                    },
+                }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {
+                    "active_islands": ["momentum", "volatility"],
+                    "market_context": None,
+                    "iteration": 1,
+                }
+            )
+
+    emitted_note_ids = [note.note_id for note in result["research_notes"]]
+    assert len(emitted_note_ids) == 2
+    assert len(set(emitted_note_ids)) == 2
+    diagnostics_map = result["stage2_diagnostics"]["factor_gene_by_note_id"]
+    assert set(diagnostics_map.keys()) == set(emitted_note_ids)
+    assert len(diagnostics_map) == 2
+    assert {payload["family_gene_key"] for payload in diagnostics_map.values()} == {
+        "factor_algebra|mean_spread|$close|null|none|none",
+        "factor_algebra|mean_spread|$volume|null|none|none",
+    }
+
+
 def test_alpha_researcher_symbolic_path_runs_local_prescreen():
     from src.agents.researcher import AlphaResearcher
 
