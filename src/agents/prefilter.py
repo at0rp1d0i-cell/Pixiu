@@ -297,6 +297,13 @@ class NoveltyFilter:
 
     @staticmethod
     def _resolve_factor_gene_keys_from_factor(factor: dict[str, Any]) -> tuple[str | None, str | None]:
+        subspace_origin = factor.get("subspace_origin")
+        if (
+            isinstance(subspace_origin, str)
+            and subspace_origin.strip()
+            and subspace_origin != ExplorationSubspace.FACTOR_ALGEBRA.value
+        ):
+            return None, None
         direct = NoveltyFilter._extract_factor_gene_keys(factor)
         if direct[0] is not None:
             return direct

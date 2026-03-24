@@ -639,6 +639,31 @@ class TestNoveltyFilterGeneAware:
         assert passed is False
         assert "相似度过高" in reason
 
+    def test_factor_algebra_ignores_explicit_non_factor_subspace_history_for_gene_path(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        self.filter = NoveltyFilter(pool=self.pool, threshold=1.1)
+        note = _make_note(
+            formula="Mean($close, 10) - Mean($close, 30)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.FACTOR_ALGEBRA,
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "existing_cross_market_shape",
+                "formula": "Mean($close, 5) - Mean($close, 20)",
+                "subspace_origin": ExplorationSubspace.CROSS_MARKET.value,
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is True
+        assert reason == "通过新颖性检查"
+
 
 # ─────────────────────────────────────────────
 # 5. End-to-end: verdict → constraint → prefilter
