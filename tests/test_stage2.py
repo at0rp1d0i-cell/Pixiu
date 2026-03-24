@@ -1298,6 +1298,7 @@ def test_alpha_researcher_local_novelty_uses_factor_gene_duplicate_reason_for_fa
     assert len(batch.notes) == 0
     sample = researcher.last_generation_diagnostics["sample_rejections"][0]
     assert sample["filter"] == "novelty"
+    assert "相似度过高" in sample["reason"]
     assert "factor_gene 完全重复" in sample["reason"]
 
 

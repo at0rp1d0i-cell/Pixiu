@@ -252,6 +252,7 @@ class NoveltyFilter:
         if note.exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA:
             note_family_key, note_variant_key = self._resolve_factor_gene_keys_from_note(note)
             if note_family_key is not None:
+                same_family_candidate_id: str | None = None
                 for existing_factor in existing:
                     existing_family_key, existing_variant_key = self._resolve_factor_gene_keys_from_factor(existing_factor)
                     if existing_family_key != note_family_key:
@@ -262,12 +263,15 @@ class NoveltyFilter:
                         and note_variant_key == existing_variant_key
                     ):
                         return False, (
-                            f"与已有因子 {existing_factor.get('factor_id', '?')} factor_gene 完全重复 "
-                            "(family+variant 相同)"
+                            f"与已有因子 {existing_factor.get('factor_id', '?')} 相似度过高："
+                            "factor_gene 完全重复 (family+variant 相同)"
                         )
+                    if same_family_candidate_id is None:
+                        same_family_candidate_id = str(existing_factor.get("factor_id", "?"))
+                if same_family_candidate_id is not None:
                     return False, (
-                        f"与已有因子 {existing_factor.get('factor_id', '?')} 属于同一 factor_gene family "
-                        "(variant 不同，疑似 same-family collapse)"
+                        f"与已有因子 {same_family_candidate_id} 相似度过高："
+                        "属于同一 factor_gene family (variant 不同，疑似 same-family collapse)"
                     )
 
         for existing_factor in existing:
