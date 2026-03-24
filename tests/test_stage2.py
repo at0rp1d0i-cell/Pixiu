@@ -1264,6 +1264,43 @@ def test_factor_gene_rejection_sample_includes_gene_keys_when_available():
     assert sample["variant_gene_key"] == "5|20|null|null"
 
 
+def test_alpha_researcher_local_novelty_uses_factor_gene_duplicate_reason_for_factor_algebra():
+    from src.agents.researcher import AlphaResearcher
+
+    duplicate_gene = MagicMock()
+    duplicate_gene.content = '''{
+        "notes": [{
+            "note_id": "dup_gene_runtime", "island": "momentum", "iteration": 1,
+            "hypothesis": "dup", "economic_intuition": "dup",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [], "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"],
+            "exploration_subspace": "factor_algebra"
+        }],
+        "generation_rationale": "dup"
+    }'''
+    mock_pool = MagicMock()
+    mock_pool.get_island_factors.return_value = [
+        {
+            "formula": "Mean($close, 5) - Mean($close, 20)",
+            "factor_id": "existing_dup_gene",
+        }
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[duplicate_gene, duplicate_gene])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+            batch = asyncio.run(researcher.generate_batch(context=None, iteration=1))
+
+    assert len(batch.notes) == 0
+    sample = researcher.last_generation_diagnostics["sample_rejections"][0]
+    assert sample["filter"] == "novelty"
+    assert "factor_gene 完全重复" in sample["reason"]
+
+
 def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     from src.agents.researcher import AlphaResearcher
 

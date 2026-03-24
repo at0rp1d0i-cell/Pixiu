@@ -554,6 +554,93 @@ class TestConstraintChecker:
 
 
 # ─────────────────────────────────────────────
+# 4b. NoveltyFilter gene-aware behavior
+# ─────────────────────────────────────────────
+
+class TestNoveltyFilterGeneAware:
+    def setup_method(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        self.pool = MagicMock()
+        self.filter = NoveltyFilter(pool=self.pool)
+
+    def test_factor_algebra_same_family_same_variant_rejected_as_duplicate(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        self.filter = NoveltyFilter(pool=self.pool, threshold=1.1)
+        note = _make_note(
+            formula="Mean($close, 5) - Mean($close, 20)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.FACTOR_ALGEBRA,
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "existing_dup",
+                "formula": "Mean($close, 5) - Mean($close, 20)",
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is False
+        assert "factor_gene 完全重复" in reason
+
+    def test_factor_algebra_same_family_different_variant_rejected_as_family_collapse(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        self.filter = NoveltyFilter(pool=self.pool, threshold=1.1)
+        note = _make_note(
+            formula="Mean($close, 10) - Mean($close, 30)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.FACTOR_ALGEBRA,
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "existing_family",
+                "formula": "Mean($close, 5) - Mean($close, 20)",
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is False
+        assert "同一 factor_gene family" in reason
+
+    def test_non_factor_algebra_keeps_token_similarity_path(self):
+        note = _make_note(
+            formula="Mean($close, 5) - Mean($close, 20)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.CROSS_MARKET,
+                "mutation_record": {
+                    "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                    "variant_gene_key": "5|20|null|null",
+                },
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "existing_cross_market",
+                "formula": "Mean($close, 5) - Mean($close, 20)",
+                "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                "variant_gene_key": "5|20|null|null",
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is False
+        assert "相似度过高" in reason
+
+
+# ─────────────────────────────────────────────
 # 5. End-to-end: verdict → constraint → prefilter
 # ─────────────────────────────────────────────
 

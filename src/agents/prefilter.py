@@ -16,11 +16,13 @@ import asyncio
 import json
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.formula.capabilities import FormulaCapabilities, get_runtime_formula_capabilities
+from src.formula.gene import build_family_gene_key, build_variant_gene_key
+from src.formula.sketch import FormulaRecipe
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
@@ -28,6 +30,7 @@ from src.llm.openai_compat import build_researcher_llm
 from src.schemas.stage_io import PrefilterDiagnostics, PrefilterOutput
 from src.skills.loader import SkillLoader
 from src.schemas.market_context import MarketRegime
+from src.schemas.hypothesis import ExplorationSubspace
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +249,27 @@ class NoveltyFilter:
         # 从 FactorPool 获取同 Island 的历史因子
         existing = self.pool.get_island_factors(island=note.island, limit=50)
 
+        if note.exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA:
+            note_family_key, note_variant_key = self._resolve_factor_gene_keys_from_note(note)
+            if note_family_key is not None:
+                for existing_factor in existing:
+                    existing_family_key, existing_variant_key = self._resolve_factor_gene_keys_from_factor(existing_factor)
+                    if existing_family_key != note_family_key:
+                        continue
+                    if (
+                        note_variant_key is not None
+                        and existing_variant_key is not None
+                        and note_variant_key == existing_variant_key
+                    ):
+                        return False, (
+                            f"与已有因子 {existing_factor.get('factor_id', '?')} factor_gene 完全重复 "
+                            "(family+variant 相同)"
+                        )
+                    return False, (
+                        f"与已有因子 {existing_factor.get('factor_id', '?')} 属于同一 factor_gene family "
+                        "(variant 不同，疑似 same-family collapse)"
+                    )
+
         for existing_factor in existing:
             existing_formula = existing_factor.get("formula", "")
             if not existing_formula:
@@ -260,6 +284,145 @@ class NoveltyFilter:
                 )
 
         return True, "通过新颖性检查"
+
+    @staticmethod
+    def _resolve_factor_gene_keys_from_note(note: FactorResearchNote) -> tuple[str | None, str | None]:
+        payload = note.mutation_record
+        if isinstance(payload, dict):
+            explicit = NoveltyFilter._extract_factor_gene_keys(payload)
+            if explicit[0] is not None:
+                return explicit
+        formula = note.final_formula or note.proposed_formula
+        return NoveltyFilter._extract_factor_gene_keys_from_rendered_formula(formula)
+
+    @staticmethod
+    def _resolve_factor_gene_keys_from_factor(factor: dict[str, Any]) -> tuple[str | None, str | None]:
+        direct = NoveltyFilter._extract_factor_gene_keys(factor)
+        if direct[0] is not None:
+            return direct
+        gene_payload = factor.get("factor_gene")
+        if isinstance(gene_payload, dict):
+            nested = NoveltyFilter._extract_factor_gene_keys(gene_payload)
+            if nested[0] is not None:
+                return nested
+        formula = factor.get("formula")
+        if isinstance(formula, str) and formula.strip():
+            return NoveltyFilter._extract_factor_gene_keys_from_rendered_formula(formula)
+        return None, None
+
+    @staticmethod
+    def _extract_factor_gene_keys(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+        family_key = payload.get("family_gene_key")
+        variant_key = payload.get("variant_gene_key")
+        if not isinstance(family_key, str) or not family_key.strip():
+            return None, None
+        if isinstance(variant_key, str) and variant_key.strip():
+            return family_key, variant_key
+        return family_key, None
+
+    @staticmethod
+    def _extract_factor_gene_keys_from_rendered_formula(formula: str) -> tuple[str | None, str | None]:
+        recipe = NoveltyFilter._reverse_factor_algebra_formula_recipe(formula)
+        if recipe is None:
+            return None, None
+        return build_family_gene_key(recipe), build_variant_gene_key(recipe)
+
+    @staticmethod
+    def _reverse_factor_algebra_formula_recipe(formula: str) -> FormulaRecipe | None:
+        source = formula.strip()
+        if not source:
+            return None
+
+        normalization = "none"
+        normalization_window: int | None = None
+        quantile_qscore: float | None = None
+        core_expr = source
+
+        quantile_match = re.fullmatch(r"Quantile\((.+),\s*(\d+),\s*([0-9]*\.?[0-9]+)\)", source)
+        if quantile_match:
+            normalization = "quantile"
+            core_expr = quantile_match.group(1).strip()
+            normalization_window = int(quantile_match.group(2))
+            quantile_qscore = float(quantile_match.group(3))
+        else:
+            rank_match = re.fullmatch(r"Rank\((.+),\s*(\d+)\)", source)
+            if rank_match:
+                normalization = "rank"
+                core_expr = rank_match.group(1).strip()
+                normalization_window = int(rank_match.group(2))
+
+        family_payload = NoveltyFilter._reverse_core_family_payload(core_expr)
+        if family_payload is None:
+            return None
+        family_payload["normalization"] = normalization
+        family_payload["normalization_window"] = normalization_window
+        family_payload["quantile_qscore"] = quantile_qscore
+
+        try:
+            return FormulaRecipe(**family_payload)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _reverse_core_family_payload(core_expr: str) -> dict[str, Any] | None:
+        mean_spread = re.fullmatch(
+            r"Mean\((\$\w+),\s*(\d+)\)\s*-\s*Mean\(\1,\s*(\d+)\)",
+            core_expr,
+        )
+        if mean_spread:
+            return {
+                "base_field": mean_spread.group(1),
+                "lookback_short": int(mean_spread.group(2)),
+                "lookback_long": int(mean_spread.group(3)),
+                "transform_family": "mean_spread",
+            }
+
+        ratio_momentum = re.fullmatch(
+            r"Mean\((\$\w+),\s*(\d+)\)\s*/\s*Mean\(\1,\s*(\d+)\)\s*-\s*1",
+            core_expr,
+        )
+        if ratio_momentum:
+            return {
+                "base_field": ratio_momentum.group(1),
+                "lookback_short": int(ratio_momentum.group(2)),
+                "lookback_long": int(ratio_momentum.group(3)),
+                "transform_family": "ratio_momentum",
+            }
+
+        volatility_state = re.fullmatch(
+            r"Std\((\$\w+),\s*(\d+)\)\s*-\s*Std\(\1,\s*(\d+)\)",
+            core_expr,
+        )
+        if volatility_state:
+            return {
+                "base_field": volatility_state.group(1),
+                "lookback_short": int(volatility_state.group(2)),
+                "lookback_long": int(volatility_state.group(3)),
+                "transform_family": "volatility_state",
+            }
+
+        volume_confirmation = re.fullmatch(
+            r"Mul\(\s*Mean\((\$\w+),\s*(\d+)\)\s*-\s*Mean\(\1,\s*(\d+)\)\s*,\s*"
+            r"Mean\((\$\w+),\s*(\d+)\)\s*-\s*Mean\(\4,\s*(\d+)\)\s*\)",
+            core_expr,
+        )
+        if volume_confirmation is None:
+            return None
+
+        short = int(volume_confirmation.group(2))
+        long = int(volume_confirmation.group(3))
+        secondary_short = int(volume_confirmation.group(5))
+        secondary_long = int(volume_confirmation.group(6))
+        if short != secondary_short or long != secondary_long:
+            return None
+        return {
+            "base_field": volume_confirmation.group(1),
+            "secondary_field": volume_confirmation.group(4),
+            "lookback_short": short,
+            "lookback_long": long,
+            "transform_family": "volume_confirmation",
+            "interaction_mode": "mul",
+        }
 
     def _tokenize(self, formula: str) -> set:
         """将 Qlib 公式分解为 token 集合。
