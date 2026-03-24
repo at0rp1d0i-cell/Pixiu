@@ -176,11 +176,20 @@ def check_moneyflow_staging() -> tuple[bool | str, str]:
 def build_doctor_checks(mode: str = "core") -> list[DoctorCheck]:
     checks = [
         DoctorCheck("runtime_readiness", "blocking", "数据 (Data)", check_runtime_readiness),
-        DoctorCheck("moneyflow_hsgt", "blocking", "工具 (Blocking API)", check_moneyflow_hsgt),
-        DoctorCheck("margin_proxy", "blocking", "工具 (Blocking API)", check_margin_proxy),
-        DoctorCheck("llm", "core_optional", "算力 (LLM)", check_llm_layer),
-        DoctorCheck("factor_pool", "core_optional", "因子池 (Pool)", check_pool_knowledge),
     ]
+    if mode in {"core", "full"}:
+        checks.extend(
+            [
+                DoctorCheck("moneyflow_hsgt", "blocking", "工具 (Blocking API)", check_moneyflow_hsgt),
+                DoctorCheck("margin_proxy", "blocking", "工具 (Blocking API)", check_margin_proxy),
+            ]
+        )
+    checks.extend(
+        [
+            DoctorCheck("llm", "core_optional", "算力 (LLM)", check_llm_layer),
+            DoctorCheck("factor_pool", "core_optional", "因子池 (Pool)", check_pool_knowledge),
+        ]
+    )
     if mode == "full":
         checks.extend(
             [
@@ -251,9 +260,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pixiu tiered system doctor")
     parser.add_argument(
         "--mode",
-        choices=["core", "full"],
+        choices=["core", "full", "fast_feedback"],
         default="core",
-        help="core = blocking + core_optional, full = add enrichment + data_plane",
+        help="core = blocking + core_optional, full = add enrichment + data_plane, fast_feedback = runtime-only checks",
     )
     return parser.parse_args(argv)
 

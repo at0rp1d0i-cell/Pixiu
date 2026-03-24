@@ -50,3 +50,20 @@ def test_full_mode_includes_enrichment_and_data_plane_checks():
     assert "moneyflow_staging" in names
     assert tiers["news_enrichment"] == "enrichment"
     assert tiers["moneyflow_staging"] == "data_plane"
+
+
+def test_fast_feedback_mode_skips_live_blocking_api_checks():
+    module = _load_doctor_module()
+
+    checks = module.build_doctor_checks(mode="fast_feedback")
+    names = [check.name for check in checks]
+    tiers = {check.name: check.tier for check in checks}
+
+    assert "runtime_readiness" in names
+    assert "llm" in names
+    assert "factor_pool" in names
+    assert "moneyflow_hsgt" not in names
+    assert "margin_proxy" not in names
+    assert "news_enrichment" not in names
+    assert tiers["runtime_readiness"] == "blocking"
+    assert tiers["llm"] == "core_optional"

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,11 @@ TEMPLATE_PATH = Path(__file__).parent / "templates" / "qlib_backtest.py.tpl"
 ARTIFACTS_DIR = Path(__file__).resolve().parents[2] / "data" / "artifacts"
 
 
+def resolve_artifacts_dir() -> Path:
+    configured = os.getenv("PIXIU_ARTIFACTS_DIR")
+    return Path(configured) if configured else ARTIFACTS_DIR
+
+
 class Coder:
     """
     Deterministic Stage 4 executor.
@@ -36,7 +42,8 @@ class Coder:
         except FileNotFoundError as e:
             raise RuntimeError(f"Qlib backtest template not found: {TEMPLATE_PATH}") from e
         self.template_version = TEMPLATE_PATH.name
-        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        self._artifacts_dir = resolve_artifacts_dir()
+        self._artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     async def run_backtest(self, note: FactorResearchNote) -> BacktestReport:
         formula = note.final_formula or note.proposed_formula
@@ -101,7 +108,7 @@ class Coder:
         stderr: str,
     ) -> ArtifactRefs:
         try:
-            run_dir = ARTIFACTS_DIR / run_id
+            run_dir = self._artifacts_dir / run_id
             run_dir.mkdir(parents=True, exist_ok=True)
 
             script_path = run_dir / "script.py"

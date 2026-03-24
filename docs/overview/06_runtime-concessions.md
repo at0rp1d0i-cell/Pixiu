@@ -89,6 +89,7 @@ Last Reviewed: 2026-03-23
   - Stage 1 按 `blocking core + async enrichment` 运行
   - `async enrichment` 不做同轮 late merge，只影响下一轮
   - 同日、非 degraded 的 `market_context` 会在 round 0 之后被复用，避免重复慢 MCP
+  - profile 可通过 `PIXIU_STAGE1_CONTEXT_MODE` / `PIXIU_STAGE1_CONTEXT_PATH` 固定 `live | cached | frozen` context policy
 - `Why It Exists`:
   - 当前 Stage 1 数据面和工具面还不够稳定
   - 先保证实验入口可跑、blocking red light 语义清楚
@@ -98,9 +99,11 @@ Last Reviewed: 2026-03-23
 - `Removal Trigger`:
   - blocking core 足够稳定
   - enrichment 的角色与注入方式进一步收口
-  - fast feedback / controlled run 的 context policy 正式进入设置层
+  - `live | cached | frozen` policy 不再需要作为运行时让步存在
 - `Related Settings`:
   - `config/experiments/default.json`
+  - `PIXIU_STAGE1_CONTEXT_MODE`
+  - `PIXIU_STAGE1_CONTEXT_PATH`
 - `Evidence`:
   - [20_stage-1-market-context.md](/home/torpedo/Workspace/ML/Pixiu/docs/design/20_stage-1-market-context.md)
   - [stage1.py](/home/torpedo/Workspace/ML/Pixiu/src/core/orchestrator/nodes/stage1.py)
@@ -172,6 +175,36 @@ Last Reviewed: 2026-03-23
   - [18_synthesis-agent.md](/home/torpedo/Workspace/ML/Pixiu/docs/design/18_synthesis-agent.md)
   - [stage2.py](/home/torpedo/Workspace/ML/Pixiu/src/core/orchestrator/nodes/stage2.py)
   - [synthesis.py](/home/torpedo/Workspace/ML/Pixiu/src/agents/synthesis.py)
+
+### EXP-005
+
+- `Type`: `experiment_concession`
+- `Status`: `active`
+- `Scope`: `Experiment profiles / fast feedback`
+- `Current Behavior`:
+  - `fast_feedback` profile 可用 `cached | frozen` Stage 1 context 启动
+  - run 写面被重定向到 `data/runtime_namespaces/{namespace}/...`
+  - 可只跑 `doctor + single`，并通过 `ACTIVE_ISLANDS` / `PIXIU_TARGET_SUBSPACES` 缩小验证范围
+- `Why It Exists`:
+  - 当前需要快速工程回路来验证 profile、contract、artifact、diagnostics 变化
+  - 同时必须避免把 fast feedback 误当成 formal controlled run
+- `Risk If Kept`:
+  - frozen/cached context 会削弱 live-data 真实性
+  - isolated namespace 容易让使用者误以为“跑通 fast feedback = 研究主线稳定”
+- `Removal Trigger`:
+  - formal controlled run 与 fast engineering validation 的产品边界进一步稳定
+  - profile 层和控制平面能用更明确的正式/非正式运行模式替代当前 shortcut
+- `Related Settings`:
+  - `config/experiments/fast_feedback.json`
+  - `ACTIVE_ISLANDS`
+  - `PIXIU_TARGET_SUBSPACES`
+  - `PIXIU_STAGE1_CONTEXT_MODE`
+  - `PIXIU_EXPERIMENT_NAMESPACE`
+  - `PIXIU_EXPERIMENT_PERSISTENCE_MODE`
+- `Evidence`:
+  - [fast_feedback.json](/home/torpedo/Workspace/ML/Pixiu/config/experiments/fast_feedback.json)
+  - [experiment_preflight.py](/home/torpedo/Workspace/ML/Pixiu/scripts/experiment_preflight.py)
+  - [run_experiment_harness.py](/home/torpedo/Workspace/ML/Pixiu/scripts/run_experiment_harness.py)
 
 ### MVP-001
 

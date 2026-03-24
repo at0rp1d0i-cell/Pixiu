@@ -16,8 +16,9 @@ async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
     """进化模式：多 Island 轮换，持续运行 rounds 轮。"""
     _config.MAX_ROUNDS = rounds
     if islands:
-        _config.ACTIVE_ISLANDS = islands
+        _config.ACTIVE_ISLANDS = list(islands)
 
+    _runtime.reset_scheduler()
     _runtime.reset_current_run_id()
     graph = _runtime.get_graph()
     if graph is None:
@@ -60,6 +61,8 @@ async def run_evolve(rounds: int = 20, islands: list[str] | None = None):
 async def run_single(island: str):
     """单次模式：指定 Island，单轮调试。"""
     _config.MAX_ROUNDS = 1
+    _config.ACTIVE_ISLANDS = [island]
+    _runtime.reset_scheduler()
     _runtime.reset_current_run_id()
     graph = _runtime.get_graph()
     if graph is None:
@@ -73,6 +76,7 @@ async def run_single(island: str):
 
     logger.info("\n%s", "=" * 60)
     logger.info("Pixiu v2 启动（单次模式，Island=%s）", island)
+    logger.info("   Active Islands: %s", ", ".join(_config.ACTIVE_ISLANDS))
     logger.info("%s\n", "=" * 60)
 
     initial_state = AgentState(current_round=0, current_island=island)

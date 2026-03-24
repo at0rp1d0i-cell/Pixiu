@@ -101,6 +101,7 @@ def market_context_node(state: AgentState) -> MarketContextOutput:
             degraded=False,
             degrade_reason=None,
         )
+        stage1_reliability["context_source"] = "same_day_state_cache"
         timing_update = merge_stage_timing(
             state,
             "market_context",

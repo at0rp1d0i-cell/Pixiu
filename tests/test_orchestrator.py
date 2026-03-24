@@ -389,6 +389,8 @@ class TestLoopControlSnapshotWritten:
                     "tool_calls_total": 2,
                     "tool_timeouts_total": 1,
                     "tool_errors_total": 0,
+                    "blocking_failures_total": 1,
+                    "enrichment_failures_total": 0,
                     "finalization_forced": True,
                     "degraded": False,
                     "degrade_reason": None,
@@ -401,7 +403,21 @@ class TestLoopControlSnapshotWritten:
                             "max_latency_ms": 120.0,
                         }
                     },
-                    "sample_failures": [],
+                    "sample_failures": [
+                        {
+                            "tool": "get_moneyflow_hsgt",
+                            "kind": "timeout",
+                            "message": "工具调用超时（15.0s）: get_moneyflow_hsgt",
+                            "tier": "blocking",
+                        }
+                    ],
+                    "payload_warnings": [
+                        {
+                            "field": "northbound",
+                            "kind": "invalid_shape",
+                            "message": "coerced invalid northbound payload to null",
+                        }
+                    ],
                 },
                 "stage_timings": {
                     "market_context": 1200.0,
@@ -446,6 +462,10 @@ class TestLoopControlSnapshotWritten:
             assert data["stage1_reliability"]["blocking_required"] is True
             assert data["stage1_reliability"]["tool_calls_total"] == 2
             assert data["stage1_reliability"]["finalization_forced"] is True
+            assert data["stage1_reliability"]["blocking_failures_total"] == 1
+            assert data["stage1_reliability"]["enrichment_failures_total"] == 0
+            assert data["stage1_reliability"]["sample_failures"][0]["tier"] == "blocking"
+            assert data["stage1_reliability"]["payload_warnings"][0]["field"] == "northbound"
             assert data["prefilter"]["rejection_counts_by_filter"]["validator"] == 4
             assert data["execution"]["backtest_reports_count"] == 1
             assert data["execution"]["execution_error_count"] == 0

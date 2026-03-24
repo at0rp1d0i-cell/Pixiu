@@ -1,0 +1,22 @@
+{
+  "date": "2026-03-24",
+  "northbound": null,
+  "macro_signals": [
+    {
+      "signal": "frozen fast-feedback context",
+      "source": "news",
+      "direction": "neutral",
+      "confidence": 0.7
+    }
+  ],
+  "hot_themes": [
+    "AI算力",
+    "高股息"
+  ],
+  "historical_insights": [],
+  "suggested_islands": [
+    "momentum"
+  ],
+  "market_regime": "range_bound",
+  "raw_summary": "Frozen market context for fast feedback experiment runs."
+}

@@ -133,9 +133,11 @@ async def test_run_single_records_stopped_final_status(monkeypatch, orchestrator
     graph = result["graph"]
     store = result["store"]
     max_rounds = result["max_rounds"]
+    active_islands = result["active_islands"]
     graph_config = result["graph_config"]
 
     assert max_rounds == 1
+    assert active_islands == ["sentiment"]
     assert graph.ainvoke.await_count == 1
     assert graph_config is not None
     assert graph_config["configurable"]["thread_id"].startswith("pixiu_single_sentiment_")

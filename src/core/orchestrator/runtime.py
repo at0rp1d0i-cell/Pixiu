@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from src.core.orchestrator import config as _config
 from src.factor_pool.pool import get_factor_pool
 from src.factor_pool.scheduler import IslandScheduler
 
@@ -21,7 +22,7 @@ def get_scheduler():
     global _scheduler
     if _scheduler is None:
         pool = get_factor_pool()
-        _scheduler = IslandScheduler(pool=pool)
+        _scheduler = IslandScheduler(pool=pool, active_islands=list(_config.ACTIVE_ISLANDS))
     return _scheduler
 
 

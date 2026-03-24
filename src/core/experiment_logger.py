@@ -23,12 +23,19 @@ logger = logging.getLogger(__name__)
 _DEFAULT_RUNS_DIR = Path(__file__).resolve().parents[2] / "data" / "experiment_runs"
 
 
+def resolve_experiment_runs_dir(runs_dir: Optional[Path] = None) -> Path:
+    if runs_dir is not None:
+        return Path(runs_dir)
+    configured = os.environ.get("PIXIU_EXPERIMENT_RUNS_DIR")
+    return Path(configured) if configured else _DEFAULT_RUNS_DIR
+
+
 class ExperimentLogger:
     """每轮实验快照写入器。写到 data/experiment_runs/{run_id}/round_{n:03d}.json"""
 
     def __init__(self, run_id: str, runs_dir: Optional[Path] = None) -> None:
         self.run_id = run_id
-        self._base_dir: Path = (runs_dir or _DEFAULT_RUNS_DIR) / run_id
+        self._base_dir: Path = resolve_experiment_runs_dir(runs_dir) / run_id
         self._last_llm_usage_run_id: str | None = None
         self._last_llm_usage_cumulative: dict[str, Any] | None = None
         self._last_llm_call_event_count: int = 0
@@ -295,16 +302,34 @@ class ExperimentLogger:
 # 模块级单例（类似 get_factor_pool() 模式）
 # ─────────────────────────────────────────────────────────
 _logger_instance: Optional[ExperimentLogger] = None
+_logger_instance_key: tuple[str, str] | None = None
 
 
 def get_experiment_logger() -> ExperimentLogger:
     """获取 ExperimentLogger 单例。run_id 从环境变量 PIXIU_RUN_ID 读取，
     默认为当前时间戳。"""
-    global _logger_instance
-    if _logger_instance is None:
-        run_id = os.environ.get(
-            "PIXIU_RUN_ID",
-            datetime.now().strftime("%Y%m%d_%H%M%S"),
+    global _logger_instance, _logger_instance_key
+    run_id = os.environ.get(
+        "PIXIU_RUN_ID",
+        datetime.now().strftime("%Y%m%d_%H%M%S"),
+    )
+    runs_dir = resolve_experiment_runs_dir()
+    key = (run_id, str(runs_dir))
+    if _logger_instance is not None:
+        current_instance_key = (
+            getattr(_logger_instance, "run_id", ""),
+            str(getattr(_logger_instance, "_base_dir", Path()).parent),
         )
-        _logger_instance = ExperimentLogger(run_id=run_id)
+        if _logger_instance_key is None or _logger_instance_key != current_instance_key:
+            _logger_instance_key = current_instance_key
+            return _logger_instance
+    if _logger_instance is None or _logger_instance_key != key:
+        _logger_instance = ExperimentLogger(run_id=run_id, runs_dir=runs_dir)
+        _logger_instance_key = key
     return _logger_instance
+
+
+def reset_experiment_logger() -> None:
+    global _logger_instance, _logger_instance_key
+    _logger_instance = None
+    _logger_instance_key = None

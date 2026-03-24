@@ -20,6 +20,10 @@ DEFAULT_DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data", "factor_pool_db")
 )
 
+
+def resolve_default_db_path() -> str:
+    return os.getenv("PIXIU_FACTOR_POOL_DB_PATH", DEFAULT_DB_PATH)
+
 COLLECTION_NAME = "factor_experiments"
 NOTE_COLLECTION_NAME = "research_notes"
 EXPLORATION_COLLECTION_NAME = "exploration_results"
@@ -154,17 +158,18 @@ def _build_client(
 
 
 def build_factor_pool_storage(
-    db_path: str = DEFAULT_DB_PATH,
+    db_path: str | None = None,
     *,
     persistent_client_factory=None,
     embedding_function_factory=None,
 ) -> FactorPoolStorage:
+    resolved_db_path = db_path or resolve_default_db_path()
     if persistent_client_factory is None:
         persistent_client_factory = chromadb.PersistentClient
     if embedding_function_factory is None:
         embedding_function_factory = build_default_chroma_embedding_function
     client, storage_mode = _build_client(
-        db_path,
+        resolved_db_path,
         persistent_client_factory=persistent_client_factory,
     )
     embedding_function = embedding_function_factory()
@@ -183,7 +188,7 @@ def build_factor_pool_storage(
     constraints_collection = client.get_or_create_collection(name=CONSTRAINT_COLLECTION_NAME)
     _attach_embedding_function(constraints_collection, embedding_function)
 
-    logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", db_path, storage_mode)
+    logger.info("[FactorPool] 初始化完成，数据库路径：%s，模式：%s", resolved_db_path, storage_mode)
     logger.info("[FactorPool] 当前存储因子数量：%d", factor_collection.count())
 
     return FactorPoolStorage(

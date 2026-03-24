@@ -9,6 +9,7 @@ import asyncio
 import math
 import sys
 from datetime import date
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,6 +78,52 @@ def test_market_analyst_valid_json_parsing():
     assert "momentum" in memo.suggested_islands
     assert memo.northbound is not None
     assert memo.northbound.net_buy_bn == 12.5
+
+
+def test_market_analyst_normalizes_invalid_northbound_payload_without_degrading():
+    """northbound 子对象出现 None shape drift 时，不应让整份 memo 降级。"""
+    from src.agents.market_analyst import MarketAnalyst
+
+    mock_response = MagicMock()
+    mock_response.tool_calls = []
+    mock_response.content = '''{
+        "date": "2026-03-24",
+        "northbound": {
+            "net_buy_bn": null,
+            "top_sectors": ["科技"],
+            "top_stocks": ["600519"],
+            "sentiment": "bullish"
+        },
+        "macro_signals": [],
+        "hot_themes": ["AI算力"],
+        "historical_insights": [],
+        "suggested_islands": ["momentum"],
+        "market_regime": "trending_up",
+        "raw_summary": "blocking core 部分字段为空"
+    }'''
+
+    with patch("src.agents.market_analyst.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            analyst = MarketAnalyst(mcp_tools=[])
+            memo = asyncio.run(analyst.analyze())
+            diagnostics = analyst.get_reliability_diagnostics()
+
+    assert isinstance(memo, MarketContextMemo)
+    assert memo.market_regime == "bull_trend"
+    assert memo.northbound is None
+    assert memo.raw_summary == "blocking core 部分字段为空"
+    assert diagnostics["degraded"] is False
+    assert diagnostics["payload_warnings"] == [
+        {
+            "field": "northbound",
+            "kind": "invalid_shape",
+            "message": "coerced invalid northbound payload to null",
+        }
+    ]
 
 
 def test_market_analyst_falls_back_to_openai_env():
@@ -229,14 +276,18 @@ def test_market_analyst_collects_stage1_reliability_diagnostics():
     assert diagnostics["tool_calls_total"] == 1
     assert diagnostics["tool_timeouts_total"] == 0
     assert diagnostics["tool_errors_total"] == 1
+    assert diagnostics["blocking_failures_total"] == 0
+    assert diagnostics["enrichment_failures_total"] == 1
     assert diagnostics["finalization_forced"] is True
     assert diagnostics["degraded"] is False
     assert diagnostics["degrade_reason"] is None
     assert diagnostics["enrichment_tools_used"] == ["get_market_hot_topics"]
+    assert diagnostics["payload_warnings"] == []
     assert diagnostics["tool_stats"]["get_market_hot_topics"]["calls"] == 1
     assert diagnostics["tool_stats"]["get_market_hot_topics"]["errors"] == 1
     assert diagnostics["sample_failures"][0]["tool"] == "get_market_hot_topics"
     assert diagnostics["sample_failures"][0]["kind"] == "error"
+    assert diagnostics["sample_failures"][0]["tier"] == "enrichment"
 
 
 def test_market_context_node_timeout_falls_back_to_empty_memo():
@@ -344,6 +395,120 @@ def test_run_market_context_once_includes_tushare_when_token_present():
     assert isinstance(result["market_context"], MarketContextMemo)
     assert result["stage1_reliability"]["blocking_tools_expected"] == ["get_moneyflow_hsgt"]
     assert result["stage1_reliability"]["tool_calls_total"] == 1
+
+
+def test_run_market_context_once_can_disable_enrichment_tools():
+    from src.agents.market_analyst import _run_market_context_once
+
+    blocking_tool = MagicMock()
+    blocking_tool.name = "get_moneyflow_hsgt"
+    enrichment_tool = MagicMock()
+    enrichment_tool.name = "get_market_hot_topics"
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[blocking_tool, enrichment_tool])
+
+    with patch.dict("os.environ", {"PIXIU_STAGE1_ENABLE_ENRICHMENT": "0"}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client):
+            with patch("src.agents.market_analyst.build_researcher_llm") as mock_builder:
+                mock_chat = MagicMock()
+                mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+                mock_builder.return_value = mock_chat
+                with patch(
+                    "src.agents.market_analyst.MarketAnalyst.analyze",
+                    new=AsyncMock(return_value=_make_market_memo()),
+                ) as mock_analyze:
+                    with patch(
+                        "src.agents.market_analyst.MarketAnalyst.get_reliability_diagnostics",
+                        return_value={
+                            "tool_calls_total": 1,
+                            "tool_errors_total": 0,
+                            "tool_timeouts_total": 0,
+                            "blocking_tools_used": ["get_moneyflow_hsgt"],
+                            "enrichment_tools_used": [],
+                            "blocking_failures_total": 0,
+                            "enrichment_failures_total": 0,
+                            "finalization_forced": False,
+                            "degraded": False,
+                            "degrade_reason": None,
+                            "tool_stats": {},
+                            "sample_failures": [],
+                            "payload_warnings": [],
+                        },
+                    ):
+                        result = asyncio.run(_run_market_context_once({}))
+
+    bound_tools = mock_builder.return_value.bind_tools.call_args.args[0]
+    assert [tool.name for tool in bound_tools] == ["get_moneyflow_hsgt"]
+    assert mock_analyze.await_count == 1
+    assert result["stage1_reliability"]["enrichment_tools_used"] == []
+
+
+def test_market_context_node_can_load_frozen_context_file(tmp_path: Path):
+    from src.agents.market_analyst import market_context_node
+
+    frozen_context_path = tmp_path / "frozen_context.json"
+    frozen_context_path.write_text(
+        """{
+            "date": "2026-03-24",
+            "northbound": null,
+            "macro_signals": [],
+            "hot_themes": ["AI算力"],
+            "historical_insights": [],
+            "suggested_islands": ["momentum"],
+            "market_regime": "range_bound",
+            "raw_summary": "frozen context"
+        }""",
+        encoding="utf-8",
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "PIXIU_STAGE1_CONTEXT_MODE": "frozen",
+            "PIXIU_STAGE1_CONTEXT_PATH": str(frozen_context_path),
+        },
+        clear=True,
+    ):
+        with patch("src.agents.market_analyst._run_market_context_once", new=AsyncMock()) as mock_live:
+            result = market_context_node({"active_islands": ["momentum"]})
+
+    memo = result["market_context"]
+    assert isinstance(memo, MarketContextMemo)
+    assert memo.raw_summary == "frozen context"
+    assert result["stage1_reliability"]["context_mode"] == "frozen"
+    assert result["stage1_reliability"]["context_source"].endswith("frozen_context.json")
+    mock_live.assert_not_awaited()
+
+
+def test_market_context_live_mode_writes_context_cache(tmp_path: Path):
+    from src.agents.market_analyst import market_context_node
+
+    cache_path = tmp_path / "market_context_cache.json"
+    with patch.dict(
+        "os.environ",
+        {
+            "PIXIU_STAGE1_CONTEXT_MODE": "live",
+            "PIXIU_STAGE1_CONTEXT_PATH": str(cache_path),
+        },
+        clear=True,
+    ):
+        with patch(
+            "src.agents.market_analyst._run_market_context_once",
+            new=AsyncMock(
+                return_value={
+                    "market_context": _make_market_memo(),
+                    "stage1_reliability": {
+                        "context_mode": "live",
+                        "context_source": "live_tools",
+                        "payload_warnings": [],
+                    },
+                }
+            ),
+        ):
+            result = market_context_node({"active_islands": ["momentum"]})
+
+    assert cache_path.exists()
+    assert result["stage1_reliability"]["cache_written"] is True
 
 
 def test_stage1_node_reuses_same_day_market_context_after_round_zero():
