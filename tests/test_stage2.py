@@ -1003,7 +1003,7 @@ def test_factor_algebra_invalid_base_field_triggers_retry_hint():
     assert "$close, $open, $high, $low, $vwap, $volume, $amount" in captured_user_messages[1]
 
 
-def test_non_factor_algebra_subspace_keeps_free_form_path():
+def test_cross_market_valid_grounding_claim_preserves_note():
     from src.agents.researcher import AlphaResearcher
 
     mock_response = MagicMock()
@@ -1015,12 +1015,18 @@ def test_non_factor_algebra_subspace_keeps_free_form_path():
             "hypothesis": "cross market",
             "economic_intuition": "cross market",
             "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "grounding_claim": {
+                "mechanism_source": "库存周期传导",
+                "proxy_fields": ["$close"],
+                "proxy_rationale": "短中期价格均线差可代理库存周期传导下的价格趋势切换",
+                "formula_claim": "用短长均值差刻画机制在A股上的价格投影"
+            },
             "risk_factors": [],
             "market_context_date": "2026-03-23",
             "applicable_regimes": ["bull_trend"],
             "invalid_regimes": ["range_bound"]
         }],
-        "generation_rationale": "free form for non-factor-algebra"
+        "generation_rationale": "grounded cross-market"
     }'''
 
     with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
@@ -1047,6 +1053,135 @@ def test_non_factor_algebra_subspace_keeps_free_form_path():
     assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
     assert "factor_gene_by_note_id" not in researcher.last_generation_diagnostics
+    assert "grounding" not in researcher.last_generation_diagnostics["rejection_counts_by_filter"]
+
+
+def test_cross_market_missing_grounding_claim_triggers_retry():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_cross",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "cross market",
+            "economic_intuition": "cross market",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "missing grounding"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_cross",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "cross market grounded",
+            "economic_intuition": "cross market grounded",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "grounding_claim": {
+                "mechanism_source": "库存周期传导",
+                "proxy_fields": ["$close"],
+                "proxy_rationale": "价格趋势可作为跨市场机制在A股中的保守代理",
+                "formula_claim": "短长均线差刻画该机制的价格传导"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "fixed grounding"
+    }'''
+
+    async def capture_ainvoke(messages):
+        captured_user_messages.append(messages[-1].content)
+        return first if len(captured_user_messages) == 1 else second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.CROSS_MARKET,
+                        )
+                    )
+
+    assert [note.note_id for note in batch.notes] == ["good_cross"]
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("grounding", 0) >= 1
+    grouped = researcher.last_generation_diagnostics["rejection_counts_by_filter_and_subspace"]
+    assert grouped.get("grounding", {}).get("cross_market", 0) >= 1
+    assert "必须提供 grounding_claim 对象" in captured_user_messages[1]
+
+
+def test_narrative_mining_invalid_proxy_field_is_rejected_by_grounding():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [{
+            "note_id": "bad_narrative",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "narrative",
+            "economic_intuition": "narrative",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "grounding_claim": {
+                "mechanism_source": "政策口径",
+                "proxy_fields": ["$turnover_rate"],
+                "proxy_rationale": "换手率代理政策驱动关注度",
+                "formula_claim": "用换手率刻画政策叙事扩散"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "invalid proxy field"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.NARRATIVE_MINING,
+                        )
+                    )
+
+    assert batch.notes == []
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("grounding", 0) >= 1
+    grouped = researcher.last_generation_diagnostics["rejection_counts_by_filter_and_subspace"]
+    assert grouped.get("grounding", {}).get("narrative_mining", 0) >= 1
+    sample = researcher.last_generation_diagnostics["sample_rejections"][0]
+    assert sample["filter"] == "grounding"
+    assert "$turnover_rate" in sample["reason"]
 
 
 def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():

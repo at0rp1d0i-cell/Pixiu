@@ -47,6 +47,7 @@ from src.scheduling.subspace_context import build_subspace_context
 from src.schemas.exploration import SubspaceRegistry
 from src.skills.loader import SkillLoader
 from src.hypothesis.mutation import SymbolicMutator, try_all_mutations, build_mutation_record_dict
+from src.hypothesis.grounding import MechanismProxyClaim, validate_grounding_claim
 logger = logging.getLogger(__name__)
 
 _SKILL_LOADER = SkillLoader()
@@ -56,10 +57,12 @@ _MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
+_GROUNDING_STATUS_PREFIX = "invalid_grounding:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
 _FACTOR_GENE_RUNTIME_FIELD = "__factor_gene_runtime"
 _FACTOR_GENE_DIAGNOSTICS_KEY = "factor_gene_by_note_id"
+_GROUNDING_RUNTIME_FIELD = "__grounding_runtime"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -165,6 +168,32 @@ FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
 - 必须满足 `lookback_short < lookback_long`
 - `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
 - 如果 hypothesis 想引用 ROE / PB / float_mv / turnover_rate 等字段，请在本子空间改用价量代理；不要把这些字段写进 formula_recipe
+"""
+
+CROSS_MARKET_GROUNDING_INSTRUCTION = """
+## CROSS_MARKET 专用 grounding 约束（必须遵守）
+- 本子空间必须输出 `grounding_claim` 对象
+- `grounding_claim` 字段：
+  - mechanism_source: 必须选择一个已给出的跨市场机制模板名
+  - proxy_fields: 公式实际使用的运行时字段列表
+  - proxy_rationale: 为什么这些代理字段能承接该跨市场机制
+  - formula_claim: 用一句话说明公式如何实现该机制
+- `proxy_fields` 必须全部来自当前运行时可用字段
+- `proposed_formula` 必须实际使用 `proxy_fields` 中至少一个字段
+- 禁止只写“海外逻辑迁移到A股”而不给出明确代理字段
+"""
+
+NARRATIVE_GROUNDING_INSTRUCTION = """
+## NARRATIVE_MINING 专用 grounding 约束（必须遵守）
+- 本子空间必须输出 `grounding_claim` 对象
+- `grounding_claim` 字段：
+  - mechanism_source: 必须选择一个已给出的叙事类别名
+  - proxy_fields: 公式实际使用的运行时字段列表
+  - proxy_rationale: 为什么这些代理字段能承接该叙事机制
+  - formula_claim: 用一句话说明公式如何实现该叙事传导
+- `proxy_fields` 必须全部来自当前运行时可用字段
+- `proposed_formula` 必须实际使用 `proxy_fields` 中至少一个字段
+- 禁止只写定性叙事，不给出可检验代理
 """
 
 
@@ -375,6 +404,10 @@ class AlphaResearcher:
                 anti_collapse_section = self._build_factor_algebra_anti_collapse_section()
                 if anti_collapse_section:
                     user_msg += "\n\n" + anti_collapse_section
+            elif subspace_hint == ExplorationSubspace.CROSS_MARKET:
+                user_msg += "\n" + CROSS_MARKET_GROUNDING_INSTRUCTION
+            elif subspace_hint == ExplorationSubspace.NARRATIVE_MINING:
+                user_msg += "\n" + NARRATIVE_GROUNDING_INSTRUCTION
             if attempt > 0:
                 user_msg += (
                     "\n\n## 本地预筛拒绝反馈（重试约束）\n"
@@ -470,6 +503,11 @@ class AlphaResearcher:
         for note_data in notes_data:
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
                 note_data = self._render_factor_algebra_recipe_into_note(note_data)
+            elif subspace_hint in {
+                ExplorationSubspace.CROSS_MARKET,
+                ExplorationSubspace.NARRATIVE_MINING,
+            }:
+                note_data = self._render_grounding_claim_into_note(note_data, subspace_hint)
             note_data["note_id"] = _make_unique_note_id(
                 note_data.get("note_id"),
                 used_note_ids=emitted_note_ids,
@@ -483,6 +521,7 @@ class AlphaResearcher:
             note_data.setdefault("risk_factors", [])
             note_data.setdefault("market_context_date", _today_str())
             factor_gene_diagnostics = note_data.pop(_FACTOR_GENE_RUNTIME_FIELD, None)
+            grounding_diagnostics = note_data.pop(_GROUNDING_RUNTIME_FIELD, None)
             # 子空间溯源：优先使用 LLM 输出的值，fallback 到调度器分配的 hint
             if "exploration_subspace" not in note_data and subspace_hint:
                 note_data["exploration_subspace"] = subspace_hint.value
@@ -490,6 +529,8 @@ class AlphaResearcher:
             notes.append(note)
             if isinstance(factor_gene_diagnostics, dict):
                 self._factor_gene_by_note_id[note.note_id] = factor_gene_diagnostics
+            if isinstance(grounding_diagnostics, dict):
+                note.status = grounding_diagnostics.get("status", note.status)
 
         return AlphaResearcherBatch(
             island=self.island,
@@ -524,6 +565,47 @@ class AlphaResearcher:
             rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA
         return rendered_note
 
+    def _render_grounding_claim_into_note(
+        self,
+        note_data: dict[str, Any],
+        subspace: ExplorationSubspace,
+    ) -> dict[str, Any]:
+        rendered_note = dict(note_data)
+        grounding_payload = rendered_note.pop("grounding_claim", None)
+        if not isinstance(grounding_payload, dict):
+            rendered_note["status"] = f"{_GROUNDING_STATUS_PREFIX}missing_grounding_claim"
+            rendered_note[_GROUNDING_RUNTIME_FIELD] = {"subspace": subspace.value}
+            return rendered_note
+
+        try:
+            claim = MechanismProxyClaim(**grounding_payload)
+            formula = str(rendered_note.get("proposed_formula") or "")
+            error = validate_grounding_claim(
+                claim,
+                subspace=subspace,
+                registry=self.registry,
+                available_fields=self.capabilities.available_fields,
+                formula=formula,
+            )
+            rendered_note[_GROUNDING_RUNTIME_FIELD] = {
+                "subspace": subspace.value,
+                "mechanism_source": claim.mechanism_source,
+                "proxy_fields": list(claim.proxy_fields),
+                "proxy_rationale": claim.proxy_rationale,
+                "formula_claim": claim.formula_claim,
+                "status": rendered_note.get("status", "draft"),
+            }
+            if error is not None:
+                rendered_note["status"] = f"{_GROUNDING_STATUS_PREFIX}{error}"
+                rendered_note[_GROUNDING_RUNTIME_FIELD]["status"] = rendered_note["status"]
+        except Exception as exc:
+            rendered_note["status"] = f"{_GROUNDING_STATUS_PREFIX}{exc}"
+            rendered_note[_GROUNDING_RUNTIME_FIELD] = {
+                "subspace": subspace.value,
+                "status": rendered_note["status"],
+            }
+        return rendered_note
+
     @staticmethod
     def _factor_algebra_recipe_rejection_reason(note: FactorResearchNote) -> str | None:
         status = note.status or ""
@@ -531,6 +613,14 @@ class AlphaResearcher:
             return None
         detail = status.removeprefix(_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX).strip() or "invalid_formula_recipe"
         return f"FormulaSketch recipe 无效：{detail}"
+
+    @staticmethod
+    def _grounding_rejection_reason(note: FactorResearchNote) -> str | None:
+        status = note.status or ""
+        if not status.startswith(_GROUNDING_STATUS_PREFIX):
+            return None
+        detail = status.removeprefix(_GROUNDING_STATUS_PREFIX).strip() or "invalid_grounding_claim"
+        return f"Mechanism grounding 无效：{detail}"
 
     def _try_symbolic_mutation_batch(
         self,
@@ -764,6 +854,15 @@ class AlphaResearcher:
                     sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", recipe_reason, subspace))
                 continue
 
+            grounding_reason = self._grounding_rejection_reason(note)
+            if grounding_reason is not None:
+                rejection_counts["grounding"] += 1
+                subspace = _note_subspace_value(note)
+                rejection_counts_by_filter_and_subspace["grounding"][subspace] += 1
+                if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                    sample_rejections.append(self._build_stage2_rejection_sample(note, "grounding", grounding_reason, subspace))
+                continue
+
             passed, reason = validator.validate(note)
             if not passed:
                 rejection_counts["validator"] += 1
@@ -930,8 +1029,28 @@ class AlphaResearcher:
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
+            if "missing_grounding_claim" in reason_lower:
+                hint = "- CROSS_MARKET / NARRATIVE_MINING 必须提供 grounding_claim 对象，不能只给自由 hypothesis 和公式。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported mechanism_source" in reason_lower:
+                hint = "- mechanism_source 必须选择当前上下文里明确列出的机制模板名或叙事类别名。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported proxy_fields" in reason_lower:
+                hint = "- proxy_fields 必须全部来自当前运行时可用字段列表，不要猜测外部字段。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "formula does not use declared proxy_fields" in reason_lower:
+                hint = "- proposed_formula 必须实际使用 grounding_claim.proxy_fields 中至少一个字段。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
         if hints:
-            lines.append("针对本轮拒绝样本，请按下列 recipe 约束修正：")
+            lines.append("针对本轮拒绝样本，请按下列结构化约束修正：")
             lines.extend(hints)
         lines.append("请避免重复提交与上述拒绝原因相同的公式模式。")
         return "\n".join(lines)
