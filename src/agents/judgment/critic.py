@@ -33,7 +33,11 @@ class Critic:
         tags.append("passed" if overall_passed else f"failed:{failure_mode.value if failure_mode else 'unknown'}")
         tags.append(f"decision:{decision}")
 
-        if overall_passed:
+        if overall_passed and decision == "promote":
+            summary = f"{report.factor_id} passed deterministic and OOS checks with score {score:.2f}."
+        elif overall_passed and decision == "candidate":
+            summary = f"{report.factor_id} passed deterministic checks and is pending OOS validation."
+        elif overall_passed:
             summary = f"{report.factor_id} passed deterministic checks with score {score:.2f}."
         else:
             summary = failure_explanation

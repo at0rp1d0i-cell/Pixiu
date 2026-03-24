@@ -76,6 +76,7 @@ def write_factor(
             "verdict_id": record.verdict_id,
             "overall_passed": verdict.overall_passed,
             "passed": record.decision == "promote",
+            "candidate": record.decision == "candidate",
             "decision": record.decision,
             "score": record.score,
             "sharpe": record.sharpe,
@@ -131,6 +132,7 @@ def write_factor_v2(collection, record: FactorPoolRecord) -> None:
         "execution_succeeded": record.execution_succeeded,
         "parse_success": record.execution_succeeded,
         "passed": record.decision == "promote",
+        "candidate": record.decision == "candidate",
         "beats_baseline": record.decision == "promote",
     }
     collection.upsert(

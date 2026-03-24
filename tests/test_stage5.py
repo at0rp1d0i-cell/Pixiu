@@ -36,6 +36,7 @@ def _make_report(
     icir: float = 0.6,
     turnover_rate: float = 0.2,
     error_message: str | None = None,
+    oos_passed: bool | None = None,
 ) -> BacktestReport:
     return BacktestReport(
         report_id=f"report-{factor_id}",
@@ -57,6 +58,7 @@ def _make_report(
         execution_time_seconds=1.0,
         qlib_output_raw="BACKTEST_RESULT_JSON:{}",
         error_message=error_message,
+        oos_passed=oos_passed,
     )
 
 
@@ -70,7 +72,7 @@ def test_critic_passes_strong_report():
     verdict = asyncio.run(Critic().evaluate(report))
 
     assert verdict.overall_passed is True
-    assert verdict.decision == "promote"
+    assert verdict.decision == "candidate"
     assert verdict.note_id == report.note_id
     assert verdict.score > 0.8
     assert verdict.failure_mode is None
@@ -78,6 +80,16 @@ def test_critic_passes_strong_report():
     assert verdict.reason_codes == []
     assert "passed" in verdict.pool_tags
     assert verdict.verdict_id
+
+
+def test_critic_promotes_oos_passed_report():
+    report = _make_report(oos_passed=True)
+
+    verdict = asyncio.run(Critic().evaluate(report))
+
+    assert verdict.overall_passed is True
+    assert verdict.decision == "promote"
+    assert "decision:promote" in verdict.pool_tags
 
 
 def test_critic_reports_execution_failure():
@@ -137,11 +149,11 @@ def test_risk_auditor_and_writeback_contract():
     assert len(pool.registered) == 1
     assert pool.registered[0]["report"].factor_id == report.factor_id
     assert pool.registered[0]["verdict"].overall_passed is True
-    assert pool.registered[0]["verdict"].decision == "promote"
+    assert pool.registered[0]["verdict"].decision == "candidate"
 
 
 def test_portfolio_manager_and_report_writer_generate_minimal_outputs():
-    report = _make_report()
+    report = _make_report(oos_passed=True)
     verdict = asyncio.run(Critic().evaluate(report))
     state = AgentState(
         current_round=1,
@@ -160,8 +172,30 @@ def test_portfolio_manager_and_report_writer_generate_minimal_outputs():
     assert "## Best Factor" in cio_report.full_report_markdown
 
 
+def test_report_writer_surfaces_candidate_without_approval():
+    report = _make_report()
+    verdict = asyncio.run(Critic().evaluate(report))
+    state = AgentState(
+        current_round=1,
+        backtest_reports=[report],
+        critic_verdicts=[verdict],
+    )
+
+    allocation = asyncio.run(PortfolioManager().rebalance(state))
+    cio_report = asyncio.run(
+        ReportWriter().generate_cio_report(
+            state.model_copy(update={"portfolio_allocation": allocation})
+        )
+    )
+
+    assert verdict.decision == "candidate"
+    assert allocation.total_factors == 0
+    assert cio_report.new_factors_approved == 0
+    assert "Candidate factors: 1" in cio_report.full_report_markdown
+
+
 def test_report_writer_ignores_failed_verdicts_when_picking_best_factor():
-    passed_report = _make_report(factor_id="momentum_passed", sharpe=2.8)
+    passed_report = _make_report(factor_id="momentum_passed", sharpe=2.8, oos_passed=True)
     failed_report = _make_report(factor_id="momentum_failed", sharpe=6.0)
 
     passed_verdict = asyncio.run(Critic().evaluate(passed_report))
@@ -192,7 +226,7 @@ def test_report_writer_ignores_failed_verdicts_when_picking_best_factor():
 
 
 def test_report_writer_only_counts_promoted_factors_as_approved():
-    report = _make_report(factor_id="momentum_archived", sharpe=2.9)
+    report = _make_report(factor_id="momentum_archived", sharpe=2.9, oos_passed=True)
     verdict = asyncio.run(Critic().evaluate(report)).model_copy(
         update={
             "decision": "archive",
@@ -541,6 +575,7 @@ def test_stage45_golden_path_runs_end_to_end(tmp_path):
     assert Path(report.artifacts.stderr_path).exists()
     assert Path(report.artifacts.script_path).exists()
 
+    report = report.model_copy(update={"oos_passed": True})
     verdict = asyncio.run(Critic().evaluate(report))
     assert verdict.overall_passed is True
     assert verdict.decision == "promote"
@@ -703,10 +738,18 @@ class TestConstraintExtractor:
 # ─────────────────────────────────────────────────────────
 
 class TestScoring:
-    def test_decide_promotes_high_score(self):
+    def test_decide_candidates_without_oos(self):
         from src.agents.judgment._scoring import _decide
 
         report = _make_report(sharpe=3.0)
+        result = _decide(report, overall_passed=True, score=0.9, failed_checks=[])
+
+        assert result == "candidate"
+
+    def test_decide_promotes_high_score_with_oos(self):
+        from src.agents.judgment._scoring import _decide
+
+        report = _make_report(sharpe=3.0, oos_passed=True)
         result = _decide(report, overall_passed=True, score=0.9, failed_checks=[])
 
         assert result == "promote"

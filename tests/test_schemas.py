@@ -22,7 +22,14 @@ from src.schemas.thresholds import THRESHOLDS
 from src.schemas.market_context import MarketContextMemo, NorthboundFlow, MacroSignal, HistoricalInsight
 from src.schemas.research_note import FactorResearchNote, ExplorationQuestion, SynthesisInsight
 from src.schemas.exploration import ExplorationRequest, ExplorationResult
-from src.schemas.backtest import BacktestReport, BacktestMetrics, ExecutionMeta, FactorSpecSnapshot, ArtifactRefs
+from src.schemas.backtest import (
+    BacktestReport,
+    BacktestMetrics,
+    ExecutionMeta,
+    FactorSpecSnapshot,
+    ArtifactRefs,
+    ValidationWindow,
+)
 from src.schemas.judgment import CriticVerdict, ThresholdCheck, RiskAuditReport, CorrelationFlag, PortfolioAllocation, FactorWeight, CIOReport
 from src.schemas.factor_pool import FactorPoolRecord
 LegacyFactorPoolRecord = FactorPoolRecord
@@ -144,12 +151,30 @@ def test_backtest_report_metrics():
             economic_rationale="低估值回归均值",
         ),
         artifacts=ArtifactRefs(),
+        discovery_window=ValidationWindow(
+            start_date="2020-01-01",
+            end_date="2024-01-01",
+            coverage=0.95,
+            notes="Discovery test window",
+        ),
+        oos_window=ValidationWindow(
+            start_date="2024-01-02",
+            end_date="2025-01-01",
+            coverage=0.9,
+            notes="OOS follow-up window",
+        ),
+        discovery_passed=True,
+        oos_passed=None,
     )
     
     assert report.passed is True
     assert report.metrics.sharpe == 2.8
     assert report.metrics.annualized_return == 0.25
     assert report.factor_spec is not None
+    assert report.discovery_window is not None
+    assert report.oos_window is not None
+    assert report.discovery_passed is True
+    assert report.oos_passed is None
 
 def test_critic_verdict():
     """测试 Stage 5 Critic 的判定报告 Schema"""
@@ -184,6 +209,24 @@ def test_critic_verdict():
     assert len(verdict.checks) == 1
     assert verdict.failure_mode == "low_sharpe"
     assert verdict.verdict_id
+
+
+def test_critic_verdict_accepts_candidate():
+    verdict = CriticVerdict(
+        report_id="rep-456",
+        factor_id="factor-456",
+        note_id="note-456",
+        overall_passed=True,
+        decision="candidate",
+        score=0.5,
+        checks=[],
+        register_to_pool=True,
+        pool_tags=["candidate_test"],
+        reason_codes=[],
+    )
+
+    assert verdict.decision == "candidate"
+    assert verdict.overall_passed is True
 
 
 def test_factor_pool_record_schema():

@@ -305,6 +305,60 @@ class TestReads:
         assert meta["parse_success"] is False
         assert meta["beats_baseline"] is True
 
+    def test_register_factor_candidate_is_not_counted_as_passed(self, pool):
+        report = BacktestReport(
+            report_id="report-candidate",
+            note_id="note-candidate",
+            factor_id="factor-candidate",
+            island="momentum",
+            formula="$close",
+            metrics=BacktestMetrics(
+                sharpe=3.0,
+                annualized_return=0.2,
+                max_drawdown=0.1,
+                ic_mean=0.04,
+                ic_std=0.03,
+                icir=0.6,
+                turnover_rate=0.18,
+                coverage=0.9,
+            ),
+            passed=True,
+            execution_succeeded=True,
+            execution_time_seconds=1.0,
+            qlib_output_raw="{}",
+        )
+        verdict = CriticVerdict(
+            report_id="report-candidate",
+            factor_id="factor-candidate",
+            note_id="note-candidate",
+            overall_passed=True,
+            decision="candidate",
+            score=0.88,
+            checks=[],
+            register_to_pool=True,
+            pool_tags=["passed", "decision:candidate"],
+            reason_codes=[],
+        )
+        risk = RiskAuditReport(
+            factor_id="factor-candidate",
+            overfitting_score=0.1,
+            overfitting_flag=False,
+            correlation_flags=[],
+            recommendation="clear",
+            audit_notes="ok",
+        )
+
+        pool.register_factor(report=report, verdict=verdict, risk_report=risk)
+
+        rows = pool._collection.get(ids=["factor-candidate"], include=["metadatas"])
+        assert len(rows["metadatas"]) == 1
+        meta = rows["metadatas"][0]
+        assert meta["decision"] == "candidate"
+        assert meta["candidate"] is True
+        assert meta["passed"] is False
+        passed = pool.get_passed_factors(limit=10)
+        assert all(row["factor_id"] != "factor-candidate" for row in passed)
+
     def test_register_factor_v2_compatibility_seed_data(self, pool):
         record = FactorPoolRecord(
             factor_id="factor-v2",

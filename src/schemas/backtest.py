@@ -30,6 +30,13 @@ class ArtifactRefs(PixiuBase):
     equity_curve_path: Optional[str] = None
 
 
+class ValidationWindow(PixiuBase):
+    start_date: date
+    end_date: date
+    coverage: Optional[float] = None
+    notes: Optional[str] = None
+
+
 class BacktestMetrics(PixiuBase):
     sharpe: float
     annualized_return: float
@@ -67,3 +74,8 @@ class BacktestReport(PixiuBase):
     execution_meta: Optional[ExecutionMeta] = None
     factor_spec: Optional[FactorSpecSnapshot] = None
     artifacts: Optional[ArtifactRefs] = None
+
+    discovery_window: Optional[ValidationWindow] = None
+    oos_window: Optional[ValidationWindow] = None
+    discovery_passed: Optional[bool] = None
+    oos_passed: Optional[bool] = None

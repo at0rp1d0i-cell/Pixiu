@@ -28,6 +28,10 @@ class ReportWriter:
             verdict for verdict in state.critic_verdicts
             if verdict.decision == "promote"
         ]
+        candidate_verdicts = [
+            verdict for verdict in state.critic_verdicts
+            if verdict.decision == "candidate"
+        ]
         passed_verdicts = [
             verdict for verdict in state.critic_verdicts if verdict.overall_passed
         ]
@@ -48,6 +52,10 @@ class ReportWriter:
             )
         if allocation.total_factors:
             highlights.append(f"Portfolio now tracks {allocation.total_factors} approved factor(s).")
+        if candidate_verdicts:
+            highlights.append(
+                f"{len(candidate_verdicts)} factor(s) passed deterministic checks and remain candidates pending OOS validation."
+            )
         archived_count = sum(1 for verdict in passed_verdicts if verdict.decision == "archive")
         if archived_count:
             highlights.append(
@@ -64,6 +72,7 @@ class ReportWriter:
             allocation,
             best_report,
             promoted_verdicts,
+            candidate_verdicts,
             passed_verdicts,
             non_promoted_verdicts,
         )
@@ -92,6 +101,7 @@ class ReportWriter:
         allocation: PortfolioAllocation,
         best_report: BacktestReport | None,
         promoted_verdicts: list[CriticVerdict],
+        candidate_verdicts: list[CriticVerdict],
         passed_verdicts: list[CriticVerdict],
         non_promoted_verdicts: list[CriticVerdict],
     ) -> str:
@@ -106,6 +116,7 @@ class ReportWriter:
             "## Summary",
             f"- Tested factors: {len(state.backtest_reports)}",
             f"- Promoted factors: {len(promoted_verdicts)}",
+            f"- Candidate factors: {len(candidate_verdicts)}",
             f"- Deterministic passes: {len(passed_verdicts)}",
             f"- Best factor: {best_factor_id}",
             f"- Best Sharpe: {best_sharpe}",

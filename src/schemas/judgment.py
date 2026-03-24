@@ -33,7 +33,7 @@ class CriticVerdict(PixiuBase):
     factor_id: str
     note_id: Optional[str] = None
     overall_passed: bool
-    decision: Optional[Literal["promote", "archive", "reject", "retry"]] = None
+    decision: Optional[Literal["candidate", "promote", "archive", "reject", "retry"]] = None
     score: float = 0.0
 
     # 逐项检查
