@@ -524,6 +524,194 @@ def test_factor_algebra_factor_gene_diagnostics_include_gene_bundle():
     assert gene_bundle["variant_gene_key"] == "5|20|20|0.8"
 
 
+def test_factor_algebra_blank_note_id_gets_unique_emitted_id_and_gene_key():
+    from src.agents.researcher import AlphaResearcher
+
+    content = '''{
+        "notes": [
+            {
+                "note_id": "   ",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "blank id",
+                "economic_intuition": "blank id",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "blank id"
+    }'''
+
+    researcher = AlphaResearcher(
+        island="momentum",
+        capabilities=_stage2_test_capabilities(),
+    )
+    batch = researcher._parse_batch(
+        content=content,
+        iteration=1,
+        subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+
+    emitted_note_id = batch.notes[0].note_id
+    assert emitted_note_id.strip() != ""
+    assert emitted_note_id != "   "
+    gene_map = researcher._factor_gene_by_note_id
+    assert list(gene_map.keys()) == [emitted_note_id]
+
+
+def test_factor_algebra_duplicate_note_ids_are_deduped_for_diagnostics_map():
+    from src.agents.researcher import AlphaResearcher
+
+    content = '''{
+        "notes": [
+            {
+                "note_id": "dup_note",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "dup 1",
+                "economic_intuition": "dup 1",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "dup_note",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "dup 2",
+                "economic_intuition": "dup 2",
+                "formula_recipe": {
+                    "base_field": "$volume",
+                    "lookback_short": 10,
+                    "lookback_long": 30,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "duplicate note ids"
+    }'''
+
+    researcher = AlphaResearcher(
+        island="momentum",
+        capabilities=_stage2_test_capabilities(),
+    )
+    batch = researcher._parse_batch(
+        content=content,
+        iteration=1,
+        subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+
+    emitted_note_ids = [note.note_id for note in batch.notes]
+    assert len(emitted_note_ids) == 2
+    assert len(set(emitted_note_ids)) == 2
+    assert "dup_note" in emitted_note_ids
+    assert any(note_id != "dup_note" and note_id.startswith("dup_note_") for note_id in emitted_note_ids)
+    gene_map = researcher._factor_gene_by_note_id
+    assert set(gene_map.keys()) == set(emitted_note_ids)
+
+
+def test_factor_algebra_gene_sidecar_keys_match_emitted_note_ids():
+    from src.agents.researcher import AlphaResearcher
+
+    content = '''{
+        "notes": [
+            {
+                "note_id": "",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "blank",
+                "economic_intuition": "blank",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "dup_same",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "dup a",
+                "economic_intuition": "dup a",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 10,
+                    "lookback_long": 30,
+                    "transform_family": "ratio_momentum",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "dup_same",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "dup b",
+                "economic_intuition": "dup b",
+                "formula_recipe": {
+                    "base_field": "$volume",
+                    "lookback_short": 20,
+                    "lookback_long": 60,
+                    "transform_family": "mean_spread",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "sidecar note-id consistency"
+    }'''
+
+    researcher = AlphaResearcher(
+        island="momentum",
+        capabilities=_stage2_test_capabilities(),
+    )
+    batch = researcher._parse_batch(
+        content=content,
+        iteration=1,
+        subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+
+    emitted_note_ids = [note.note_id for note in batch.notes]
+    assert len(emitted_note_ids) == len(set(emitted_note_ids))
+    gene_map = researcher._factor_gene_by_note_id
+    assert set(gene_map.keys()) == set(emitted_note_ids)
+    assert all(gene_map[note_id]["family_gene_key"].startswith("factor_algebra|") for note_id in emitted_note_ids)
+
+
 def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     from src.agents.researcher import AlphaResearcher
 

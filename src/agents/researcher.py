@@ -420,22 +420,34 @@ class AlphaResearcher:
         notes_data = data.get("notes", [data])  # 兼容降级
 
         notes = []
+        emitted_note_ids: set[str] = set()
         for note_data in notes_data:
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
                 note_data = self._render_factor_algebra_recipe_into_note(note_data)
-            note_data.setdefault("note_id", f"{self.island}_{_today_str()}_{uuid.uuid4().hex[:8]}")
+            raw_note_id = note_data.get("note_id")
+            note_id = raw_note_id.strip() if isinstance(raw_note_id, str) else ""
+            if not note_id:
+                note_id = f"{self.island}_{_today_str()}_{uuid.uuid4().hex[:8]}"
+            if note_id in emitted_note_ids:
+                dedupe_seed = note_id
+                note_id = f"{dedupe_seed}_{uuid.uuid4().hex[:8]}"
+                while note_id in emitted_note_ids:
+                    note_id = f"{dedupe_seed}_{uuid.uuid4().hex[:8]}"
+            note_data["note_id"] = note_id
+            emitted_note_ids.add(note_id)
             note_data.setdefault("island", self.island)
             note_data.setdefault("iteration", iteration)
             note_data.setdefault("exploration_questions", [])
             note_data.setdefault("risk_factors", [])
             note_data.setdefault("market_context_date", _today_str())
             factor_gene_diagnostics = note_data.pop(_FACTOR_GENE_RUNTIME_FIELD, None)
-            if isinstance(factor_gene_diagnostics, dict):
-                self._factor_gene_by_note_id[str(note_data["note_id"])] = factor_gene_diagnostics
             # 子空间溯源：优先使用 LLM 输出的值，fallback 到调度器分配的 hint
             if "exploration_subspace" not in note_data and subspace_hint:
                 note_data["exploration_subspace"] = subspace_hint.value
-            notes.append(FactorResearchNote(**note_data))
+            note = FactorResearchNote(**note_data)
+            notes.append(note)
+            if isinstance(factor_gene_diagnostics, dict):
+                self._factor_gene_by_note_id[note.note_id] = factor_gene_diagnostics
 
         return AlphaResearcherBatch(
             island=self.island,
