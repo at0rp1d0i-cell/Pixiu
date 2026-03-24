@@ -453,6 +453,77 @@ def test_factor_algebra_renders_formula_from_recipe_payload():
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
 
 
+def test_factor_algebra_factor_gene_diagnostics_include_gene_bundle():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [
+            {
+                "note_id": "gene_ok",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "gene",
+                "economic_intuition": "gene",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "secondary_field": "$volume",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "volume_confirmation",
+                    "interaction_mode": "mul",
+                    "normalization": "quantile",
+                    "normalization_window": 20,
+                    "quantile_qscore": 0.8
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "factor gene diagnostics"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul, Quantile"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    gene_bundle = researcher.last_generation_diagnostics["factor_gene_by_note_id"]["gene_ok"]
+    assert gene_bundle["family_gene"] == {
+        "subspace": "factor_algebra",
+        "transform_family": "volume_confirmation",
+        "base_field": "$close",
+        "secondary_field": "$volume",
+        "interaction_mode": "mul",
+        "normalization_kind": "quantile",
+    }
+    assert gene_bundle["variant_gene"] == {
+        "lookback_short": 5,
+        "lookback_long": 20,
+        "normalization_window": 20,
+        "quantile_qscore": 0.8,
+    }
+    assert gene_bundle["family_gene_key"] == "factor_algebra|volume_confirmation|$close|$volume|mul|quantile"
+    assert gene_bundle["variant_gene_key"] == "5|20|20|0.8"
+
+
 def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     from src.agents.researcher import AlphaResearcher
 
@@ -787,6 +858,7 @@ def test_non_factor_algebra_subspace_keeps_free_form_path():
     assert batch.notes[0].note_id == "cross_market_free_form"
     assert batch.notes[0].proposed_formula == "Mean($close, 5) - Mean($close, 20)"
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+    assert "factor_gene_by_note_id" not in researcher.last_generation_diagnostics
 
 
 def test_alpha_researcher_local_prescreen_rejects_unsafe_formula():
@@ -953,6 +1025,57 @@ def test_alpha_researcher_local_novelty_rejects_duplicate_formula():
     assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("novelty", 0) >= 1
 
 
+def test_factor_gene_rejection_sample_includes_gene_keys_when_available():
+    from src.agents.researcher import AlphaResearcher
+
+    duplicate = MagicMock()
+    duplicate.content = '''{
+        "notes": [{
+            "note_id": "dup_gene", "island": "momentum", "iteration": 1,
+            "hypothesis": "dup", "economic_intuition": "dup",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [], "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"], "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "dup"
+    }'''
+    mock_pool = MagicMock()
+    mock_pool.get_island_factors.return_value = [
+        {"formula": "Mean($close, 5) - Mean($close, 20)", "factor_id": "existing"}
+    ]
+    mock_pool.get_passed_factors.return_value = []
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[duplicate, duplicate])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    sample = researcher.last_generation_diagnostics["sample_rejections"][0]
+    assert sample["filter"] == "novelty"
+    assert sample["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
+    assert sample["variant_gene_key"] == "5|20|null|null"
+
+
 def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     from src.agents.researcher import AlphaResearcher
 
@@ -1043,6 +1166,7 @@ def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics()
                     proposed_formula="Mean($close, 5) - Mean($close, 20)",
                     risk_factors=[],
                     market_context_date="2026-03-08",
+                    exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
                 )
                 instance.generate_batch = AsyncMock(
                     return_value=AlphaResearcherBatch(
@@ -1057,6 +1181,12 @@ def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics()
                     "local_retry_count": 0,
                     "rejection_counts_by_filter": {},
                     "sample_rejections": [],
+                    "factor_gene_by_note_id": {
+                        note.note_id: {
+                            "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                            "variant_gene_key": "5|20|null|null",
+                        }
+                    },
                 }
                 return instance
 
@@ -1069,6 +1199,8 @@ def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics()
     assert all(pool is sentinel_pool for pool in captured_pools)
     assert "stage2_diagnostics" in result
     assert result["stage2_diagnostics"]["generated_count"] >= 1
+    gene_diag = result["stage2_diagnostics"]["factor_gene_by_note_id"]["momentum_x"]
+    assert gene_diag["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
 
 
 def test_alpha_researcher_symbolic_path_runs_local_prescreen():

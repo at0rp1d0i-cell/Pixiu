@@ -28,6 +28,12 @@ from src.formula.capabilities import (
     format_available_operators_for_prompt,
     get_runtime_formula_capabilities,
 )
+from src.formula.gene import (
+    build_family_gene,
+    build_family_gene_key,
+    build_variant_gene,
+    build_variant_gene_key,
+)
 from src.formula.sketch import (
     ALLOWED_BASE_FIELDS,
     ALLOWED_QUANTILE_QSCORES,
@@ -50,6 +56,8 @@ _MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
+_FACTOR_GENE_RUNTIME_FIELD = "__factor_gene_runtime"
+_FACTOR_GENE_DIAGNOSTICS_KEY = "factor_gene_by_note_id"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -196,6 +204,7 @@ class AlphaResearcher:
         self.factor_pool = factor_pool
         self._llm = None
         self.last_generation_diagnostics: dict[str, Any] = {}
+        self._factor_gene_by_note_id: dict[str, dict[str, Any]] = {}
 
     def _get_llm(self):
         if self._llm is None:
@@ -216,6 +225,7 @@ class AlphaResearcher:
         """
         from src.factor_pool.islands import ISLANDS
         island_info = ISLANDS.get(self.island, {})
+        self._factor_gene_by_note_id = {}
 
         # 构建市场上下文字符串
         if context:
@@ -252,6 +262,8 @@ class AlphaResearcher:
                     "rejection_counts_by_filter_and_subspace": diagnostics["rejection_counts_by_filter_and_subspace"],
                     "sample_rejections": diagnostics["sample_rejections"],
                 }
+                if self._factor_gene_by_note_id:
+                    self.last_generation_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = dict(self._factor_gene_by_note_id)
                 if not approved_notes:
                     logger.info(
                         "[AlphaResearcher] SYMBOLIC_MUTATION 本地预筛后无可用候选: island=%s",
@@ -360,6 +372,8 @@ class AlphaResearcher:
                     },
                     "sample_rejections": sample_rejections,
                 }
+                if self._factor_gene_by_note_id:
+                    self.last_generation_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = dict(self._factor_gene_by_note_id)
                 return parsed_batch.model_copy(update={"notes": approved_notes})
 
             if attempt < _MAX_LOCAL_RETRY:
@@ -384,6 +398,8 @@ class AlphaResearcher:
             },
             "sample_rejections": sample_rejections,
         }
+        if self._factor_gene_by_note_id:
+            self.last_generation_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = dict(self._factor_gene_by_note_id)
         return AlphaResearcherBatch(
             island=self.island,
             notes=[],
@@ -413,6 +429,9 @@ class AlphaResearcher:
             note_data.setdefault("exploration_questions", [])
             note_data.setdefault("risk_factors", [])
             note_data.setdefault("market_context_date", _today_str())
+            factor_gene_diagnostics = note_data.pop(_FACTOR_GENE_RUNTIME_FIELD, None)
+            if isinstance(factor_gene_diagnostics, dict):
+                self._factor_gene_by_note_id[str(note_data["note_id"])] = factor_gene_diagnostics
             # 子空间溯源：优先使用 LLM 输出的值，fallback 到调度器分配的 hint
             if "exploration_subspace" not in note_data and subspace_hint:
                 note_data["exploration_subspace"] = subspace_hint.value
@@ -438,6 +457,14 @@ class AlphaResearcher:
         try:
             recipe = FormulaRecipe(**recipe_payload)
             rendered_note["proposed_formula"] = render_formula_recipe(recipe)
+            family_gene = build_family_gene(recipe)
+            variant_gene = build_variant_gene(recipe)
+            rendered_note[_FACTOR_GENE_RUNTIME_FIELD] = {
+                "family_gene": family_gene,
+                "variant_gene": variant_gene,
+                "family_gene_key": build_family_gene_key(family_gene),
+                "variant_gene_key": build_variant_gene_key(variant_gene),
+            }
         except Exception as exc:
             rendered_note["status"] = f"{_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX}{exc}"
             rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA
@@ -626,14 +653,7 @@ class AlphaResearcher:
                 subspace = _note_subspace_value(note)
                 rejection_counts_by_filter_and_subspace["validator"][subspace] += 1
                 if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
-                    sample_rejections.append(
-                        {
-                            "note_id": note.note_id,
-                            "filter": "validator",
-                            "reason": recipe_reason,
-                            "exploration_subspace": subspace,
-                        }
-                    )
+                    sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", recipe_reason, subspace))
                 continue
 
             passed, reason = validator.validate(note)
@@ -642,14 +662,7 @@ class AlphaResearcher:
                 subspace = _note_subspace_value(note)
                 rejection_counts_by_filter_and_subspace["validator"][subspace] += 1
                 if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
-                    sample_rejections.append(
-                        {
-                            "note_id": note.note_id,
-                            "filter": "validator",
-                            "reason": reason,
-                            "exploration_subspace": subspace,
-                        }
-                    )
+                    sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", reason, subspace))
                 continue
 
             if novelty_filter is not None:
@@ -659,14 +672,7 @@ class AlphaResearcher:
                     subspace = _note_subspace_value(note)
                     rejection_counts_by_filter_and_subspace["novelty"][subspace] += 1
                     if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
-                        sample_rejections.append(
-                            {
-                                "note_id": note.note_id,
-                                "filter": "novelty",
-                                "reason": reason,
-                                "exploration_subspace": subspace,
-                            }
-                        )
+                        sample_rejections.append(self._build_stage2_rejection_sample(note, "novelty", reason, subspace))
                     continue
 
             approved_notes.append(note)
@@ -681,6 +687,30 @@ class AlphaResearcher:
             },
             "sample_rejections": sample_rejections,
         }
+
+    def _build_stage2_rejection_sample(
+        self,
+        note: FactorResearchNote,
+        filter_name: str,
+        reason: str,
+        exploration_subspace: str,
+    ) -> dict[str, str]:
+        sample: dict[str, str] = {
+            "note_id": note.note_id,
+            "filter": filter_name,
+            "reason": reason,
+            "exploration_subspace": exploration_subspace,
+        }
+        factor_gene = self._factor_gene_by_note_id.get(note.note_id)
+        if not factor_gene:
+            return sample
+        family_gene_key = factor_gene.get("family_gene_key")
+        variant_gene_key = factor_gene.get("variant_gene_key")
+        if isinstance(family_gene_key, str):
+            sample["family_gene_key"] = family_gene_key
+        if isinstance(variant_gene_key, str):
+            sample["variant_gene_key"] = variant_gene_key
+        return sample
 
     @staticmethod
     def _build_local_rejection_feedback(sample_rejections: list[dict[str, str]]) -> str:
@@ -845,6 +875,7 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     stage2_rejection_counts = Counter()
     stage2_rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
     stage2_sample_rejections: list[dict[str, str]] = []
+    stage2_factor_gene_by_note_id: dict[str, dict[str, Any]] = {}
     stage2_generated_count = 0
     stage2_delivered_count = 0
     stage2_retry_count = 0
@@ -858,6 +889,9 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         for filter_name, subspace_counts in diagnostics.get("rejection_counts_by_filter_and_subspace", {}).items():
             if isinstance(subspace_counts, dict):
                 stage2_rejection_counts_by_filter_and_subspace[filter_name].update(subspace_counts)
+        factor_gene_diagnostics = diagnostics.get(_FACTOR_GENE_DIAGNOSTICS_KEY)
+        if isinstance(factor_gene_diagnostics, dict):
+            stage2_factor_gene_by_note_id.update(factor_gene_diagnostics)
         for item in diagnostics.get("sample_rejections", []):
             if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
                 break
@@ -878,23 +912,27 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     hypotheses: list[Hypothesis] = [note.to_hypothesis() for note in all_notes]
     strategy_specs: list[StrategySpec] = [note.to_strategy_spec() for note in all_notes]
 
+    stage2_diagnostics = {
+        "generated_count": stage2_generated_count,
+        "delivered_count": stage2_delivered_count,
+        "local_retry_count": stage2_retry_count,
+        "rejection_counts_by_filter": dict(stage2_rejection_counts),
+        "rejection_counts_by_filter_and_subspace": {
+            filter_name: dict(subspace_counts)
+            for filter_name, subspace_counts in stage2_rejection_counts_by_filter_and_subspace.items()
+        },
+        "sample_rejections": stage2_sample_rejections,
+    }
+    if stage2_factor_gene_by_note_id:
+        stage2_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = stage2_factor_gene_by_note_id
+
     return {
         "research_notes": all_notes,
         "hypotheses": hypotheses,
         "strategy_specs": strategy_specs,
         "scheduler_state": scheduler_state.model_dump(),
         "subspace_generated": {s.value: v[0] for s, v in subspace_results.items()},
-        "stage2_diagnostics": {
-            "generated_count": stage2_generated_count,
-            "delivered_count": stage2_delivered_count,
-            "local_retry_count": stage2_retry_count,
-            "rejection_counts_by_filter": dict(stage2_rejection_counts),
-            "rejection_counts_by_filter_and_subspace": {
-                filter_name: dict(subspace_counts)
-                for filter_name, subspace_counts in stage2_rejection_counts_by_filter_and_subspace.items()
-            },
-            "sample_rejections": stage2_sample_rejections,
-        },
+        "stage2_diagnostics": stage2_diagnostics,
     }
 
 
