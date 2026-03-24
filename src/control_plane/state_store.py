@@ -19,6 +19,13 @@ _DEFAULT_DB_PATH = (
 )
 
 
+def resolve_state_store_path(db_path: str | Path | None = None) -> Path:
+    if db_path is not None:
+        return Path(db_path)
+    configured_path = os.getenv("PIXIU_STATE_STORE_PATH")
+    return Path(configured_path) if configured_path else _DEFAULT_DB_PATH
+
+
 def _iso(ts: datetime | None) -> str | None:
     if ts is None:
         return None
@@ -34,8 +41,8 @@ def _dt(ts: str | None) -> datetime | None:
 class StateStore:
     """Minimal SQLite-backed control-plane repository."""
 
-    def __init__(self, db_path: str | Path = _DEFAULT_DB_PATH):
-        self._db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None):
+        self._db_path = resolve_state_store_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_tables()
 
@@ -423,18 +430,23 @@ class StateStore:
 
 
 _state_store: StateStore | None = None
+_state_store_path: Path | None = None
 
 
 def get_state_store(db_path: str | Path | None = None) -> StateStore:
     """Return the process-wide control-plane store singleton."""
-    global _state_store
+    global _state_store, _state_store_path
 
-    if db_path is not None:
-        _state_store = StateStore(db_path)
-        return _state_store
+    resolved_path = resolve_state_store_path(db_path)
 
-    if _state_store is None:
-        configured_path = os.getenv("PIXIU_STATE_STORE_PATH")
-        _state_store = StateStore(configured_path or _DEFAULT_DB_PATH)
+    if _state_store is None or _state_store_path != resolved_path:
+        _state_store = StateStore(resolved_path)
+        _state_store_path = resolved_path
 
     return _state_store
+
+
+def reset_state_store() -> None:
+    global _state_store, _state_store_path
+    _state_store = None
+    _state_store_path = None

@@ -39,11 +39,16 @@ class IslandScheduler:
             scheduler.on_epoch_done(island, round_n)
     """
 
-    def __init__(self, pool: FactorPool, seed: Optional[int] = None):
+    def __init__(
+        self,
+        pool: FactorPool,
+        seed: Optional[int] = None,
+        active_islands: Optional[list[str]] = None,
+    ):
         self._pool = pool
         self._temperature = T_INIT
         self._round = 0
-        self._active_islands: list[str] = list(DEFAULT_ACTIVE_ISLANDS)
+        self._active_islands: list[str] = self._resolve_active_islands(active_islands)
         # 所有可用但当前未激活的 Island（作为重置补充池）
         self._reserve_islands: list[str] = [
             name for name in ISLANDS if name not in self._active_islands
@@ -122,6 +127,18 @@ class IslandScheduler:
     # ─────────────────────────────────────────────
     # 内部方法
     # ─────────────────────────────────────────────
+
+    @staticmethod
+    def _resolve_active_islands(active_islands: Optional[list[str]]) -> list[str]:
+        ordered = list(active_islands) if active_islands else list(DEFAULT_ACTIVE_ISLANDS)
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for island in ordered:
+            if island not in ISLANDS or island in seen:
+                continue
+            seen.add(island)
+            resolved.append(island)
+        return resolved or list(DEFAULT_ACTIVE_ISLANDS)
 
     def _get_island_sharpes(self) -> dict[str, float]:
         """从 FactorPool 获取各 Island 的历史最优 Sharpe。

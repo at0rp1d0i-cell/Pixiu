@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from datetime import date
+from pathlib import Path
 from time import perf_counter
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -24,6 +25,7 @@ from src.schemas.stage_io import MarketContextOutput
 from src.skills.loader import SkillLoader
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _SKILL_LOADER = SkillLoader()
 _DEGRADED_SUMMARY_PREFIX = "市场数据获取失败："
@@ -100,6 +102,8 @@ valuation（估值）、volatility（波动率）、volume（量价）、sentime
 _DEFAULT_STAGE1_TIMEOUT_SEC = 60.0
 _DEFAULT_STAGE1_MAX_TOOL_ROUNDS = 3
 _MAX_STAGE1_SAMPLE_FAILURES = 5
+_DEFAULT_STAGE1_CONTEXT_MODE = "live"
+_STAGE1_CONTEXT_MODES = {"live", "cached", "frozen"}
 
 
 def _today_str() -> str:
@@ -159,6 +163,28 @@ def _stage1_rss_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _stage1_enrichment_enabled() -> bool:
+    raw = os.getenv("PIXIU_STAGE1_ENABLE_ENRICHMENT", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _get_stage1_context_mode() -> str:
+    raw = os.getenv("PIXIU_STAGE1_CONTEXT_MODE", _DEFAULT_STAGE1_CONTEXT_MODE).strip().lower()
+    return raw if raw in _STAGE1_CONTEXT_MODES else _DEFAULT_STAGE1_CONTEXT_MODE
+
+
+def _get_stage1_context_path(active_islands: list[str] | None = None) -> Path:
+    raw = os.getenv("PIXIU_STAGE1_CONTEXT_PATH", "").strip()
+    if raw:
+        path = Path(raw)
+    else:
+        suffix = active_islands[0] if active_islands else "default"
+        path = PROJECT_ROOT / "data" / "market_context_cache" / f"{suffix}.json"
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
 def _build_stage1_stdio_server(server_path: str) -> dict[str, object]:
     """Build stdio server config with explicit env forwarding for child MCP processes."""
     return {
@@ -172,11 +198,12 @@ def _build_stage1_stdio_server(server_path: str) -> dict[str, object]:
 def _select_stage1_tools(tools: list) -> dict[str, list]:
     """Split Stage 1 tools into blocking and enrichment allowlists."""
     selected = {"blocking": [], "enrichment": []}
+    enrichment_enabled = _stage1_enrichment_enabled()
     for tool in tools:
         name = getattr(tool, "name", "")
         if name in _STAGE1_BLOCKING_TOOL_NAMES:
             selected["blocking"].append(tool)
-        elif name in _STAGE1_ENRICHMENT_TOOL_NAMES:
+        elif enrichment_enabled and name in _STAGE1_ENRICHMENT_TOOL_NAMES:
             selected["enrichment"].append(tool)
     return selected
 
@@ -201,15 +228,97 @@ def _empty_stage1_reliability() -> dict:
         "blocking_tools_expected": [],
         "blocking_tools_used": [],
         "enrichment_tools_used": [],
+        "context_mode": _DEFAULT_STAGE1_CONTEXT_MODE,
+        "context_source": "live_tools",
+        "cache_written": False,
         "tool_calls_total": 0,
         "tool_timeouts_total": 0,
         "tool_errors_total": 0,
+        "blocking_failures_total": 0,
+        "enrichment_failures_total": 0,
         "finalization_forced": False,
         "degraded": False,
         "degrade_reason": None,
         "tool_stats": {},
         "sample_failures": [],
+        "payload_warnings": [],
     }
+
+
+def _classify_stage1_tool_tier(tool_name: str) -> str:
+    if tool_name in _STAGE1_BLOCKING_TOOL_NAMES:
+        return "blocking"
+    if tool_name in _STAGE1_ENRICHMENT_TOOL_NAMES:
+        return "enrichment"
+    return "unknown"
+
+
+def _is_string_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _normalize_market_context_payload(data: dict) -> tuple[dict, list[dict[str, str]]]:
+    normalized = dict(data)
+    payload_warnings: list[dict[str, str]] = []
+
+    if "historical_insights" in normalized:
+        historical_insights = normalized["historical_insights"]
+        if not isinstance(historical_insights, list) or (
+            historical_insights and not isinstance(historical_insights[0], dict)
+        ):
+            normalized["historical_insights"] = []
+            payload_warnings.append(
+                {
+                    "field": "historical_insights",
+                    "kind": "invalid_shape",
+                    "message": "coerced invalid historical_insights payload to []",
+                }
+            )
+
+    if "northbound" in normalized and normalized["northbound"] is not None:
+        northbound = normalized["northbound"]
+        is_valid_northbound = (
+            isinstance(northbound, dict)
+            and northbound.get("net_buy_bn") is not None
+            and _is_string_list(northbound.get("top_sectors"))
+            and _is_string_list(northbound.get("top_stocks"))
+            and isinstance(northbound.get("sentiment"), str)
+            and bool(northbound.get("sentiment", "").strip())
+        )
+        if not is_valid_northbound:
+            normalized["northbound"] = None
+            payload_warnings.append(
+                {
+                    "field": "northbound",
+                    "kind": "invalid_shape",
+                    "message": "coerced invalid northbound payload to null",
+                }
+            )
+
+    return normalized, payload_warnings
+
+
+def _build_market_context_memo(data: dict) -> tuple[MarketContextMemo, list[dict[str, str]]]:
+    normalized, payload_warnings = _normalize_market_context_payload(data)
+    memo = MarketContextMemo(**normalized)
+    regime = _apply_regime_detector(memo)
+    if regime is not None:
+        memo = memo.model_copy(update={"market_regime": regime})
+        logger.info("[MarketAnalyst] RegimeDetector 覆盖 regime: %s", regime.value)
+    return memo, payload_warnings
+
+
+def _load_market_context_from_path(path: Path) -> tuple[MarketContextMemo, list[dict[str, str]]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return _build_market_context_memo(payload)
+
+
+def _write_market_context_cache(path: Path, memo: MarketContextMemo) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(memo.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 class MarketAnalyst:
@@ -223,6 +332,7 @@ class MarketAnalyst:
         self.skill_loader = skill_loader or _SKILL_LOADER
         self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
         self._last_reliability_diagnostics: dict = _empty_stage1_reliability()
+        self._last_payload_warnings: list[dict[str, str]] = []
 
     _TOOL_CALL_TIMEOUT_SEC = 15.0
 
@@ -304,7 +414,10 @@ class MarketAnalyst:
         tool_calls_total = 0
         tool_timeouts_total = 0
         tool_errors_total = 0
+        blocking_failures_total = 0
+        enrichment_failures_total = 0
         finalization_forced = False
+        self._last_payload_warnings = []
 
         system_content = MARKET_ANALYST_SYSTEM_PROMPT.format(today=_today_str())
         skill_context = self.skill_loader.load_for_agent("market_analyst")
@@ -361,13 +474,25 @@ class MarketAnalyst:
                     enrichment_tools_used.add(tool_name)
                 failure = trace.get("failure")
                 if isinstance(failure, dict) and len(sample_failures) < _MAX_STAGE1_SAMPLE_FAILURES:
+                    tier = _classify_stage1_tool_tier(tool_name)
+                    if tier == "blocking":
+                        blocking_failures_total += 1
+                    elif tier == "enrichment":
+                        enrichment_failures_total += 1
                     sample_failures.append(
                         {
                             "tool": str(failure.get("tool", tool_name)),
                             "kind": str(failure.get("kind", "error")),
                             "message": str(failure.get("message", "")),
+                            "tier": tier,
                         }
                     )
+                elif isinstance(failure, dict):
+                    tier = _classify_stage1_tool_tier(tool_name)
+                    if tier == "blocking":
+                        blocking_failures_total += 1
+                    elif tier == "enrichment":
+                        enrichment_failures_total += 1
         else:
             used_all_rounds = True
 
@@ -406,6 +531,8 @@ class MarketAnalyst:
             "tool_calls_total": tool_calls_total,
             "tool_timeouts_total": tool_timeouts_total,
             "tool_errors_total": tool_errors_total,
+            "blocking_failures_total": blocking_failures_total,
+            "enrichment_failures_total": enrichment_failures_total,
             "finalization_forced": finalization_forced,
             "degraded": is_degraded_market_context(memo),
             "degrade_reason": (
@@ -415,6 +542,7 @@ class MarketAnalyst:
             ),
             "tool_stats": tool_stats_payload,
             "sample_failures": sample_failures,
+            "payload_warnings": list(self._last_payload_warnings),
         }
         return memo
 
@@ -427,22 +555,27 @@ class MarketAnalyst:
         if match:
             try:
                 data = json.loads(match.group())
-                # historical_insights 由 LiteratureMiner 填充，LLM 可能填错格式，强制清空
-                if "historical_insights" in data:
-                    hi = data["historical_insights"]
-                    if not isinstance(hi, list) or (hi and not isinstance(hi[0], dict)):
-                        data["historical_insights"] = []
-                memo = MarketContextMemo(**data)
-                # 确定性优先：从 memo 的类型化字段读取技术指标，用 RegimeDetector 覆盖 LLM 的 regime。
-                # 数据不足时保留 LLM 的 regime（已通过 coerce validator 标准化）。
-                regime = _apply_regime_detector(memo)
-                if regime is not None:
-                    memo = memo.model_copy(update={"market_regime": regime})
-                    logger.info("[MarketAnalyst] RegimeDetector 覆盖 regime: %s", regime.value)
+                memo, payload_warnings = _build_market_context_memo(data)
+                self._last_payload_warnings = payload_warnings
                 return memo
             except Exception as e:
+                self._last_payload_warnings = [
+                    {
+                        "field": "memo",
+                        "kind": "parse_error",
+                        "message": str(e),
+                    }
+                ]
                 logger.warning("[MarketAnalyst] JSON 解析失败: %s", e)
         # 降级：返回最小化空 Memo
+        if not match:
+            self._last_payload_warnings = [
+                {
+                    "field": "memo",
+                    "kind": "missing_json",
+                    "message": "response did not contain a JSON object payload",
+                }
+            ]
         return _empty_memo("MarketAnalyst 输出解析失败")
 
 
@@ -527,10 +660,67 @@ async def _run_market_context_once(state: dict) -> dict:
 async def _market_context_async(state: dict) -> dict:
     """异步执行 Stage 1 市场上下文生成。"""
     active_islands = list(state.get("active_islands", ["momentum"]))
+    context_mode = _get_stage1_context_mode()
+    context_path = _get_stage1_context_path(active_islands=active_islands)
+    if context_mode in {"cached", "frozen"}:
+        try:
+            memo, payload_warnings = _load_market_context_from_path(context_path)
+            return {
+                "market_context": memo,
+                "stage1_reliability": {
+                    **_empty_stage1_reliability(),
+                    "context_mode": context_mode,
+                    "context_source": str(context_path),
+                    "payload_warnings": payload_warnings,
+                    "degraded": is_degraded_market_context(memo),
+                    "degrade_reason": (
+                        _extract_degrade_reason(getattr(memo, "raw_summary", None))
+                        if is_degraded_market_context(memo)
+                        else None
+                    ),
+                },
+            }
+        except Exception as e:
+            logger.warning("[Stage 1] 无法加载 %s context 文件 %s: %s", context_mode, context_path, e)
+            reason = f"{context_mode} market context unavailable: {e}"
+            return {
+                "market_context": _empty_memo(reason, active_islands=active_islands),
+                "stage1_reliability": {
+                    **_empty_stage1_reliability(),
+                    "context_mode": context_mode,
+                    "context_source": str(context_path),
+                    "degraded": True,
+                    "degrade_reason": reason,
+                    "payload_warnings": [
+                        {
+                            "field": "market_context_file",
+                            "kind": "load_error",
+                            "message": str(e),
+                        }
+                    ],
+                },
+            }
+
     timeout_sec = _get_stage1_timeout_sec()
 
     try:
-        return await asyncio.wait_for(_run_market_context_once(state), timeout=timeout_sec)
+        result = await asyncio.wait_for(_run_market_context_once(state), timeout=timeout_sec)
+        memo = result.get("market_context")
+        reliability = {
+            **_empty_stage1_reliability(),
+            **dict(result.get("stage1_reliability") or {}),
+            "context_mode": context_mode,
+            "context_source": "live_tools",
+            "cache_written": False,
+        }
+        if memo is not None and not is_degraded_market_context(memo):
+            try:
+                _write_market_context_cache(context_path, memo)
+                reliability["cache_written"] = True
+            except Exception as e:
+                logger.warning("[Stage 1] context cache 写入失败 %s: %s", context_path, e)
+        result["stage1_reliability"] = reliability
+        return result
     except TimeoutError:
         logger.warning("[Stage 1] MarketAnalyst 超时（%.1fs），使用空上下文", timeout_sec)
         reason = f"Stage 1 timeout after {timeout_sec:.1f}s"
@@ -541,6 +731,8 @@ async def _market_context_async(state: dict) -> dict:
             ),
             "stage1_reliability": {
                 **_empty_stage1_reliability(),
+                "context_mode": context_mode,
+                "context_source": "live_tools",
                 "degraded": True,
                 "degrade_reason": reason,
             },
@@ -552,6 +744,8 @@ async def _market_context_async(state: dict) -> dict:
             "market_context": _empty_memo(reason, active_islands=active_islands),
             "stage1_reliability": {
                 **_empty_stage1_reliability(),
+                "context_mode": context_mode,
+                "context_source": "live_tools",
                 "degraded": True,
                 "degrade_reason": reason,
             },

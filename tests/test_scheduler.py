@@ -387,6 +387,18 @@ def test_allocation_sorted_by_weight(subspace_scheduler: SubspaceScheduler, cold
     assert weights == sorted(weights, reverse=True)
 
 
+def test_allocate_honors_target_subspaces_env(monkeypatch: pytest.MonkeyPatch, subspace_scheduler: SubspaceScheduler):
+    monkeypatch.setenv("PIXIU_TARGET_SUBSPACES", "factor_algebra,cross_market")
+
+    allocations = subspace_scheduler.allocate(SchedulerState())
+
+    assert [alloc.subspace for alloc in allocations] == [
+        ExplorationSubspace.FACTOR_ALGEBRA,
+        ExplorationSubspace.CROSS_MARKET,
+    ]
+    assert sum(alloc.quota for alloc in allocations) == subspace_scheduler.TOTAL_QUOTA
+
+
 # ─────────────────────────────────────────────────────────
 # From test_scheduler_pool_integration.py
 # ─────────────────────────────────────────────────────────

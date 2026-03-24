@@ -7,6 +7,7 @@ Stage 2 子空间调度器 — 管理四个探索子空间的配额分配
 
 from __future__ import annotations
 
+import os
 import random
 from typing import Dict, List, Tuple
 
@@ -72,6 +73,14 @@ class SubspaceScheduler:
         else:
             weights = self._thompson_sampling_weights(state)
 
+        enabled_subspaces = self._resolve_target_subspaces()
+        if enabled_subspaces:
+            weights = {
+                subspace: weight
+                for subspace, weight in weights.items()
+                if subspace in enabled_subspaces
+            }
+
         quotas = self._distribute_quota(weights)
 
         allocations = [
@@ -80,12 +89,33 @@ class SubspaceScheduler:
                 quota=quotas[subspace],
                 weight=weights[subspace],
             )
-            for subspace in ExplorationSubspace
+            for subspace in weights
         ]
 
         # 按权重降序排列
         allocations.sort(key=lambda a: a.weight, reverse=True)
         return allocations
+
+    @staticmethod
+    def _resolve_target_subspaces() -> List[ExplorationSubspace] | None:
+        raw = os.getenv("PIXIU_TARGET_SUBSPACES", "").strip()
+        if not raw:
+            return None
+
+        resolved: List[ExplorationSubspace] = []
+        seen: set[ExplorationSubspace] = set()
+        for item in raw.split(","):
+            candidate = item.strip()
+            if not candidate:
+                continue
+            try:
+                subspace = ExplorationSubspace(candidate)
+            except ValueError:
+                continue
+            if subspace not in seen:
+                seen.add(subspace)
+                resolved.append(subspace)
+        return resolved or None
 
     def update_state(
         self,
@@ -184,11 +214,12 @@ class SubspaceScheduler:
         确保总和恒等于 TOTAL_QUOTA。
         """
         quotas: Dict[ExplorationSubspace, int] = {}
-        min_total = sum(self.MIN_QUOTA.values())
+        enabled_subspaces = list(weights.keys()) or list(ExplorationSubspace)
+        min_total = sum(self.MIN_QUOTA[subspace] for subspace in enabled_subspaces)
         remaining = self.TOTAL_QUOTA - min_total
 
         # 先分配最低配额
-        for subspace in ExplorationSubspace:
+        for subspace in enabled_subspaces:
             quotas[subspace] = self.MIN_QUOTA[subspace]
 
         if remaining <= 0:
@@ -201,12 +232,12 @@ class SubspaceScheduler:
 
         # 计算每个子空间的浮点配额
         fractional: Dict[ExplorationSubspace, float] = {}
-        for subspace in ExplorationSubspace:
+        for subspace in enabled_subspaces:
             fractional[subspace] = (weights[subspace] / weight_total) * remaining
 
         # 先分配整数部分
         int_parts: Dict[ExplorationSubspace, int] = {}
-        for subspace in ExplorationSubspace:
+        for subspace in enabled_subspaces:
             int_parts[subspace] = int(fractional[subspace])
 
         allocated = sum(int_parts.values())
@@ -215,7 +246,7 @@ class SubspaceScheduler:
         # 按小数部分降序分配剩余的 1
         remainders = [
             (subspace, fractional[subspace] - int_parts[subspace])
-            for subspace in ExplorationSubspace
+            for subspace in enabled_subspaces
         ]
         remainders.sort(key=lambda x: x[1], reverse=True)
 
@@ -223,7 +254,7 @@ class SubspaceScheduler:
             if i < leftover:
                 int_parts[subspace] += 1
 
-        for subspace in ExplorationSubspace:
+        for subspace in enabled_subspaces:
             quotas[subspace] += int_parts[subspace]
 
         return quotas

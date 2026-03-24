@@ -36,12 +36,23 @@ class _FakeProfile:
     report_every_n_rounds: int = 5
     max_rounds_env_override_allowed: bool = True
     human_gate_auto_action: str = "approve"
+    profile_kind: str = "controlled_run"
+    target_islands: list[str] | None = None
+    target_subspaces: list[str] | None = None
+    market_context_mode: str = "live"
+    market_context_path: str = "data/market_context_cache/default.json"
+    persistence_mode: str = "full"
+    namespace: str = "controlled_run"
+    stage1_enrichment_enabled: bool = False
+    run_single: bool = True
+    run_preflight_evolve: bool = True
 
 
 @dataclass(frozen=True)
 class _FakePreflightResult:
     ok: bool
     blocking_errors: list[str]
+    runtime_truth: dict[str, object] | None = None
 
 
 @pytest.mark.asyncio
@@ -59,7 +70,11 @@ async def test_harness_stops_on_preflight_blocking_failure():
         _FakeProfile(),
         profile_path="dummy.json",
         long_run=False,
-        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=False, blocking_errors=["doctor failed"]),
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=False,
+            blocking_errors=["doctor failed"],
+            runtime_truth={"planned_phases": ["doctor", "single", "evolve_preflight"]},
+        ),
         run_single_fn=fake_single,
         run_evolve_fn=fake_evolve,
         status_runner=lambda mode: (True, "ok"),
@@ -91,7 +106,11 @@ async def test_harness_stops_when_single_stage_fails_status_check():
         _FakeProfile(),
         profile_path="dummy.json",
         long_run=False,
-        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=True, blocking_errors=[]),
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single", "evolve_preflight"]},
+        ),
         run_single_fn=fake_single,
         run_evolve_fn=fake_evolve,
         status_runner=status_runner,
@@ -120,7 +139,11 @@ async def test_harness_runs_fixed_order_without_long_run():
         _FakeProfile(preflight_evolve_rounds=2, long_run_rounds=50),
         profile_path="dummy.json",
         long_run=False,
-        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=True, blocking_errors=[]),
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single", "evolve_preflight"]},
+        ),
         run_single_fn=fake_single,
         run_evolve_fn=fake_evolve,
         status_runner=status_runner,
@@ -147,7 +170,11 @@ async def test_harness_long_run_requires_flag_and_respects_env_override(monkeypa
         _FakeProfile(preflight_evolve_rounds=2, long_run_rounds=50, max_rounds_env_override_allowed=True),
         profile_path="dummy.json",
         long_run=True,
-        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=True, blocking_errors=[]),
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single", "evolve_preflight", "evolve_long"]},
+        ),
         run_single_fn=fake_single,
         run_evolve_fn=fake_evolve,
         status_runner=lambda mode: (True, f"{mode} ok"),
@@ -194,10 +221,25 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     monkeypatch.setattr(module, "resolve_profile_env_truth", fake_resolve_profile_env_truth)
 
     result = await module.run_harness(
-        _FakeProfile(report_every_n_rounds=9),
+        _FakeProfile(
+            report_every_n_rounds=9,
+            profile_kind="fast_feedback",
+            target_islands=["momentum"],
+            target_subspaces=["factor_algebra"],
+            market_context_mode="frozen",
+            market_context_path=str(tmp_path / "frozen_context.json"),
+            persistence_mode="artifact_only",
+            namespace="fast_feedback",
+            stage1_enrichment_enabled=False,
+            run_preflight_evolve=False,
+        ),
         profile_path="dummy.json",
         long_run=False,
-        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(ok=True, blocking_errors=[]),
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single"], "profile_kind": "fast_feedback"},
+        ),
         run_single_fn=fake_single,
         run_evolve_fn=fake_evolve,
         status_runner=lambda mode: (True, f"{mode} ok"),
@@ -208,6 +250,85 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["QLIB_DATA_DIR"] == str(qlib_dir)
     assert observed["REPORT_EVERY_N_ROUNDS"] == "9"
     assert observed["PIXIU_HUMAN_GATE_AUTO_ACTION"] == "approve"
+    assert os.environ["ACTIVE_ISLANDS"] == "momentum"
+    assert os.environ["PIXIU_TARGET_SUBSPACES"] == "factor_algebra"
+    assert os.environ["PIXIU_STAGE1_CONTEXT_MODE"] == "frozen"
+    assert os.environ["PIXIU_EXPERIMENT_PROFILE_KIND"] == "fast_feedback"
+    assert os.environ["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] == "artifact_only"
+    assert "runtime_namespaces/fast_feedback" in os.environ["PIXIU_STATE_STORE_PATH"]
+    assert module._runtime.peek_scheduler() is None
+    from src.core.orchestrator import config as orchestrator_config
+    assert orchestrator_config.ACTIVE_ISLANDS == ["momentum"]
+    assert orchestrator_config.REPORT_EVERY_N_ROUNDS == 9
+    assert "runtime_namespaces/fast_feedback/reports" in str(orchestrator_config.REPORTS_DIR)
+    assert result.runtime_truth["profile_kind"] == "fast_feedback"
+
+
+@pytest.mark.asyncio
+async def test_harness_fast_feedback_profile_can_skip_preflight_evolve():
+    module = _load_harness_module()
+    calls: list[tuple[str, object]] = []
+
+    async def fake_single(island: str) -> None:
+        calls.append(("single", island))
+
+    async def fake_evolve(rounds: int) -> None:
+        calls.append(("evolve", rounds))
+
+    result = await module.run_harness(
+        _FakeProfile(
+            profile_kind="fast_feedback",
+            target_islands=["momentum"],
+            target_subspaces=["factor_algebra"],
+            market_context_mode="frozen",
+            persistence_mode="artifact_only",
+            namespace="fast_feedback",
+            run_preflight_evolve=False,
+        ),
+        profile_path="fast_feedback.json",
+        long_run=False,
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single"], "profile_kind": "fast_feedback"},
+        ),
+        run_single_fn=fake_single,
+        run_evolve_fn=fake_evolve,
+        status_runner=lambda mode: (True, f"{mode} ok"),
+    )
+
+    assert result.ok
+    assert calls == [("single", "momentum")]
+    assert [phase.name for phase in result.phases] == ["preflight", "single"]
+
+
+def test_harness_print_text_summary_includes_profile_policy_details(capsys: pytest.CaptureFixture[str]):
+    module = _load_harness_module()
+    result = module.HarnessResult(
+        ok=False,
+        profile_path="config/experiments/fast_feedback.json",
+        long_run_requested=False,
+        long_run_executed=False,
+        phases=[module.PhaseResult(name="preflight", ok=False, detail="doctor failed")],
+        runtime_truth={
+            "profile_kind": "fast_feedback",
+            "namespace": "fast_feedback",
+            "persistence_mode": "artifact_only",
+            "market_context_mode": "frozen",
+            "planned_phases": ["doctor", "single"],
+            "write_scope": "artifact_only_scratch",
+        },
+        failure_stage="preflight",
+        next_step="Resolve doctor blocking checks.",
+    )
+
+    module._print_text_summary(result)
+    captured = capsys.readouterr().out
+
+    assert "[Harness] namespace: fast_feedback" in captured
+    assert "[Harness] planned_phases: doctor, single" in captured
+    assert "[Harness] write_scope: artifact_only_scratch" in captured
+    assert "[Harness] next_step: Resolve doctor blocking checks." in captured
 
 
 def test_default_status_runner_prefers_current_run_id_over_latest(monkeypatch: pytest.MonkeyPatch):

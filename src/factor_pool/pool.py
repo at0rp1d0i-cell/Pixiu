@@ -45,11 +45,12 @@ _InMemoryClient = _storage._InMemoryClient
 FactorPoolStorage = _storage.FactorPoolStorage
 chromadb = _storage.chromadb
 build_default_chroma_embedding_function = _storage.build_default_chroma_embedding_function
+resolve_default_db_path = _storage.resolve_default_db_path
 
 
-def build_factor_pool_storage(db_path: str = _DEFAULT_DB_PATH) -> FactorPoolStorage:
+def build_factor_pool_storage(db_path: str | None = None) -> FactorPoolStorage:
     return _storage.build_factor_pool_storage(
-        db_path=db_path,
+        db_path=db_path or resolve_default_db_path(),
         persistent_client_factory=chromadb.PersistentClient,
         embedding_function_factory=build_default_chroma_embedding_function,
     )
@@ -60,8 +61,9 @@ class FactorPool:
 
     CONSTRAINT_COLLECTION = CONSTRAINT_COLLECTION_NAME
 
-    def __init__(self, db_path: str = _DEFAULT_DB_PATH):
-        storage: FactorPoolStorage = build_factor_pool_storage(db_path)
+    def __init__(self, db_path: str | None = None):
+        resolved_db_path = db_path or resolve_default_db_path()
+        storage: FactorPoolStorage = build_factor_pool_storage(resolved_db_path)
         self._client = storage.client
         self._storage_mode = storage.storage_mode
         self._embedding_function = storage.embedding_function
@@ -69,6 +71,7 @@ class FactorPool:
         self._notes_collection = storage.notes_collection
         self._explorations_collection = storage.explorations_collection
         self._constraints_collection = storage.constraints_collection
+        self._db_path = resolved_db_path
 
     def get_island_best_factors(self, island_name: str, top_k: int = 3) -> list[dict]:
         return _get_island_best_factors(self._collection, island_name, top_k)
@@ -155,11 +158,20 @@ class FactorPool:
 
 # 模块级单例（跨调用复用连接）
 _pool_instance: Optional[FactorPool] = None
+_pool_instance_path: str | None = None
 
 
-def get_factor_pool() -> FactorPool:
+def get_factor_pool(db_path: str | None = None) -> FactorPool:
     """获取 FactorPool 单例。"""
-    global _pool_instance
-    if _pool_instance is None:
-        _pool_instance = FactorPool()
+    global _pool_instance, _pool_instance_path
+    resolved_db_path = db_path or resolve_default_db_path()
+    if _pool_instance is None or _pool_instance_path != resolved_db_path:
+        _pool_instance = FactorPool(db_path=resolved_db_path)
+        _pool_instance_path = resolved_db_path
     return _pool_instance
+
+
+def reset_factor_pool() -> None:
+    global _pool_instance, _pool_instance_path
+    _pool_instance = None
+    _pool_instance_path = None
