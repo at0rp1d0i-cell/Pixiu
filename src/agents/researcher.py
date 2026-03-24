@@ -174,6 +174,21 @@ def _formula_skeleton(formula: str) -> str:
     compact = re.sub(r"(?<![\w$])\d+(?![\w$])", "N", compact)
     return compact
 
+
+def _format_family_gene_summary(family_key: str) -> str:
+    parts = family_key.split("|")
+    if len(parts) != 6:
+        return family_key
+    _, transform_family, base_field, secondary_field, interaction_mode, normalization_kind = parts
+    secondary_value = secondary_field if secondary_field != "null" else "none"
+    return (
+        f"transform_family={transform_family}, "
+        f"base_field={base_field}, "
+        f"secondary_field={secondary_value}, "
+        f"interaction_mode={interaction_mode}, "
+        f"normalization_kind={normalization_kind}"
+    )
+
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 
@@ -621,6 +636,7 @@ class AlphaResearcher:
         """Build a short family-memory prompt to reduce repeated factor_algebra variants."""
         if self.factor_pool is None:
             return ""
+        from src.agents.prefilter import NoveltyFilter
 
         existing: list[dict[str, Any]] = []
         try:
@@ -635,35 +651,52 @@ class AlphaResearcher:
                 logger.debug("[AlphaResearcher] get_island_factors failed for anti-collapse: %s", exc)
                 return ""
 
-        skeleton_examples: list[tuple[str, str]] = []
-        seen_skeletons: set[str] = set()
+        family_samples: dict[str, dict[str, Any]] = {}
         for item in existing:
-            formula = item.get("formula") or item.get("document") or ""
-            if not isinstance(formula, str) or not formula:
+            family_key, variant_key = NoveltyFilter._resolve_factor_gene_keys_from_factor(item)
+            if family_key is None:
                 continue
-            subspace_origin = item.get("subspace_origin")
-            if subspace_origin not in (None, "", ExplorationSubspace.FACTOR_ALGEBRA.value):
-                continue
-            skeleton = _formula_skeleton(formula)
-            if skeleton in seen_skeletons:
-                continue
-            seen_skeletons.add(skeleton)
-            label = item.get("factor_id") or item.get("factor_name") or f"formula_{len(skeleton_examples) + 1}"
-            skeleton_examples.append((str(label), skeleton))
-            if len(skeleton_examples) >= _MAX_ANTI_COLLAPSE_SKELETONS:
-                break
+            bucket = family_samples.setdefault(
+                family_key,
+                {
+                    "count": 0,
+                    "variants": set(),
+                    "labels": [],
+                },
+            )
+            label = item.get("factor_id") or item.get("factor_name") or f"family_{len(family_samples)}"
+            bucket["count"] += 1
+            if isinstance(variant_key, str):
+                bucket["variants"].add(variant_key)
+            if len(bucket["labels"]) < 2 and str(label) not in bucket["labels"]:
+                bucket["labels"].append(str(label))
 
-        if not skeleton_examples:
+        if not family_samples:
             return ""
+
+        ranked_families = sorted(
+            family_samples.items(),
+            key=lambda item: (
+                -int(item[1]["count"]),
+                -len(item[1]["variants"]),
+                item[0],
+            ),
+        )[:_MAX_ANTI_COLLAPSE_SKELETONS]
 
         lines = [
             "## FACTOR_ALGEBRA Anti-Collapse 提示",
-            "- 当前岛上已有一些已占满的 factor family 骨架；如果你的新 recipe 只是改窗口、qscore、normalization_window，请不要提交。",
-            "- 若命中下列骨架，请优先改变 base_field、transform_family 或 interaction_mode，而不是只改数字。",
-            "- 当前已占满骨架示例：",
+            "- 当前岛上已有一些已占满的 factor_gene family；如果你的新 recipe 只是改 lookback_short/lookback_long/normalization_window/quantile_qscore，请不要提交。",
+            "- 若命中下列 family，请优先改变 base_field、secondary_field、transform_family、interaction_mode 或 normalization_kind。",
+            "- 当前已占满 family 示例：",
         ]
-        for idx, (label, skeleton) in enumerate(skeleton_examples, start=1):
-            lines.append(f"  {idx}. {label}: {skeleton}")
+        for idx, (family_key, payload) in enumerate(ranked_families, start=1):
+            lines.append(f"  {idx}. {family_key}")
+            lines.append(f"     - summary: {_format_family_gene_summary(family_key)}")
+            variants = sorted(payload["variants"])
+            if variants:
+                lines.append(f"     - seen variants: {', '.join(variants[:3])}")
+            if payload["labels"]:
+                lines.append(f"     - examples: {', '.join(payload['labels'])}")
         return "\n".join(lines)
 
     def _local_prescreen_notes(

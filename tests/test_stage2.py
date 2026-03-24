@@ -1339,13 +1339,18 @@ def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     mock_pool = MagicMock()
     mock_pool.get_passed_factors.return_value = [
         {
-            "factor_id": "momentum_consistency_5_20d",
-            "formula": "Sign(($close / Ref($close, 5) - 1) * ($close / Ref($close, 20) - 1))",
+            "factor_id": "mom_alg_001",
+            "formula": "Rank(Mean($close, 5) - Mean($close, 20), 20)",
             "subspace_origin": "factor_algebra",
         },
         {
-            "factor_id": "momentum_volume_confirmation_10d",
-            "formula": "Corr(Rank($close, 10), Rank($volume, 10), 10)",
+            "factor_id": "mom_alg_002",
+            "formula": "Rank(Mean($close, 10) - Mean($close, 30), 20)",
+            "subspace_origin": "factor_algebra",
+        },
+        {
+            "factor_id": "mom_alg_003",
+            "formula": "Quantile(Std($close, 5) - Std($close, 30), 20, 0.8)",
             "subspace_origin": "factor_algebra",
         },
     ]
@@ -1369,7 +1374,11 @@ def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     human_message = captured_messages[0][1]
     assert "FACTOR_ALGEBRA Anti-Collapse 提示" in human_message.content
     assert "不要提交" in human_message.content
-    assert "momentum_consistency_5_20d" in human_message.content
+    assert "factor_algebra|mean_spread|$close|null|none|rank" in human_message.content
+    assert "summary: transform_family=mean_spread, base_field=$close" in human_message.content
+    assert "seen variants: 10|30|20|null, 5|20|20|null" in human_message.content
+    assert "examples: mom_alg_001, mom_alg_002" in human_message.content
+    assert "skeleton" not in human_message.content.lower()
 
 
 def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics():
