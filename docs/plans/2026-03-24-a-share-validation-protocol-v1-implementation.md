@@ -91,3 +91,31 @@ Owner: codex
 - `oos_passed=True -> promote` 路径保留
 - `candidate` 不会混入正式 passed factors
 - 主线程 review 通过后再进入下一轮 `OOSReport / walk-forward` 实现
+
+## Next Slice
+
+下一刀只做 `Stage 4` 的最小真实 OOS 路径。
+
+### Chosen Contract
+
+- `BacktestReport.metrics` 在存在 validation split 时表示 `discovery` 指标
+- 新增 `metrics_scope="discovery"` 以避免语义含糊
+- 新增 `oos_metrics` 承载 holdout 指标
+- 新增 `oos_degradation` 作为 discovery vs OOS 的最小退化信号
+- `oos_passed` 由 `Stage 4` 真实计算，不再手工注入
+
+### Minimal Runtime Rule
+
+- 若回测区间足够长，则使用 `最后 12 个月` 作为 OOS
+- 其余较早窗口作为 discovery
+- 若区间不足以安全切分，则保留 `oos_window=None`、`oos_passed=None`
+- 阈值资格判断统一由 `Coder` 依据 canonical `THRESHOLDS` 计算；模板只产出 metrics 和 split 事实
+
+### Validation Mode
+
+- `Mode`: fast feedback
+- `Command`: `uv run pytest -q tests/test_stage4.py tests/test_stage5.py -k "oos or validation or coder"`
+- `Proof`:
+  - `Coder` 能解析 discovery/OOS 输出
+  - `BacktestReport` 带真实 `oos_passed`
+  - `Critic` 在真实 `Coder` 输出上走 `candidate/promote` 分流

@@ -12,6 +12,7 @@ from src.schemas.backtest import (
     BacktestReport,
     ExecutionMeta,
     FactorSpecSnapshot,
+    ValidationWindow,
 )
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
@@ -25,6 +26,18 @@ ARTIFACTS_DIR = Path(__file__).resolve().parents[2] / "data" / "artifacts"
 def resolve_artifacts_dir() -> Path:
     configured = os.getenv("PIXIU_ARTIFACTS_DIR")
     return Path(configured) if configured else ARTIFACTS_DIR
+
+
+def _passes_thresholds(metrics: BacktestMetrics, error_message: str | None) -> bool:
+    return (
+        metrics.sharpe >= THRESHOLDS.min_sharpe
+        and metrics.ic_mean >= THRESHOLDS.min_ic_mean
+        and metrics.icir >= THRESHOLDS.min_icir
+        and metrics.turnover_rate <= THRESHOLDS.max_turnover_rate
+        and metrics.max_drawdown <= THRESHOLDS.max_drawdown
+        and (metrics.coverage or 0.0) >= THRESHOLDS.min_coverage
+        and error_message is None
+    )
 
 
 class Coder:
@@ -195,25 +208,57 @@ class Coder:
             )
 
         error_message = raw.get("error")
+        metrics_payload = raw.get("metrics") or raw
         metrics = BacktestMetrics(
-            sharpe=raw.get("sharpe", 0.0),
-            annualized_return=raw.get("annualized_return", 0.0),
-            max_drawdown=raw.get("max_drawdown", 0.0),
-            ic_mean=raw.get("ic_mean", 0.0),
-            ic_std=raw.get("ic_std", 0.0),
-            icir=raw.get("icir", 0.0),
-            turnover_rate=raw.get("turnover_rate", 0.0),
-            coverage=raw.get("coverage", 1.0 if error_message is None else 0.0),
+            sharpe=metrics_payload.get("sharpe", 0.0),
+            annualized_return=metrics_payload.get("annualized_return", 0.0),
+            max_drawdown=metrics_payload.get("max_drawdown", 0.0),
+            ic_mean=metrics_payload.get("ic_mean", 0.0),
+            ic_std=metrics_payload.get("ic_std", 0.0),
+            icir=metrics_payload.get("icir", 0.0),
+            turnover_rate=metrics_payload.get("turnover_rate", 0.0),
+            coverage=metrics_payload.get(
+                "coverage", 1.0 if error_message is None else 0.0
+            ),
         )
-
-        passed = (
-            metrics.sharpe >= THRESHOLDS.min_sharpe
-            and metrics.ic_mean >= THRESHOLDS.min_ic_mean
-            and metrics.icir >= THRESHOLDS.min_icir
-            and metrics.turnover_rate <= THRESHOLDS.max_turnover_rate
-            and (metrics.coverage or 0.0) >= THRESHOLDS.min_coverage
-            and error_message is None
+        oos_metrics_payload = raw.get("oos_metrics")
+        oos_metrics = (
+            BacktestMetrics(
+                sharpe=oos_metrics_payload.get("sharpe", 0.0),
+                annualized_return=oos_metrics_payload.get("annualized_return", 0.0),
+                max_drawdown=oos_metrics_payload.get("max_drawdown", 0.0),
+                ic_mean=oos_metrics_payload.get("ic_mean", 0.0),
+                ic_std=oos_metrics_payload.get("ic_std", 0.0),
+                icir=oos_metrics_payload.get("icir", 0.0),
+                turnover_rate=oos_metrics_payload.get("turnover_rate", 0.0),
+                coverage=oos_metrics_payload.get("coverage", 0.0),
+            )
+            if oos_metrics_payload is not None
+            else None
         )
+        metrics_scope = raw.get("metrics_scope", "full")
+        discovery_window_payload = raw.get("discovery_window")
+        discovery_window = (
+            ValidationWindow(**discovery_window_payload)
+            if discovery_window_payload is not None
+            else None
+        )
+        oos_window_payload = raw.get("oos_window")
+        oos_window = (
+            ValidationWindow(**oos_window_payload)
+            if oos_window_payload is not None
+            else None
+        )
+        passed = _passes_thresholds(metrics, error_message)
+        discovery_passed = raw.get("discovery_passed")
+        if discovery_passed is None:
+            discovery_passed = passed
+        oos_passed = raw.get("oos_passed")
+        if oos_passed is None and oos_metrics is not None:
+            oos_passed = _passes_thresholds(oos_metrics, error_message)
+        oos_degradation = raw.get("oos_degradation")
+        if oos_degradation is None and oos_metrics is not None:
+            oos_degradation = round(metrics.sharpe - oos_metrics.sharpe, 4)
 
         return BacktestReport(
             report_id=report_id,
@@ -224,11 +269,18 @@ class Coder:
             island_id=note.island,
             formula=formula,
             metrics=metrics,
+            metrics_scope=metrics_scope,
+            oos_metrics=oos_metrics,
+            oos_degradation=oos_degradation,
             passed=passed,
             execution_succeeded=not error_message,
             status="success" if not error_message else "failed",
             failure_stage=None if not error_message else "run",
             failure_reason=None if not error_message else "backtest_error",
+            discovery_window=discovery_window,
+            oos_window=oos_window,
+            discovery_passed=discovery_passed,
+            oos_passed=oos_passed,
             execution_time_seconds=exec_result.duration_seconds,
             qlib_output_raw=exec_result.stdout[:2000],
             error_message=error_message,
@@ -269,11 +321,18 @@ class Coder:
                 turnover_rate=0.0,
                 coverage=0.0,
             ),
+            metrics_scope="full",
+            oos_metrics=None,
+            oos_degradation=None,
             passed=False,
             execution_succeeded=False,
             status="failed",
             failure_stage=failure_stage,
             failure_reason=failure_reason,
+            discovery_window=None,
+            oos_window=None,
+            discovery_passed=False,
+            oos_passed=None,
             execution_time_seconds=execution_time_seconds,
             qlib_output_raw=qlib_output_raw,
             error_message=error_message,

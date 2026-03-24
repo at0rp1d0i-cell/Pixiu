@@ -61,6 +61,9 @@ class BacktestReport(PixiuBase):
 
     # 结果
     metrics: BacktestMetrics
+    metrics_scope: Literal["full", "discovery"] = "full"
+    oos_metrics: Optional[BacktestMetrics] = None
+    oos_degradation: Optional[float] = None
     passed: bool               # 质量阈值是否通过（兼容旧调用点；执行是否成功见 execution_succeeded）
     execution_succeeded: Optional[bool] = None  # 这次回测/解析是否真的成功
     status: Literal["success", "failed", "partial"] = "success"

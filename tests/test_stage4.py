@@ -49,7 +49,7 @@ def test_coder_valid_formula(mock_note):
     """合法 Qlib 公式应返回 BacktestReport(passed=True 或 False，无 error)"""
     coder = Coder()
 
-    mock_stdout = "Some logs...\nBACKTEST_RESULT_JSON:" + json.dumps({
+    discovery_metrics = {
         "sharpe": 2.8,
         "annualized_return": 0.3,
         "max_drawdown": 0.1,
@@ -58,8 +58,39 @@ def test_coder_valid_formula(mock_note):
         "icir": 0.75,
         "turnover_rate": 0.2,
         "coverage": 0.95,
-        "error": None
-    })
+    }
+    oos_metrics = {
+        "sharpe": 2.5,
+        "annualized_return": 0.28,
+        "max_drawdown": 0.12,
+        "ic_mean": 0.02,
+        "ic_std": 0.05,
+        "icir": 0.4,
+        "turnover_rate": 0.25,
+        "coverage": 0.88,
+    }
+    validation_payload = {
+        "metrics_scope": "discovery",
+        "metrics": discovery_metrics,
+        "oos_metrics": oos_metrics,
+        "discovery_window": {
+            "start_date": "2021-01-01",
+            "end_date": "2024-03-31",
+            "coverage": 0.95,
+            "notes": "Discovery window",
+        },
+        "oos_window": {
+            "start_date": "2024-04-01",
+            "end_date": "2025-03-31",
+            "coverage": 0.88,
+            "notes": "Out-of-sample validation window",
+        },
+        "discovery_passed": True,
+        "oos_passed": True,
+        "oos_degradation": 0.3,
+        "error": None,
+    }
+    mock_stdout = "Some logs...\nBACKTEST_RESULT_JSON:" + json.dumps(validation_payload)
 
     mock_exec_result = ExecutionResult(
         success=True,
@@ -87,13 +118,21 @@ def test_coder_valid_formula(mock_note):
     assert report.metrics.annualized_return == 0.3
     assert report.metrics.turnover_rate == 0.2
     assert report.metrics.coverage == 0.95
+    assert report.metrics_scope == "discovery"
+    assert report.oos_metrics is not None
+    assert report.oos_metrics.sharpe == 2.5
+    assert report.oos_metrics.coverage == 0.88
+    assert report.discovery_window is not None
+    assert report.oos_window is not None
+    assert report.oos_passed is True
+    assert report.oos_degradation == 0.3
 
 
 def test_coder_invalid_formula(mock_note):
     """语法错误公式应返回 BacktestReport(passed=False, error_message 非空)"""
     coder = Coder()
 
-    mock_stdout = "Traceback...\nBACKTEST_RESULT_JSON:" + json.dumps({
+    error_metrics = {
         "sharpe": 0.0,
         "annualized_return": 0.0,
         "max_drawdown": 0.0,
@@ -102,8 +141,24 @@ def test_coder_invalid_formula(mock_note):
         "icir": 0.0,
         "turnover_rate": 0.0,
         "coverage": 0.0,
-        "error": "SyntaxError: invalid syntax in formula"
-    })
+    }
+    payload = {
+        "metrics_scope": "full",
+        "metrics": error_metrics,
+        "oos_metrics": None,
+        "discovery_window": {
+            "start_date": "2021-06-01",
+            "end_date": "2025-03-31",
+            "coverage": 0.0,
+            "notes": "Discovery window (failure)",
+        },
+        "oos_window": None,
+        "discovery_passed": False,
+        "oos_passed": None,
+        "oos_degradation": None,
+        "error": "SyntaxError: invalid syntax in formula",
+    }
+    mock_stdout = "Traceback...\nBACKTEST_RESULT_JSON:" + json.dumps(payload)
 
     mock_exec_result = ExecutionResult(
         success=True,
@@ -123,6 +178,67 @@ def test_coder_invalid_formula(mock_note):
     assert "SyntaxError" in report.error_message
     assert report.factor_spec is not None
     assert report.metrics.coverage == 0.0
+    assert report.metrics_scope == "full"
+    assert report.oos_metrics is None
+    assert report.discovery_window is not None
+    assert report.oos_window is None
+
+
+def test_coder_derives_validation_flags_from_metrics_only(mock_note):
+    coder = Coder()
+
+    payload = {
+        "metrics_scope": "discovery",
+        "metrics": {
+            "sharpe": 1.2,
+            "annualized_return": 0.18,
+            "max_drawdown": 0.09,
+            "ic_mean": 0.01,
+            "ic_std": 0.03,
+            "icir": 0.35,
+            "turnover_rate": 0.15,
+            "coverage": 0.92,
+        },
+        "oos_metrics": {
+            "sharpe": 0.9,
+            "annualized_return": 0.14,
+            "max_drawdown": 0.11,
+            "ic_mean": 0.008,
+            "ic_std": 0.03,
+            "icir": 0.27,
+            "turnover_rate": 0.18,
+            "coverage": 0.84,
+        },
+        "discovery_window": {
+            "start_date": "2021-01-01",
+            "end_date": "2024-03-31",
+            "coverage": 0.92,
+            "notes": "Discovery window",
+        },
+        "oos_window": {
+            "start_date": "2024-04-01",
+            "end_date": "2025-03-31",
+            "coverage": 0.84,
+            "notes": "Out-of-sample validation window",
+        },
+        "error": None,
+    }
+    mock_stdout = "Some logs...\nBACKTEST_RESULT_JSON:" + json.dumps(payload)
+    mock_exec_result = ExecutionResult(
+        success=True,
+        stdout=mock_stdout,
+        stderr="",
+        returncode=0,
+        duration_seconds=9.0,
+    )
+
+    with patch.object(coder.runner, "run_python", return_value=mock_exec_result):
+        report = asyncio.run(coder.run_backtest(mock_note))
+
+    assert report.passed is True
+    assert report.discovery_passed is True
+    assert report.oos_passed is True
+    assert report.oos_degradation == 0.3
 
 
 def test_coder_template_uses_current_qlib_features_signature(mock_note):
@@ -131,15 +247,17 @@ def test_coder_template_uses_current_qlib_features_signature(mock_note):
     script = coder._compile(mock_note, "$close")
 
     assert 'field_names = ["factor"]' not in script
-    assert 'D.features(\n        instruments,\n        fields,\n        start_time=START_DATE,' in script
-    assert ').reset_index().rename(columns={fields[0]: "factor"})' in script
-    assert ').reset_index().rename(columns={ret_fields[0]: "ret"})' in script
-    assert 'df = df.merge(ret_df, on=["instrument", "datetime"], how="left")' in script
+    assert 'D.features(\n            D.instruments(market=UNIVERSE_NAME),' in script
+    assert 'fields,\n            start_time=window_start,' in script
+    assert '.rename(columns={fields[0]: "factor"})' in script
+    assert 'ret_fields,\n            start_time=window_start,' in script
+    assert '.rename(columns={ret_fields[0]: "ret"})' in script
+    assert 'merged = df.merge(ret_df, on=["instrument", "datetime"], how="left")' in script
     assert 'factor_df.groupby("datetime")["factor"].count()' in script
     assert 'ret_df.groupby("datetime")["ret"].count()' in script
     assert 'nsmallest(TOPK, "rank")["instrument"]' in script
     assert 'Path(f"/data/qlib_bin/instruments/{UNIVERSE}.txt").exists()' in script
-    assert 'universe_name = "all"' in script
+    assert 'UNIVERSE_NAME = (' in script
 
 
 def test_coder_output_parsing(mock_note):
