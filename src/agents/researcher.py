@@ -891,14 +891,16 @@ async def _hypothesis_gen_async(state: dict) -> dict:
     }
     stage2_rejection_counts = Counter()
     stage2_rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
-    stage2_sample_rejections: list[dict[str, str]] = []
+    stage2_sample_rejections: list[dict[str, Any]] = []
     stage2_factor_gene_by_note_id: dict[str, dict[str, Any]] = {}
-    stage2_emitted_note_ids: set[str] = set()
+    stage2_non_factor_note_ids: set[str] = set()
+    stage2_factor_note_entries: list[dict[str, Any]] = []
+    stage2_sample_rejections_by_researcher: list[list[Any]] = []
     stage2_generated_count = 0
     stage2_delivered_count = 0
     stage2_retry_count = 0
 
-    for (island, subspace), researcher, batch in zip(assignments, researchers, batches):
+    for researcher_idx, ((island, subspace), researcher, batch) in enumerate(zip(assignments, researchers, batches)):
         diagnostics = researcher.last_generation_diagnostics or {}
         stage2_generated_count += int(diagnostics.get("generated_count", 0))
         stage2_delivered_count += int(diagnostics.get("delivered_count", 0))
@@ -907,10 +909,10 @@ async def _hypothesis_gen_async(state: dict) -> dict:
         for filter_name, subspace_counts in diagnostics.get("rejection_counts_by_filter_and_subspace", {}).items():
             if isinstance(subspace_counts, dict):
                 stage2_rejection_counts_by_filter_and_subspace[filter_name].update(subspace_counts)
-        for item in diagnostics.get("sample_rejections", []):
-            if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
-                break
-            stage2_sample_rejections.append(item)
+        sample_rejections = diagnostics.get("sample_rejections", [])
+        if not isinstance(sample_rejections, list):
+            sample_rejections = []
+        stage2_sample_rejections_by_researcher.append(sample_rejections)
 
         if isinstance(batch, Exception):
             logger.warning("AlphaResearcher[%s/%s] 失败（跳过）: %s", island, subspace.value, batch)
@@ -922,17 +924,72 @@ async def _hypothesis_gen_async(state: dict) -> dict:
                 source_note_id = note.note_id
                 factor_gene_payload = factor_gene_diagnostics.get(source_note_id)
                 if isinstance(factor_gene_payload, dict):
-                    final_note_id = _make_unique_note_id(
-                        source_note_id,
-                        used_note_ids=stage2_emitted_note_ids,
-                        fallback_prefix=f"{note.island}_{_today_str()}",
+                    stage2_factor_note_entries.append(
+                        {
+                            "researcher_idx": researcher_idx,
+                            "source_note_id": source_note_id,
+                            "note": note,
+                            "factor_gene_payload": factor_gene_payload,
+                        }
                     )
-                    if final_note_id != source_note_id:
-                        note.note_id = final_note_id
-                    stage2_emitted_note_ids.add(final_note_id)
-                    stage2_factor_gene_by_note_id[final_note_id] = factor_gene_payload
+                elif isinstance(source_note_id, str):
+                    stage2_non_factor_note_ids.add(source_note_id)
                 all_notes.append(note)
             subspace_results[subspace][0] += len(batch.notes)  # generated
+
+    stage2_factor_note_id_remap_by_researcher: dict[int, dict[str, list[dict[str, str | None]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    occupied_note_ids = set(stage2_non_factor_note_ids)
+    for item in stage2_factor_note_entries:
+        note = item["note"]
+        source_note_id = item["source_note_id"]
+        factor_gene_payload = item["factor_gene_payload"]
+        final_note_id = _make_unique_note_id(
+            source_note_id,
+            used_note_ids=occupied_note_ids,
+            fallback_prefix=f"{note.island}_{_today_str()}",
+        )
+        if final_note_id != source_note_id:
+            note.note_id = final_note_id
+        occupied_note_ids.add(final_note_id)
+        stage2_factor_gene_by_note_id[final_note_id] = factor_gene_payload
+        identity = _factor_gene_identity(factor_gene_payload)
+        if identity is not None:
+            family_key, variant_key = identity
+            stage2_factor_note_id_remap_by_researcher[item["researcher_idx"]][source_note_id].append(
+                {
+                    "family_gene_key": family_key,
+                    "variant_gene_key": variant_key,
+                    "final_note_id": final_note_id,
+                }
+            )
+
+    for researcher_idx, sample_rejections in enumerate(stage2_sample_rejections_by_researcher):
+        note_id_remap = stage2_factor_note_id_remap_by_researcher.get(researcher_idx, {})
+        for item in sample_rejections:
+            if len(stage2_sample_rejections) >= _MAX_STAGE2_REJECTION_SAMPLES:
+                break
+            if not isinstance(item, dict):
+                stage2_sample_rejections.append(item)
+                continue
+            mapped_item = item
+            sample_note_id = item.get("note_id")
+            has_factor_gene_keys = isinstance(item.get("family_gene_key"), str) or isinstance(
+                item.get("variant_gene_key"), str
+            )
+            if has_factor_gene_keys and isinstance(sample_note_id, str) and sample_note_id in note_id_remap:
+                candidates = note_id_remap[sample_note_id]
+                for candidate in candidates:
+                    if _sample_matches_factor_gene_identity(
+                        item,
+                        family_key=str(candidate["family_gene_key"]),
+                        variant_key=(candidate["variant_gene_key"] if isinstance(candidate["variant_gene_key"], str) else None),
+                    ):
+                        mapped_item = dict(item)
+                        mapped_item["note_id"] = str(candidate["final_note_id"])
+                        break
+            stage2_sample_rejections.append(mapped_item)
 
     logger.info(
         "Stage 2 生成 %d 个候选（%d 个任务，%d 个 Island）",

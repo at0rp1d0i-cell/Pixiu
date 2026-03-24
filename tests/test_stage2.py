@@ -1511,6 +1511,102 @@ def test_hypothesis_gen_node_non_factor_algebra_note_ids_remain_unchanged_under_
     assert "factor_gene_by_note_id" not in result["stage2_diagnostics"]
 
 
+def test_hypothesis_gen_node_mixed_collision_keeps_non_factor_id_and_remaps_factor_gene_id():
+    from src.agents.researcher import hypothesis_gen_node
+
+    # Factor first, non-factor second: verifies final mapping does not depend on researcher ordering.
+    assignments = [
+        ("momentum", ExplorationSubspace.FACTOR_ALGEBRA),
+        ("volatility", ExplorationSubspace.CROSS_MARKET),
+    ]
+
+    with patch("src.agents.researcher._build_island_subspace_assignments", return_value=assignments):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                instance = MagicMock()
+                subspace = (
+                    ExplorationSubspace.FACTOR_ALGEBRA
+                    if island == "momentum"
+                    else ExplorationSubspace.CROSS_MARKET
+                )
+                note = FactorResearchNote(
+                    note_id="dup_mixed",
+                    island=island,
+                    iteration=1,
+                    hypothesis="test",
+                    economic_intuition="test",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-24",
+                    exploration_subspace=subspace,
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                if subspace == ExplorationSubspace.FACTOR_ALGEBRA:
+                    instance.last_generation_diagnostics = {
+                        "generated_count": 1,
+                        "delivered_count": 1,
+                        "local_retry_count": 0,
+                        "rejection_counts_by_filter": {},
+                        "sample_rejections": [
+                            {
+                                "note_id": "dup_mixed",
+                                "filter": "novelty",
+                                "reason": "dup",
+                                "exploration_subspace": "factor_algebra",
+                                "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                                "variant_gene_key": "5|20|null|null",
+                            }
+                        ],
+                        "factor_gene_by_note_id": {
+                            "dup_mixed": {
+                                "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                                "variant_gene_key": "5|20|null|null",
+                            }
+                        },
+                    }
+                else:
+                    instance.last_generation_diagnostics = {
+                        "generated_count": 1,
+                        "delivered_count": 1,
+                        "local_retry_count": 0,
+                        "rejection_counts_by_filter": {},
+                        "sample_rejections": [],
+                    }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {
+                    "active_islands": ["momentum", "volatility"],
+                    "market_context": None,
+                    "iteration": 1,
+                }
+            )
+
+    notes_by_subspace = {note.exploration_subspace: note for note in result["research_notes"]}
+    non_factor_note = notes_by_subspace[ExplorationSubspace.CROSS_MARKET]
+    factor_note = notes_by_subspace[ExplorationSubspace.FACTOR_ALGEBRA]
+
+    assert non_factor_note.note_id == "dup_mixed"
+    assert factor_note.note_id != "dup_mixed"
+
+    factor_gene_map = result["stage2_diagnostics"]["factor_gene_by_note_id"]
+    assert set(factor_gene_map.keys()) == {factor_note.note_id}
+    factor_samples = [
+        item
+        for item in result["stage2_diagnostics"]["sample_rejections"]
+        if isinstance(item, dict) and item.get("exploration_subspace") == "factor_algebra"
+    ]
+    assert len(factor_samples) == 1
+    assert factor_samples[0]["note_id"] == factor_note.note_id
+
+
 def test_alpha_researcher_symbolic_path_runs_local_prescreen():
     from src.agents.researcher import AlphaResearcher
 
