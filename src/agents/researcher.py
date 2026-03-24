@@ -29,6 +29,7 @@ from src.formula.capabilities import (
     get_runtime_formula_capabilities,
 )
 from src.formula.sketch import (
+    ALLOWED_BASE_FIELDS,
     ALLOWED_QUANTILE_QSCORES,
     ALLOWED_WINDOW_BUCKETS,
     FormulaRecipe,
@@ -48,6 +49,7 @@ _MAX_LOCAL_RETRY = 1
 _MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
+_FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -147,10 +149,12 @@ FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
   - normalization_window（normalization != none 时必填）
   - quantile_qscore（normalization = quantile 时必填）
   - secondary_field（仅 volume_confirmation 时必填）
+- `base_field/secondary_field` 仅允许：$close, $open, $high, $low, $vwap, $volume, $amount
 - 窗口字段 `lookback_short/lookback_long/normalization_window` 仅允许：5, 10, 20, 30, 60
 - `quantile_qscore` 仅允许：0.2, 0.5, 0.8
 - 必须满足 `lookback_short < lookback_long`
 - `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
+- 如果 hypothesis 想引用 ROE / PB / float_mv / turnover_rate 等字段，请在本子空间改用价量代理；不要把这些字段写进 formula_recipe
 """
 
 
@@ -320,6 +324,7 @@ class AlphaResearcher:
                     "\n## 重试硬约束\n"
                     "- Rank 必须写成 Rank(expr, N)，禁止 Rank(expr)\n"
                     "- 归一化仅允许 Rank(expr, N) 或 Quantile(expr, N, qscore)\n"
+                    f"- base_field/secondary_field 仅允许：{_FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT}\n"
                     "- `lookback_short/lookback_long/normalization_window` 仅允许: 5, 10, 20, 30, 60\n"
                     "- `quantile_qscore` 仅允许: 0.2, 0.5, 0.8\n"
                     "- 禁止 Zscore/MinMax/Neutralize/Demean\n"
@@ -720,6 +725,15 @@ class AlphaResearcher:
                 hint = (
                     "- quantile_qscore 仅允许："
                     f"{', '.join(str(v) for v in ALLOWED_QUANTILE_QSCORES)}。"
+                )
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "unsupported base_field" in reason_lower or "unsupported secondary_field" in reason_lower:
+                hint = (
+                    "- factor_algebra 的 base_field/secondary_field 仅允许："
+                    f"{_FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT}；"
+                    "不要把 ROE/PB/float_mv/turnover_rate 等字段直接写进 formula_recipe。"
                 )
                 if hint not in seen_hints:
                     hints.append(hint)

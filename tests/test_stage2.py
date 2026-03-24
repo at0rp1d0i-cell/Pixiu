@@ -634,6 +634,10 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
                 "reason": "FormulaSketch recipe 无效：Unsupported normalization_window: 7",
             },
             {
+                "filter": "validator",
+                "reason": "FormulaSketch recipe 无效：Unsupported base_field: $roe",
+            },
+            {
                 "filter": "novelty",
                 "reason": "与已有因子 momentum_consistency_5_20d 相似度过高 (0.50 > 0.3)",
                 "exploration_subspace": "factor_algebra",
@@ -646,14 +650,98 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
     assert "interaction_mode 必须为 mul" in feedback
     assert "quantile_qscore 仅允许：0.2, 0.5, 0.8" in feedback
     assert "normalization_window 仅允许固定窗口桶：5, 10, 20, 30, 60" in feedback
+    assert "base_field/secondary_field 仅允许" in feedback
+    assert "$close, $open, $high, $low, $vwap, $volume, $amount" in feedback
     assert "不要只改窗口、qscore 或 normalization_window" in feedback
 
 
 def test_factor_algebra_recipe_instruction_explicitly_lists_allowed_value_buckets():
     from src.agents.researcher import FACTOR_ALGEBRA_RECIPE_INSTRUCTION
 
+    assert "base_field/secondary_field` 仅允许：$close, $open, $high, $low, $vwap, $volume, $amount" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
     assert "仅允许：5, 10, 20, 30, 60" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
     assert "quantile_qscore` 仅允许：0.2, 0.5, 0.8" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+
+
+def test_factor_algebra_invalid_base_field_triggers_retry_hint():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_field",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "bad field",
+            "economic_intuition": "bad field",
+            "formula_recipe": {
+                "base_field": "$roe",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "bad field"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_field",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "good field",
+            "economic_intuition": "good field",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "good field"
+    }'''
+
+    async def capture_ainvoke(messages):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good_field"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert "base_field/secondary_field 仅允许" in captured_user_messages[1]
+    assert "$close, $open, $high, $low, $vwap, $volume, $amount" in captured_user_messages[1]
 
 
 def test_non_factor_algebra_subspace_keeps_free_form_path():
