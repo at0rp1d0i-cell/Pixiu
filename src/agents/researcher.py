@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 _SKILL_LOADER = SkillLoader()
 _MAX_STAGE2_REJECTION_SAMPLES = 5
 _MAX_LOCAL_RETRY = 1
+_MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 
@@ -151,6 +152,15 @@ FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
 - 必须满足 `lookback_short < lookback_long`
 - `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
 """
+
+
+def _formula_skeleton(formula: str) -> str:
+    """Collapse numeric micro-variants into one readable family skeleton."""
+    compact = re.sub(r"\s+", "", formula)
+    compact = re.sub(r"(?<![\w$])\d+(?:\.\d+)?e[+-]?\d+(?![\w$])", "EPS", compact, flags=re.IGNORECASE)
+    compact = re.sub(r"(?<![\w$])\d+\.\d+(?![\w$])", "Q", compact)
+    compact = re.sub(r"(?<![\w$])\d+(?![\w$])", "N", compact)
+    return compact
 
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
@@ -300,6 +310,9 @@ class AlphaResearcher:
             )
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
                 user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+                anti_collapse_section = self._build_factor_algebra_anti_collapse_section()
+                if anti_collapse_section:
+                    user_msg += "\n\n" + anti_collapse_section
             if attempt > 0:
                 user_msg += (
                     "\n\n## 本地预筛拒绝反馈（重试约束）\n"
@@ -535,6 +548,55 @@ class AlphaResearcher:
 
         return constraints_text
 
+    def _build_factor_algebra_anti_collapse_section(self) -> str:
+        """Build a short family-memory prompt to reduce repeated factor_algebra variants."""
+        if self.factor_pool is None:
+            return ""
+
+        existing: list[dict[str, Any]] = []
+        try:
+            existing = list(self.factor_pool.get_passed_factors(island=self.island, limit=12))
+        except Exception as exc:
+            logger.debug("[AlphaResearcher] get_passed_factors failed for anti-collapse: %s", exc)
+
+        if not existing:
+            try:
+                existing = list(self.factor_pool.get_island_factors(island=self.island, limit=12))
+            except Exception as exc:
+                logger.debug("[AlphaResearcher] get_island_factors failed for anti-collapse: %s", exc)
+                return ""
+
+        skeleton_examples: list[tuple[str, str]] = []
+        seen_skeletons: set[str] = set()
+        for item in existing:
+            formula = item.get("formula") or item.get("document") or ""
+            if not isinstance(formula, str) or not formula:
+                continue
+            subspace_origin = item.get("subspace_origin")
+            if subspace_origin not in (None, "", ExplorationSubspace.FACTOR_ALGEBRA.value):
+                continue
+            skeleton = _formula_skeleton(formula)
+            if skeleton in seen_skeletons:
+                continue
+            seen_skeletons.add(skeleton)
+            label = item.get("factor_id") or item.get("factor_name") or f"formula_{len(skeleton_examples) + 1}"
+            skeleton_examples.append((str(label), skeleton))
+            if len(skeleton_examples) >= _MAX_ANTI_COLLAPSE_SKELETONS:
+                break
+
+        if not skeleton_examples:
+            return ""
+
+        lines = [
+            "## FACTOR_ALGEBRA Anti-Collapse 提示",
+            "- 当前岛上已有一些已占满的 factor family 骨架；如果你的新 recipe 只是改窗口、qscore、normalization_window，请不要提交。",
+            "- 若命中下列骨架，请优先改变 base_field、transform_family 或 interaction_mode，而不是只改数字。",
+            "- 当前已占满骨架示例：",
+        ]
+        for idx, (label, skeleton) in enumerate(skeleton_examples, start=1):
+            lines.append(f"  {idx}. {label}: {skeleton}")
+        return "\n".join(lines)
+
     def _local_prescreen_notes(
         self, notes: list[FactorResearchNote]
     ) -> tuple[list[FactorResearchNote], dict[str, Any]]:
@@ -659,6 +721,11 @@ class AlphaResearcher:
                     "- quantile_qscore 仅允许："
                     f"{', '.join(str(v) for v in ALLOWED_QUANTILE_QSCORES)}。"
                 )
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "相似度过高" in reason and item.get("exploration_subspace") == ExplorationSubspace.FACTOR_ALGEBRA.value:
+                hint = "- novelty 命中说明你仍在重复已有 factor_algebra family；不要只改窗口、qscore 或 normalization_window，优先更换 transform_family、base_field 或 interaction_mode。"
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)

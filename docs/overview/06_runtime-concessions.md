@@ -329,22 +329,25 @@ Last Reviewed: 2026-03-23
 ### DEF-002
 
 - `Type`: `deferred`
-- `Status`: `agreed`
+- `Status`: `partial`
 - `Scope`: `Stage 2 anti-collapse`
 - `Current Behavior`:
-  - 尚未实现
-  - 已确认后续要引入 `passed family memory + novelty-collapse memory`
+  - 已进入 `factor_algebra anti-collapse v1`
+  - 生成前会注入少量已占满 family skeleton，重试反馈也会显式提示避免只改窗口/qscore/归一化
+  - 但 `passed family memory + novelty-collapse memory` 仍未形成正式长期机制
 - `Why It Exists`:
-  - 当前先通过 telemetry 确定最脏子空间，再做有针对性的收缩
+  - 当前先在最脏子空间上做短期 anti-collapse，降低围绕经典因子骨架打转的概率
 - `Risk If Kept`:
-  - 系统会继续围绕训练数据中的常见 family 绕圈
+  - 系统仍可能继续围绕训练数据中的常见 family 绕圈
+  - novelty 仍然主要是事后拦截，不是完整的搜索分布引导
 - `Removal Trigger`:
-  - factor_algebra 的 FormulaSketch Lite 先进入主线
-  - family-level memory 设计完成
+  - family-level memory 设计完成并进入主线
+  - novelty-collapse memory 形成正式可消费对象
 - `Related Settings`:
   - 未来 Stage 2 family/novelty memory settings
 - `Evidence`:
-  - 本次 2026-03-23 架构讨论结论
+  - `researcher.py` 已加入 factor_algebra anti-collapse prompt 注入
+  - 2026-03-23 `single` artifact 显示 validator 降低但 novelty 仍高，说明该能力已部分进入主线、但仍不完整
 
 ### DEF-003
 
