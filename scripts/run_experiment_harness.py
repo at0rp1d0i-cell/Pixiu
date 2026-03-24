@@ -132,6 +132,14 @@ _MANAGED_RUNTIME_ENV_KEYS = (
 )
 
 
+@dataclass(frozen=True)
+class _RuntimeMutationBackup:
+    managed_env: dict[str, str | None]
+    active_islands: list[str]
+    report_every_n_rounds: int
+    reports_dir: Path
+
+
 def _fallback_runtime_truth(profile) -> dict[str, object]:
     profile_kind = getattr(profile, "profile_kind", "controlled_run")
     persistence_mode = getattr(profile, "persistence_mode", "full")
@@ -235,6 +243,39 @@ def _apply_runtime_env(
     return merged, runtime_truth
 
 
+def _capture_runtime_mutation_backup() -> _RuntimeMutationBackup:
+    from src.core.orchestrator import config as orchestrator_config
+
+    return _RuntimeMutationBackup(
+        managed_env={key: os.environ.get(key) for key in _MANAGED_RUNTIME_ENV_KEYS},
+        active_islands=list(orchestrator_config.ACTIVE_ISLANDS),
+        report_every_n_rounds=int(orchestrator_config.REPORT_EVERY_N_ROUNDS),
+        reports_dir=Path(orchestrator_config.REPORTS_DIR),
+    )
+
+
+def _restore_runtime_env(backup: _RuntimeMutationBackup) -> None:
+    from src.core.orchestrator import config as orchestrator_config
+    from src.control_plane.state_store import reset_state_store
+    from src.core.experiment_logger import reset_experiment_logger
+    from src.factor_pool.pool import reset_factor_pool
+
+    for key, value in backup.managed_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+    orchestrator_config.ACTIVE_ISLANDS = list(backup.active_islands)
+    orchestrator_config.REPORT_EVERY_N_ROUNDS = backup.report_every_n_rounds
+    orchestrator_config.REPORTS_DIR = Path(backup.reports_dir)
+
+    reset_state_store()
+    reset_experiment_logger()
+    reset_factor_pool()
+    _runtime.reset_runtime_state()
+
+
 async def run_harness(
     profile,
     *,
@@ -267,83 +308,87 @@ async def run_harness(
             next_step="Resolve preflight blocking errors before starting the run.",
         )
 
+    runtime_backup = _capture_runtime_mutation_backup()
     _, runtime_truth = _apply_runtime_env(profile, profile_path=profile_path, env=env)
 
-    if profile.run_single:
-        await run_single_fn(profile.single_island)
-        single_ok, single_detail = status_runner("single")
-        phases.append(PhaseResult(name="single", ok=single_ok, detail=single_detail))
-        if not single_ok:
+    try:
+        if profile.run_single:
+            await run_single_fn(profile.single_island)
+            single_ok, single_detail = status_runner("single")
+            phases.append(PhaseResult(name="single", ok=single_ok, detail=single_detail))
+            if not single_ok:
+                return HarnessResult(
+                    ok=False,
+                    profile_path=str(profile_path),
+                    long_run_requested=long_run,
+                    long_run_executed=False,
+                    phases=phases,
+                    runtime_truth=runtime_truth,
+                    failure_stage="single",
+                    next_step="Inspect single-run artifacts before retrying evolve.",
+                )
+
+        if profile.run_preflight_evolve:
+            await run_evolve_fn(int(profile.preflight_evolve_rounds))
+            preflight_evolve_ok, preflight_evolve_detail = status_runner("evolve")
+            phases.append(PhaseResult(name="evolve_preflight", ok=preflight_evolve_ok, detail=preflight_evolve_detail))
+            if not preflight_evolve_ok:
+                return HarnessResult(
+                    ok=False,
+                    profile_path=str(profile_path),
+                    long_run_requested=long_run,
+                    long_run_executed=False,
+                    phases=phases,
+                    runtime_truth=runtime_truth,
+                    failure_stage="evolve_preflight",
+                    next_step="Fix the short evolve failure before requesting a long run.",
+                )
+
+        if not long_run:
             return HarnessResult(
-                ok=False,
+                ok=True,
                 profile_path=str(profile_path),
-                long_run_requested=long_run,
+                long_run_requested=False,
                 long_run_executed=False,
                 phases=phases,
                 runtime_truth=runtime_truth,
-                failure_stage="single",
-                next_step="Inspect single-run artifacts before retrying evolve.",
             )
 
-    if profile.run_preflight_evolve:
-        await run_evolve_fn(int(profile.preflight_evolve_rounds))
-        preflight_evolve_ok, preflight_evolve_detail = status_runner("evolve")
-        phases.append(PhaseResult(name="evolve_preflight", ok=preflight_evolve_ok, detail=preflight_evolve_detail))
-        if not preflight_evolve_ok:
+        if not profile.run_preflight_evolve:
+            phases.append(
+                PhaseResult(
+                    name="evolve_long",
+                    ok=False,
+                    detail="long run requires run_preflight_evolve=true in the selected profile",
+                )
+            )
             return HarnessResult(
                 ok=False,
                 profile_path=str(profile_path),
-                long_run_requested=long_run,
+                long_run_requested=True,
                 long_run_executed=False,
                 phases=phases,
                 runtime_truth=runtime_truth,
-                failure_stage="evolve_preflight",
-                next_step="Fix the short evolve failure before requesting a long run.",
+                failure_stage="profile_policy",
+                next_step="Use a controlled_run profile or enable run_preflight_evolve before requesting --long-run.",
             )
 
-    if not long_run:
+        long_rounds = _resolve_long_run_rounds(profile)
+        await run_evolve_fn(long_rounds)
+        long_ok, long_detail = status_runner("evolve")
+        phases.append(PhaseResult(name="evolve_long", ok=long_ok, detail=f"rounds={long_rounds}; {long_detail}"))
         return HarnessResult(
-            ok=True,
-            profile_path=str(profile_path),
-            long_run_requested=False,
-            long_run_executed=False,
-            phases=phases,
-            runtime_truth=runtime_truth,
-        )
-
-    if not profile.run_preflight_evolve:
-        phases.append(
-            PhaseResult(
-                name="evolve_long",
-                ok=False,
-                detail="long run requires run_preflight_evolve=true in the selected profile",
-            )
-        )
-        return HarnessResult(
-            ok=False,
+            ok=long_ok,
             profile_path=str(profile_path),
             long_run_requested=True,
-            long_run_executed=False,
+            long_run_executed=True,
             phases=phases,
             runtime_truth=runtime_truth,
-            failure_stage="profile_policy",
-            next_step="Use a controlled_run profile or enable run_preflight_evolve before requesting --long-run.",
+            failure_stage=None if long_ok else "evolve_long",
+            next_step=None if long_ok else "Inspect long-run diagnostics before re-running the profile.",
         )
-
-    long_rounds = _resolve_long_run_rounds(profile)
-    await run_evolve_fn(long_rounds)
-    long_ok, long_detail = status_runner("evolve")
-    phases.append(PhaseResult(name="evolve_long", ok=long_ok, detail=f"rounds={long_rounds}; {long_detail}"))
-    return HarnessResult(
-        ok=long_ok,
-        profile_path=str(profile_path),
-        long_run_requested=True,
-        long_run_executed=True,
-        phases=phases,
-        runtime_truth=runtime_truth,
-        failure_stage=None if long_ok else "evolve_long",
-        next_step=None if long_ok else "Inspect long-run diagnostics before re-running the profile.",
-    )
+    finally:
+        _restore_runtime_env(runtime_backup)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

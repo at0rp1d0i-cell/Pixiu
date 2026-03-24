@@ -84,6 +84,34 @@ def test_experiment_logger_singleton_rebuilds_when_runs_dir_changes(monkeypatch:
     assert second._base_dir == (tmp_path / "runs_b" / "run-a")
 
 
+def test_experiment_logger_manual_override_wins_when_key_is_stale(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(experiment_logger_module, "_logger_instance", None)
+    monkeypatch.setattr(experiment_logger_module, "_logger_instance_key", None)
+
+    monkeypatch.setenv("PIXIU_RUN_ID", "run-a")
+    monkeypatch.setenv("PIXIU_EXPERIMENT_RUNS_DIR", str(tmp_path / "runs_a"))
+    _ = experiment_logger_module.get_experiment_logger()
+
+    manual = experiment_logger_module.ExperimentLogger(
+        run_id="manual-run",
+        runs_dir=tmp_path / "manual_runs",
+    )
+    experiment_logger_module._logger_instance = manual
+
+    monkeypatch.setenv("PIXIU_RUN_ID", "run-b")
+    monkeypatch.setenv("PIXIU_EXPERIMENT_RUNS_DIR", str(tmp_path / "runs_b"))
+    resolved = experiment_logger_module.get_experiment_logger()
+
+    assert resolved is manual
+    assert experiment_logger_module._logger_instance_key == (
+        "manual-run",
+        str(tmp_path / "manual_runs"),
+    )
+
+
 def test_path_resolvers_follow_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("PIXIU_FACTOR_POOL_DB_PATH", str(tmp_path / "factor_pool"))
     monkeypatch.setenv("PIXIU_ARTIFACTS_DIR", str(tmp_path / "artifacts"))

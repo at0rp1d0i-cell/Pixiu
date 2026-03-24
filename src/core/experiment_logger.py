@@ -315,6 +315,14 @@ def get_experiment_logger() -> ExperimentLogger:
     )
     runs_dir = resolve_experiment_runs_dir()
     key = (run_id, str(runs_dir))
+    if _logger_instance is not None:
+        current_instance_key = (
+            getattr(_logger_instance, "run_id", ""),
+            str(getattr(_logger_instance, "_base_dir", Path()).parent),
+        )
+        if _logger_instance_key is None or _logger_instance_key != current_instance_key:
+            _logger_instance_key = current_instance_key
+            return _logger_instance
     if _logger_instance is None or _logger_instance_key != key:
         _logger_instance = ExperimentLogger(run_id=run_id, runs_dir=runs_dir)
         _logger_instance_key = key

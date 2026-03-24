@@ -214,6 +214,16 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
         observed["QLIB_DATA_DIR"] = os.environ.get("QLIB_DATA_DIR", "")
         observed["REPORT_EVERY_N_ROUNDS"] = os.environ.get("REPORT_EVERY_N_ROUNDS", "")
         observed["PIXIU_HUMAN_GATE_AUTO_ACTION"] = os.environ.get("PIXIU_HUMAN_GATE_AUTO_ACTION", "")
+        observed["ACTIVE_ISLANDS"] = os.environ.get("ACTIVE_ISLANDS", "")
+        observed["PIXIU_TARGET_SUBSPACES"] = os.environ.get("PIXIU_TARGET_SUBSPACES", "")
+        observed["PIXIU_STAGE1_CONTEXT_MODE"] = os.environ.get("PIXIU_STAGE1_CONTEXT_MODE", "")
+        observed["PIXIU_EXPERIMENT_PROFILE_KIND"] = os.environ.get("PIXIU_EXPERIMENT_PROFILE_KIND", "")
+        observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] = os.environ.get("PIXIU_EXPERIMENT_PERSISTENCE_MODE", "")
+        observed["PIXIU_STATE_STORE_PATH"] = os.environ.get("PIXIU_STATE_STORE_PATH", "")
+        from src.core.orchestrator import config as orchestrator_config
+        observed["config_active_islands"] = ",".join(orchestrator_config.ACTIVE_ISLANDS)
+        observed["config_report_every"] = str(orchestrator_config.REPORT_EVERY_N_ROUNDS)
+        observed["config_reports_dir"] = str(orchestrator_config.REPORTS_DIR)
 
     async def fake_evolve(_rounds: int) -> None:
         return None
@@ -250,18 +260,85 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["QLIB_DATA_DIR"] == str(qlib_dir)
     assert observed["REPORT_EVERY_N_ROUNDS"] == "9"
     assert observed["PIXIU_HUMAN_GATE_AUTO_ACTION"] == "approve"
-    assert os.environ["ACTIVE_ISLANDS"] == "momentum"
-    assert os.environ["PIXIU_TARGET_SUBSPACES"] == "factor_algebra"
-    assert os.environ["PIXIU_STAGE1_CONTEXT_MODE"] == "frozen"
-    assert os.environ["PIXIU_EXPERIMENT_PROFILE_KIND"] == "fast_feedback"
-    assert os.environ["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] == "artifact_only"
-    assert "runtime_namespaces/fast_feedback" in os.environ["PIXIU_STATE_STORE_PATH"]
+    assert observed["ACTIVE_ISLANDS"] == "momentum"
+    assert observed["PIXIU_TARGET_SUBSPACES"] == "factor_algebra"
+    assert observed["PIXIU_STAGE1_CONTEXT_MODE"] == "frozen"
+    assert observed["PIXIU_EXPERIMENT_PROFILE_KIND"] == "fast_feedback"
+    assert observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] == "artifact_only"
+    assert "runtime_namespaces/fast_feedback" in observed["PIXIU_STATE_STORE_PATH"]
     assert module._runtime.peek_scheduler() is None
-    from src.core.orchestrator import config as orchestrator_config
-    assert orchestrator_config.ACTIVE_ISLANDS == ["momentum"]
-    assert orchestrator_config.REPORT_EVERY_N_ROUNDS == 9
-    assert "runtime_namespaces/fast_feedback/reports" in str(orchestrator_config.REPORTS_DIR)
+    assert observed["config_active_islands"] == "momentum"
+    assert observed["config_report_every"] == "9"
+    assert "runtime_namespaces/fast_feedback/reports" in observed["config_reports_dir"]
     assert result.runtime_truth["profile_kind"] == "fast_feedback"
+
+
+@pytest.mark.asyncio
+async def test_harness_restores_runtime_env_after_return(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    module = _load_harness_module()
+    qlib_dir = tmp_path / "qlib_runtime"
+    qlib_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ACTIVE_ISLANDS", "momentum,northbound")
+    monkeypatch.setenv("PIXIU_TARGET_SUBSPACES", "cross_market")
+    monkeypatch.setenv("PIXIU_EXPERIMENT_RUNS_DIR", str(tmp_path / "runs_before"))
+
+    def fake_resolve_profile_env_truth(profile, **kwargs):
+        return SimpleNamespace(
+            merged_env={
+                "TUSHARE_TOKEN": "runtime-token",
+                "QLIB_DATA_DIR": str(qlib_dir),
+            },
+            sources={
+                "TUSHARE_TOKEN": "user_runtime_env",
+                "QLIB_DATA_DIR": "user_runtime_env",
+            },
+        )
+
+    monkeypatch.setattr(module, "resolve_profile_env_truth", fake_resolve_profile_env_truth)
+
+    from src.core.orchestrator import config as orchestrator_config
+
+    original_active = list(orchestrator_config.ACTIVE_ISLANDS)
+    original_report_every = orchestrator_config.REPORT_EVERY_N_ROUNDS
+    original_reports_dir = orchestrator_config.REPORTS_DIR
+
+    async def fake_single(_island: str) -> None:
+        return None
+
+    async def fake_evolve(_rounds: int) -> None:
+        return None
+
+    result = await module.run_harness(
+        _FakeProfile(
+            profile_kind="fast_feedback",
+            target_islands=["momentum"],
+            target_subspaces=["factor_algebra"],
+            market_context_mode="frozen",
+            market_context_path=str(tmp_path / "frozen_context.json"),
+            persistence_mode="artifact_only",
+            namespace="fast_feedback",
+            stage1_enrichment_enabled=False,
+            run_preflight_evolve=False,
+        ),
+        profile_path="dummy.json",
+        long_run=False,
+        preflight_fn=lambda *args, **kwargs: _FakePreflightResult(
+            ok=True,
+            blocking_errors=[],
+            runtime_truth={"planned_phases": ["doctor", "single"], "profile_kind": "fast_feedback"},
+        ),
+        run_single_fn=fake_single,
+        run_evolve_fn=fake_evolve,
+        status_runner=lambda mode: (True, f"{mode} ok"),
+    )
+
+    assert result.ok
+    assert os.environ["ACTIVE_ISLANDS"] == "momentum,northbound"
+    assert os.environ["PIXIU_TARGET_SUBSPACES"] == "cross_market"
+    assert os.environ["PIXIU_EXPERIMENT_RUNS_DIR"] == str(tmp_path / "runs_before")
+    assert orchestrator_config.ACTIVE_ISLANDS == original_active
+    assert orchestrator_config.REPORT_EVERY_N_ROUNDS == original_report_every
+    assert orchestrator_config.REPORTS_DIR == original_reports_dir
 
 
 @pytest.mark.asyncio
