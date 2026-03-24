@@ -83,6 +83,8 @@ def test_gene_keys_are_stable_across_recipe_and_mapping_input() -> None:
 
     assert build_family_gene_key(recipe) == build_family_gene_key(family_gene)
     assert build_variant_gene_key(recipe) == build_variant_gene_key(variant_gene)
+    assert build_family_gene_key(recipe) == "factor_algebra|volume_confirmation|$close|$volume|mul|quantile"
+    assert build_variant_gene_key(recipe) == "5|20|20|0.8"
 
 
 def test_family_gene_unchanged_when_only_windows_or_qscore_change() -> None:
@@ -138,3 +140,69 @@ def test_family_gene_changes_when_transform_or_base_field_changes() -> None:
     assert build_family_gene(recipe) != build_family_gene(changed_base)
     assert build_family_gene_key(recipe) != build_family_gene_key(changed_transform)
     assert build_family_gene_key(recipe) != build_family_gene_key(changed_base)
+
+
+def test_family_gene_key_uses_null_placeholder() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        lookback_short=5,
+        lookback_long=30,
+        transform_family="volatility_state",
+        normalization="quantile",
+        normalization_window=20,
+        quantile_qscore=0.8,
+    )
+
+    assert build_family_gene_key(recipe) == "factor_algebra|volatility_state|$close|null|none|quantile"
+    assert build_variant_gene_key(recipe) == "5|30|20|0.8"
+
+
+def test_build_variant_gene_key_rejects_family_gene_mapping() -> None:
+    family_gene = {
+        "subspace": "factor_algebra",
+        "transform_family": "volatility_state",
+        "base_field": "$close",
+        "secondary_field": None,
+        "interaction_mode": "none",
+        "normalization_kind": "quantile",
+    }
+
+    with pytest.raises(ValueError, match="variant_gene"):
+        build_variant_gene_key(family_gene)
+
+
+def test_build_family_gene_key_rejects_variant_gene_mapping() -> None:
+    variant_gene = {
+        "lookback_short": 5,
+        "lookback_long": 30,
+        "normalization_window": 20,
+        "quantile_qscore": 0.8,
+    }
+
+    with pytest.raises(ValueError, match="family_gene"):
+        build_family_gene_key(variant_gene)
+
+
+def test_build_gene_key_rejects_malformed_mapping_and_non_mapping() -> None:
+    malformed_family_gene = {
+        "subspace": "factor_algebra",
+        "transform_family": "volatility_state",
+        "base_field": "$close",
+        "secondary_field": None,
+        "interaction_mode": "none",
+        # missing normalization_kind
+    }
+    malformed_variant_gene = {
+        "lookback_short": 5,
+        "lookback_long": 30,
+        "normalization_window": 20,
+        "quantile_qscore": 0.8,
+        "unexpected": "x",
+    }
+
+    with pytest.raises(ValueError, match="family_gene"):
+        build_family_gene_key(malformed_family_gene)
+    with pytest.raises(ValueError, match="variant_gene"):
+        build_variant_gene_key(malformed_variant_gene)
+    with pytest.raises(TypeError, match="FormulaRecipe or mapping"):
+        build_family_gene_key(["not-a-gene"])

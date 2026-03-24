@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -60,28 +59,31 @@ def _coerce_gene(recipe_or_gene: FormulaRecipe | Mapping[str, Any], *, is_family
         return build_family_gene(recipe_or_gene) if is_family else build_variant_gene(recipe_or_gene)
     if not isinstance(recipe_or_gene, Mapping):
         raise TypeError("recipe_or_gene must be FormulaRecipe or mapping")
-    return _canonical_gene_object(recipe_or_gene, is_family=is_family)
-
-
-def _canonical_gene_object(gene: Mapping[str, Any], *, is_family: bool) -> dict[str, Any]:
     if is_family:
-        return {
-            "subspace": gene.get("subspace", _SUBSPACE_FACTOR_ALGEBRA),
-            "transform_family": gene.get("transform_family"),
-            "base_field": gene.get("base_field"),
-            "secondary_field": gene.get("secondary_field"),
-            "interaction_mode": gene.get("interaction_mode"),
-            "normalization_kind": gene.get("normalization_kind"),
-        }
-    return {
-        "lookback_short": gene.get("lookback_short"),
-        "lookback_long": gene.get("lookback_long"),
-        "normalization_window": gene.get("normalization_window"),
-        "quantile_qscore": gene.get("quantile_qscore"),
-    }
+        return _validate_gene_mapping(recipe_or_gene, required_fields=_FAMILY_GENE_FIELDS, gene_type="family_gene")
+    return _validate_gene_mapping(recipe_or_gene, required_fields=_VARIANT_GENE_FIELDS, gene_type="variant_gene")
 
 
 def _canonical_gene_key(gene: Mapping[str, Any], *, field_order: tuple[str, ...]) -> str:
-    # Keep explicit nulls for absent/None values by serializing full ordered objects.
-    ordered = {field: gene.get(field) for field in field_order}
-    return json.dumps(ordered, ensure_ascii=True, separators=(",", ":"), sort_keys=False)
+    return "|".join(_to_key_component(gene[field]) for field in field_order)
+
+
+def _validate_gene_mapping(
+    gene: Mapping[str, Any], *, required_fields: tuple[str, ...], gene_type: str
+) -> dict[str, Any]:
+    keys = set(gene.keys())
+    required = set(required_fields)
+    if keys != required:
+        missing = sorted(required - keys)
+        unexpected = sorted(keys - required)
+        raise ValueError(
+            f"Invalid {gene_type} mapping shape: missing={missing}, unexpected={unexpected}; "
+            f"expected keys={list(required_fields)}"
+        )
+    return {field: gene[field] for field in required_fields}
+
+
+def _to_key_component(value: Any) -> str:
+    if value is None:
+        return "null"
+    return str(value)
