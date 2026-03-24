@@ -1457,7 +1457,201 @@ def test_hypothesis_gen_node_dedupes_cross_researcher_note_ids_for_factor_gene_d
         "factor_algebra|mean_spread|$volume|null|none|none",
     }
 
+def test_hypothesis_gen_node_factor_gene_sample_rejection_note_ids_follow_final_deduped_ids():
+    from src.agents.researcher import hypothesis_gen_node
 
+    assignments = [
+        ("momentum", ExplorationSubspace.FACTOR_ALGEBRA),
+        ("volatility", ExplorationSubspace.FACTOR_ALGEBRA),
+    ]
+
+    with patch("src.agents.researcher._build_island_subspace_assignments", return_value=assignments):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                instance = MagicMock()
+                note = FactorResearchNote(
+                    note_id="dup_global",
+                    island=island,
+                    iteration=1,
+                    hypothesis="test",
+                    economic_intuition="test",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-24",
+                    exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                family_base = "$close" if island == "momentum" else "$volume"
+                family_key = f"factor_algebra|mean_spread|{family_base}|null|none|none"
+                instance.last_generation_diagnostics = {
+                    "generated_count": 1,
+                    "delivered_count": 1,
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": {},
+                    "sample_rejections": [
+                        {
+                            "note_id": "dup_global",
+                            "filter": "novelty",
+                            "reason": "dup",
+                            "exploration_subspace": "factor_algebra",
+                            "family_gene_key": family_key,
+                            "variant_gene_key": "5|20|null|null",
+                        }
+                    ],
+                    "factor_gene_by_note_id": {
+                        "dup_global": {
+                            "family_gene_key": family_key,
+                            "variant_gene_key": "5|20|null|null",
+                        }
+                    },
+                }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {
+                    "active_islands": ["momentum", "volatility"],
+                    "market_context": None,
+                    "iteration": 1,
+                }
+            )
+
+    emitted_note_ids = [note.note_id for note in result["research_notes"]]
+    assert len(emitted_note_ids) == 2
+    assert len(set(emitted_note_ids)) == 2
+    factor_gene_map = result["stage2_diagnostics"]["factor_gene_by_note_id"]
+    assert set(factor_gene_map.keys()) == set(emitted_note_ids)
+    factor_gene_samples = [
+        item
+        for item in result["stage2_diagnostics"]["sample_rejections"]
+        if isinstance(item, dict) and item.get("exploration_subspace") == "factor_algebra"
+    ]
+    assert len(factor_gene_samples) == 2
+    assert {item["note_id"] for item in factor_gene_samples} == set(emitted_note_ids)
+
+
+def test_hypothesis_gen_node_retry_reuse_sample_remap_is_gene_aware():
+    from src.agents.researcher import hypothesis_gen_node
+
+    assignments = [
+        ("momentum", ExplorationSubspace.FACTOR_ALGEBRA),
+        ("volatility", ExplorationSubspace.CROSS_MARKET),
+    ]
+
+    with patch("src.agents.researcher._build_island_subspace_assignments", return_value=assignments):
+        with patch("src.agents.researcher.AlphaResearcher") as MockResearcher:
+            def make_instance(island, **kwargs):
+                instance = MagicMock()
+                if island == "momentum":
+                    note = FactorResearchNote(
+                        note_id="dup_retry",
+                        island=island,
+                        iteration=1,
+                        hypothesis="final",
+                        economic_intuition="final",
+                        proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                        risk_factors=[],
+                        market_context_date="2026-03-24",
+                        exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
+                    )
+                    instance.generate_batch = AsyncMock(
+                        return_value=AlphaResearcherBatch(
+                            island=island,
+                            notes=[note],
+                            generation_rationale="ok",
+                        )
+                    )
+                    instance.last_generation_diagnostics = {
+                        "generated_count": 1,
+                        "delivered_count": 1,
+                        "local_retry_count": 1,
+                        "rejection_counts_by_filter": {"novelty": 2},
+                        "sample_rejections": [
+                            {
+                                "note_id": "dup_retry",
+                                "filter": "novelty",
+                                "reason": "old family",
+                                "exploration_subspace": "factor_algebra",
+                                "family_gene_key": "factor_algebra|mean_spread|$volume|null|none|none",
+                                "variant_gene_key": "10|30|null|null",
+                            },
+                            {
+                                "note_id": "dup_retry",
+                                "filter": "novelty",
+                                "reason": "new family",
+                                "exploration_subspace": "factor_algebra",
+                                "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                                "variant_gene_key": "5|20|null|null",
+                            },
+                        ],
+                        "factor_gene_by_note_id": {
+                            "dup_retry": {
+                                "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+                                "variant_gene_key": "5|20|null|null",
+                            }
+                        },
+                    }
+                    return instance
+
+                note = FactorResearchNote(
+                    note_id="dup_retry",
+                    island=island,
+                    iteration=1,
+                    hypothesis="non-factor",
+                    economic_intuition="non-factor",
+                    proposed_formula="Mean($close, 5) - Mean($close, 20)",
+                    risk_factors=[],
+                    market_context_date="2026-03-24",
+                    exploration_subspace=ExplorationSubspace.CROSS_MARKET,
+                )
+                instance.generate_batch = AsyncMock(
+                    return_value=AlphaResearcherBatch(
+                        island=island,
+                        notes=[note],
+                        generation_rationale="ok",
+                    )
+                )
+                instance.last_generation_diagnostics = {
+                    "generated_count": 1,
+                    "delivered_count": 1,
+                    "local_retry_count": 0,
+                    "rejection_counts_by_filter": {},
+                    "sample_rejections": [],
+                }
+                return instance
+
+            MockResearcher.side_effect = make_instance
+            result = hypothesis_gen_node(
+                {
+                    "active_islands": ["momentum", "volatility"],
+                    "market_context": None,
+                    "iteration": 1,
+                }
+            )
+
+    notes_by_subspace = {note.exploration_subspace: note for note in result["research_notes"]}
+    final_factor_note = notes_by_subspace[ExplorationSubspace.FACTOR_ALGEBRA]
+    assert final_factor_note.note_id != "dup_retry"
+
+    factor_gene_map = result["stage2_diagnostics"]["factor_gene_by_note_id"]
+    assert set(factor_gene_map.keys()) == {final_factor_note.note_id}
+    factor_gene_samples = [
+        item
+        for item in result["stage2_diagnostics"]["sample_rejections"]
+        if isinstance(item, dict) and item.get("exploration_subspace") == "factor_algebra"
+    ]
+    assert len(factor_gene_samples) == 2
+
+    old_family_sample = next(item for item in factor_gene_samples if item["reason"] == "old family")
+    new_family_sample = next(item for item in factor_gene_samples if item["reason"] == "new family")
+    assert old_family_sample["note_id"] == "dup_retry"
+    assert new_family_sample["note_id"] == final_factor_note.note_id
 def test_hypothesis_gen_node_non_factor_algebra_note_ids_remain_unchanged_under_collision():
     from src.agents.researcher import hypothesis_gen_node
 

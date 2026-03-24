@@ -192,6 +192,26 @@ def _make_unique_note_id(candidate: Any, *, used_note_ids: set[str], fallback_pr
     return note_id
 
 
+def _factor_gene_identity(payload: dict[str, Any]) -> tuple[str, str | None] | None:
+    family_key = payload.get("family_gene_key")
+    if not isinstance(family_key, str):
+        return None
+    variant_key = payload.get("variant_gene_key")
+    if isinstance(variant_key, str):
+        return family_key, variant_key
+    return family_key, None
+
+
+def _sample_matches_factor_gene_identity(sample: dict[str, Any], *, family_key: str, variant_key: str | None) -> bool:
+    sample_family_key = sample.get("family_gene_key")
+    if not isinstance(sample_family_key, str) or sample_family_key != family_key:
+        return False
+    sample_variant_key = sample.get("variant_gene_key")
+    if isinstance(sample_variant_key, str):
+        return isinstance(variant_key, str) and sample_variant_key == variant_key
+    return True
+
+
 def _build_researcher_system_prompt(capabilities: FormulaCapabilities) -> str:
     return ALPHA_RESEARCHER_SYSTEM_PROMPT.format(
         available_fields_block=format_available_fields_for_prompt(capabilities),
