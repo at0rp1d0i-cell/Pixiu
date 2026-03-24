@@ -90,10 +90,10 @@ Read these first:
 4. [03_architecture-overview.md](/home/torpedo/Workspace/ML/Pixiu/docs/overview/03_architecture-overview.md)
 5. [05_spec-execution-audit.md](/home/torpedo/Workspace/ML/Pixiu/docs/overview/05_spec-execution-audit.md)
 6. [06_runtime-concessions.md](/home/torpedo/Workspace/ML/Pixiu/docs/overview/06_runtime-concessions.md)
-7. [2026-03-23-experiment-harness-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-experiment-harness-design.md)
-8. [2026-03-23-experiment-harness-implementation.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-experiment-harness-implementation.md)
-9. [2026-03-23-env-truth-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-env-truth-design.md)
-10. [2026-03-23-env-truth-implementation.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-env-truth-implementation.md)
+7. [2026-03-23-experiment-harness-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-experiment-harness-design.md)
+8. [2026-03-23-experiment-harness-implementation.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-experiment-harness-implementation.md)
+9. [2026-03-23-env-truth-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-env-truth-design.md)
+10. [2026-03-23-env-truth-implementation.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-env-truth-implementation.md)
 
 Use repo-local Codex workflow too:
 

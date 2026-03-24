@@ -28,6 +28,14 @@
   - FactorPool 边界拆分设计
 - `2026-03-19-orchestrator-boundary-refactor-design.md`
   - orchestrator 包边界重构设计
+- `2026-03-23-experiment-reliability-platform-owner-brief.md`
+  - 第二开发者的独立 owner brief
+- `2026-03-24-factor-gene-v1-design.md`
+  - 当前 factor gene v1 设计
+- `2026-03-24-factor-gene-v1-implementation.md`
+  - 当前 factor gene v1 实施计划
+- `2026-03-24-pixiu-self-evolution-loop-design.md`
+  - 当前自进化回路设计备忘
 - 仍在指导当前工作的临时专题计划
   - 例如尚未完成的收口计划或准备清单
 
@@ -36,6 +44,20 @@
 - `2026-03-22-product-positioning-design.md`
 - `2026-03-19-data-capability-alignment-design.md`
 - `2026-03-19-data-capability-alignment-implementation.md`
+- `2026-03-23-codex-workflow-design.md`
+- `2026-03-23-codex-workflow-implementation.md`
+- `2026-03-23-env-truth-design.md`
+- `2026-03-23-env-truth-implementation.md`
+- `2026-03-23-experiment-harness-design.md`
+- `2026-03-23-experiment-harness-implementation.md`
+- `2026-03-23-formulasketch-lite-v1-design.md`
+- `2026-03-23-formulasketch-lite-v1-implementation.md`
+- `2026-03-23-llm-runtime-settings-design.md`
+- `2026-03-23-llm-runtime-settings-implementation.md`
+- `2026-03-23-stage1-telemetry-ledger-implementation.md`
+- `2026-03-23-stage2-contract-repair.md`
+- `2026-03-23-stage2-generation-compliance.md`
+- `2026-03-23-subspace-aware-rejection-telemetry.md`
 
 ## 已归档
 

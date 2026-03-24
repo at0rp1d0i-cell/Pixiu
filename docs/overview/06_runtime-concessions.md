@@ -147,7 +147,7 @@ Last Reviewed: 2026-03-23
   - `src/agents/researcher.py` 内部诊断与 retry 逻辑
 - `Evidence`:
   - [researcher.py](/home/torpedo/Workspace/ML/Pixiu/src/agents/researcher.py)
-  - [2026-03-23-stage2-generation-compliance.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-stage2-generation-compliance.md)
+  - [2026-03-23-stage2-generation-compliance.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-stage2-generation-compliance.md)
 
 ### EXP-004
 
@@ -303,7 +303,7 @@ Last Reviewed: 2026-03-23
   - 未来 Stage 2 formula sketch 配置
 - `Evidence`:
   - 本次 2026-03-23 架构讨论结论
-  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-formulasketch-lite-v1-design.md)
 
 ### DEF-001
 
@@ -367,7 +367,7 @@ Last Reviewed: 2026-03-23
 - `Related Settings`:
   - 未来 Stage 2 formula generation settings
 - `Evidence`:
-  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-formulasketch-lite-v1-design.md)
 
 ### DEF-004
 
@@ -387,7 +387,7 @@ Last Reviewed: 2026-03-23
 - `Related Settings`:
   - 未来 Stage 2 sketch schema settings
 - `Evidence`:
-  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/plans/2026-03-23-formulasketch-lite-v1-design.md)
+  - [2026-03-23-formulasketch-lite-v1-design.md](/home/torpedo/Workspace/ML/Pixiu/docs/archive/plans/2026-03-23-formulasketch-lite-v1-design.md)
 
 ## 4. 维护规则
 
