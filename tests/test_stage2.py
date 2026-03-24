@@ -1302,6 +1302,157 @@ def test_alpha_researcher_local_novelty_uses_factor_gene_duplicate_reason_for_fa
     assert "factor_gene 完全重复" in sample["reason"]
 
 
+def test_factor_algebra_same_batch_family_budget_rejects_extra_variants_as_anti_collapse():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [
+            {
+                "note_id": "fa_keep",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "h1",
+                "economic_intuition": "e1",
+                "proposed_formula": "placeholder",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "interaction_mode": "none",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            },
+            {
+                "note_id": "fa_drop",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "h2",
+                "economic_intuition": "e2",
+                "proposed_formula": "placeholder",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 10,
+                    "lookback_long": 30,
+                    "transform_family": "mean_spread",
+                    "interaction_mode": "none",
+                    "normalization": "none"
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-24",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }
+        ],
+        "generation_rationale": "same-family"
+    }'''
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = []
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=response)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 1
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("anti_collapse", 0) == 1
+    assert diag["rejection_counts_by_filter"].get("novelty", 0) == 0
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "anti_collapse")
+    assert "same-batch family budget exceeded" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
+
+
+def test_factor_algebra_historical_saturated_family_rejected_as_anti_collapse():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_hist",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "h1",
+            "economic_intuition": "e1",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "interaction_mode": "none",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-24",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "history-saturated"
+    }'''
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = [
+        {
+            "factor_id": "fa_old_1",
+            "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+            "variant_gene_key": "5|20|null|null",
+        },
+        {
+            "factor_id": "fa_old_2",
+            "family_gene_key": "factor_algebra|mean_spread|$close|null|none|none",
+            "variant_gene_key": "10|30|null|null",
+        },
+    ]
+    mock_pool.get_island_factors.return_value = []
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response, response])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("anti_collapse", 0) >= 1
+    assert diag["rejection_counts_by_filter"].get("novelty", 0) == 0
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "anti_collapse")
+    assert "historical saturated family" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
+
+
 def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     from src.agents.researcher import AlphaResearcher
 

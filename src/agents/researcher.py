@@ -53,6 +53,8 @@ _SKILL_LOADER = SkillLoader()
 _MAX_STAGE2_REJECTION_SAMPLES = 5
 _MAX_LOCAL_RETRY = 1
 _MAX_ANTI_COLLAPSE_SKELETONS = 3
+_FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
+_FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
@@ -699,6 +701,40 @@ class AlphaResearcher:
                 lines.append(f"     - examples: {', '.join(payload['labels'])}")
         return "\n".join(lines)
 
+    def _load_island_family_variant_counts(self) -> dict[str, int]:
+        """Return historical variant counts grouped by factor_gene family key."""
+        if self.factor_pool is None:
+            return {}
+        from src.agents.prefilter import NoveltyFilter
+
+        existing: list[dict[str, Any]] = []
+        try:
+            existing = list(self.factor_pool.get_passed_factors(island=self.island, limit=120))
+        except Exception as exc:
+            logger.debug("[AlphaResearcher] get_passed_factors failed for diversity control: %s", exc)
+        if not existing:
+            try:
+                existing = list(self.factor_pool.get_island_factors(island=self.island, limit=120))
+            except Exception as exc:
+                logger.debug("[AlphaResearcher] get_island_factors failed for diversity control: %s", exc)
+                return {}
+
+        family_to_variants: dict[str, set[str]] = defaultdict(set)
+        for item in existing:
+            family_key, variant_key = NoveltyFilter._resolve_factor_gene_keys_from_factor(item)
+            if not isinstance(family_key, str):
+                continue
+            if isinstance(variant_key, str):
+                family_to_variants[family_key].add(variant_key)
+                continue
+            fallback = item.get("factor_id") or item.get("formula")
+            if isinstance(fallback, str) and fallback:
+                family_to_variants[family_key].add(f"__unknown__:{fallback}")
+            else:
+                family_to_variants[family_key].add("__unknown__")
+
+        return {family_key: len(variants) for family_key, variants in family_to_variants.items()}
+
     def _local_prescreen_notes(
         self, notes: list[FactorResearchNote]
     ) -> tuple[list[FactorResearchNote], dict[str, Any]]:
@@ -715,6 +751,8 @@ class AlphaResearcher:
             approved_operators=set(self.capabilities.approved_operators),
         )
         novelty_filter = NoveltyFilter(pool=self.factor_pool) if self.factor_pool is not None else None
+        historical_family_variant_counts = self._load_island_family_variant_counts()
+        kept_factor_algebra_families: set[str] = set()
 
         for note in notes:
             recipe_reason = self._factor_algebra_recipe_rejection_reason(note)
@@ -735,16 +773,60 @@ class AlphaResearcher:
                     sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", reason, subspace))
                 continue
 
+            subspace = _note_subspace_value(note)
+            if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
+                factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
+                family_key = factor_gene.get("family_gene_key")
+                if isinstance(family_key, str):
+                    if family_key in kept_factor_algebra_families:
+                        rejection_counts["anti_collapse"] += 1
+                        rejection_counts_by_filter_and_subspace["anti_collapse"][subspace] += 1
+                        if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                            sample_rejections.append(
+                                self._build_stage2_rejection_sample(
+                                    note,
+                                    "anti_collapse",
+                                    (
+                                        "same-batch family budget exceeded: "
+                                        f"{family_key} (max kept={_FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET})"
+                                    ),
+                                    subspace,
+                                )
+                            )
+                        continue
+                    historical_count = historical_family_variant_counts.get(family_key, 0)
+                    if historical_count >= _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS:
+                        rejection_counts["anti_collapse"] += 1
+                        rejection_counts_by_filter_and_subspace["anti_collapse"][subspace] += 1
+                        if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                            sample_rejections.append(
+                                self._build_stage2_rejection_sample(
+                                    note,
+                                    "anti_collapse",
+                                    (
+                                        "historical saturated family: "
+                                        f"{family_key} (variant_count={historical_count} "
+                                        f">= {_FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS})"
+                                    ),
+                                    subspace,
+                                )
+                            )
+                        continue
+
             if novelty_filter is not None:
                 passed, reason = novelty_filter.check(note)
                 if not passed:
                     rejection_counts["novelty"] += 1
-                    subspace = _note_subspace_value(note)
                     rejection_counts_by_filter_and_subspace["novelty"][subspace] += 1
                     if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
                         sample_rejections.append(self._build_stage2_rejection_sample(note, "novelty", reason, subspace))
                     continue
 
+            if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
+                factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
+                family_key = factor_gene.get("family_gene_key")
+                if isinstance(family_key, str):
+                    kept_factor_algebra_families.add(family_key)
             approved_notes.append(note)
 
         return approved_notes, {
