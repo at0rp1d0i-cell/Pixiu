@@ -2826,11 +2826,74 @@ def test_factor_algebra_fast_feedback_retry_bans_volume_confirmation_after_repea
                 )
             )
 
+    assert batch.notes == []
+    assert len(captured_messages) == 1
+    assert mock_chat.ainvoke.await_count == 1
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("alignment", 0) >= 1
+
+
+def test_factor_algebra_fast_feedback_validator_full_rejection_still_retries(monkeypatch):
+    from src.agents.researcher import AlphaResearcher
+
+    first = MagicMock()
+    first.content = """{
+        "notes": [{
+            "note_id": "free_form_only",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "free",
+            "economic_intuition": "free",
+            "proposed_formula": "Mean($close, 5) - Mean($close, 20)",
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "free form only"
+    }"""
+    second = MagicMock()
+    second.content = """{
+        "notes": [{
+            "note_id": "recipe_after_retry",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期均价与长期均价的偏离",
+            "economic_intuition": "均价差扩张体现价格状态变化",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-23",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "recipe"
+    }"""
+
+    monkeypatch.setenv("PIXIU_EXPERIMENT_PROFILE_KIND", "fast_feedback")
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[first, second])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}, clear=False):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
     assert len(batch.notes) == 1
-    assert batch.notes[0].note_id == "fa_3"
-    assert len(captured_messages) == 2
-    retry_human_message = captured_messages[1][1]
-    assert "本次重试禁止使用以下 transform_family：volume_confirmation" in retry_human_message.content
+    assert batch.notes[0].note_id == "recipe_after_retry"
+    assert mock_chat.ainvoke.await_count == 2
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
 
 
 def test_alpha_researcher_injects_island_skill_marker():

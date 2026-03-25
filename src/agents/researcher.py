@@ -15,6 +15,7 @@ from collections import Counter, defaultdict
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -64,6 +65,7 @@ _FAST_FEEDBACK_MAX_ANTI_COLLAPSE_SKELETONS = 2
 _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES = 2
+_FAST_FEEDBACK_NONRETRY_FILTERS = frozenset({"alignment", "novelty", "anti_collapse", "value_density"})
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX = "invalid_alignment:"
 _GROUNDING_STATUS_PREFIX = "invalid_grounding:"
@@ -250,6 +252,25 @@ def _build_factor_algebra_retry_family_bans(sample_rejections: list[dict[str, An
     if volume_confirmation_alignment_hits >= 1:
         banned_families.append("volume_confirmation")
     return banned_families
+
+
+def _should_skip_fast_feedback_retry(
+    subspace_hint: Optional[ExplorationSubspace],
+    diagnostics: Mapping[str, Any],
+) -> bool:
+    if not _is_fast_feedback_factor_algebra(subspace_hint):
+        return False
+    rejection_counts = diagnostics.get("rejection_counts_by_filter")
+    if not isinstance(rejection_counts, Mapping) or not rejection_counts:
+        return False
+    active_filters = {
+        str(name)
+        for name, count in rejection_counts.items()
+        if isinstance(count, int) and count > 0
+    }
+    if not active_filters:
+        return False
+    return active_filters.issubset(_FAST_FEEDBACK_NONRETRY_FILTERS)
 
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
@@ -501,6 +522,15 @@ class AlphaResearcher:
                 if self._factor_gene_by_note_id:
                     self.last_generation_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = dict(self._factor_gene_by_note_id)
                 return parsed_batch.model_copy(update={"notes": approved_notes})
+
+            if attempt < _MAX_LOCAL_RETRY and _should_skip_fast_feedback_retry(subspace_hint, diagnostics):
+                logger.info(
+                    "[AlphaResearcher] fast_feedback stop-loss: skip retry after local full rejection "
+                    "(island=%s, filters=%s)",
+                    self.island,
+                    diagnostics.get("rejection_counts_by_filter"),
+                )
+                break
 
             if attempt < _MAX_LOCAL_RETRY:
                 local_retry_count += 1
