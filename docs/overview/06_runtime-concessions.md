@@ -186,7 +186,7 @@ Last Reviewed: 2026-03-23
   - run 写面被重定向到 `data/runtime_namespaces/{namespace}/...`
   - 可只跑 `doctor + single`，并通过 `ACTIVE_ISLANDS` / `PIXIU_TARGET_SUBSPACES` 缩小验证范围
   - 可通过 `PIXIU_STAGE2_TOTAL_QUOTA` 进一步压低 Stage 2 单轮配额，避免 fast feedback 被宽 batch 吞吐拖慢
-  - 对已连续成为主 blocker 的 `factor_algebra` family，可在 `fast_feedback` 中临时缩小 transform_family surface；当前已暂停 `volume_confirmation`
+  - 对已连续成为主 blocker 的 `factor_algebra` family，可在 `fast_feedback` 中临时缩小 transform_family surface；当前已暂停 `volume_confirmation` 与 `volatility_state`
 - `Why It Exists`:
   - 当前需要快速工程回路来验证 profile、contract、artifact、diagnostics 变化
   - 同时必须避免把 fast feedback 误当成 formal controlled run

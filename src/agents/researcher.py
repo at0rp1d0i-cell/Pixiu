@@ -79,7 +79,6 @@ _PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt
 _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
     "mean_spread",
     "ratio_momentum",
-    "volatility_state",
 )
 
 
