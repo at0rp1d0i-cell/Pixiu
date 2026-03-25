@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+_VOLUME_PROXY_FIELDS = {"$volume", "$amount"}
+_RETURN_TOKENS = ("收益率", "回报率", "return", "ret", "涨跌幅", "相对收益")
+_ACCELERATION_TOKENS = ("加速度", "acceleration")
+_NORMALIZATION_TOKENS = ("标准化", "归一化", "normalize", "normalized")
+_VOLUME_TOKENS = ("成交量", "量能", "放量", "缩量", "volume", "amount", "金额")
+_RELATIVE_VOLUME_TOKENS = ("相对变化", "相对成交量", "量能比", "volume ratio", "relative volume")
+_MEAN_SPREAD_TOKENS = ("均线差", "均值差", "价差", "均价差", "差值", "spread")
+_MOMENTUM_TOKENS = ("动量", "momentum", "趋势", "trend")
+
 ALLOWED_BASE_FIELDS = (
     "$close",
     "$open",
@@ -106,3 +115,39 @@ def _apply_normalization(expr: str, recipe: FormulaRecipe) -> str:
     if recipe.normalization == "rank":
         return f"Rank({expr}, {recipe.normalization_window})"
     return f"Quantile({expr}, {recipe.normalization_window}, {recipe.quantile_qscore})"
+
+
+def validate_formula_recipe_alignment(
+    recipe: FormulaRecipe,
+    *,
+    hypothesis: str,
+    economic_intuition: str,
+) -> str | None:
+    text = f"{hypothesis} {economic_intuition}".strip().lower()
+    if not text:
+        return None
+
+    uses_volume_proxy = recipe.base_field in _VOLUME_PROXY_FIELDS or recipe.secondary_field in _VOLUME_PROXY_FIELDS
+
+    if any(token in text for token in _NORMALIZATION_TOKENS) and recipe.normalization == "none":
+        return "hypothesis mentions normalization but recipe.normalization='none'"
+
+    if any(token in text for token in _VOLUME_TOKENS) and not uses_volume_proxy:
+        return "hypothesis mentions volume/liquidity but recipe has no volume proxy"
+
+    if recipe.transform_family == "mean_spread":
+        if any(token in text for token in _RETURN_TOKENS + _ACCELERATION_TOKENS):
+            return "mean_spread cannot claim return delta or acceleration"
+    elif recipe.transform_family == "ratio_momentum":
+        if any(token in text for token in _MEAN_SPREAD_TOKENS):
+            return "ratio_momentum should not be described as a mean spread"
+    elif recipe.transform_family == "volatility_state":
+        if any(token in text for token in _RETURN_TOKENS + _ACCELERATION_TOKENS + _MOMENTUM_TOKENS):
+            return "volatility_state cannot claim momentum or return-delta effects"
+    elif recipe.transform_family == "volume_confirmation":
+        if not any(token in text for token in _VOLUME_TOKENS):
+            return "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"
+        if any(token in text for token in _RELATIVE_VOLUME_TOKENS):
+            return "volume_confirmation cannot claim relative volume change"
+
+    return None

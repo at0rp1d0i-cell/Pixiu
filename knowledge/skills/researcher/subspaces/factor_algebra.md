@@ -54,6 +54,21 @@
 - `proposed_formula` 填占位文本即可，系统会按 recipe 覆盖渲染
 - hypothesis/economic_intuition/risk/regime 仍需完整输出
 
+## family 语义对齐（必须遵守）
+
+- `mean_spread`
+  - 只能描述均价/均线差、价差扩张/收敛
+  - 不要写成收益率差、相对收益变化、动量加速度
+- `ratio_momentum`
+  - 只能描述相对强弱、比值动量、短强长弱
+  - 不要写成均线差、均价差或纯价差扩张
+- `volatility_state`
+  - 只能描述长短期波动状态变化
+  - 不要写成价格动量、收益率变化，或“用波动率标准化动量”
+- `volume_confirmation`
+  - 必须明确说明成交量/流动性确认机制
+  - 当前表达的是量价差值确认，不要写成“相对成交量变化”“量能比”
+
 ---
 
 ## 禁止项

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.formula.sketch import FormulaRecipe, render_formula_recipe
+from src.formula.sketch import (
+    FormulaRecipe,
+    render_formula_recipe,
+    validate_formula_recipe_alignment,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -90,3 +94,39 @@ def test_reject_free_form_div_interaction_mode() -> None:
             transform_family="mean_spread",
             interaction_mode="div",
         )
+
+
+def test_validate_formula_recipe_alignment_rejects_return_delta_for_mean_spread() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="mean_spread",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="捕捉短期与长期收益率的差值，刻画价格动量加速度",
+        economic_intuition="收益率差值越大越强",
+    )
+
+    assert reason == "mean_spread cannot claim return delta or acceleration"
+
+
+def test_validate_formula_recipe_alignment_rejects_missing_volume_mechanism_for_volume_confirmation() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        secondary_field="$volume",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="volume_confirmation",
+        interaction_mode="mul",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="捕捉价格趋势延续",
+        economic_intuition="趋势越强后续越容易延续",
+    )
+
+    assert reason == "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"

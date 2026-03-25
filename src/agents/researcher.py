@@ -40,6 +40,7 @@ from src.formula.sketch import (
     ALLOWED_WINDOW_BUCKETS,
     FormulaRecipe,
     render_formula_recipe,
+    validate_formula_recipe_alignment,
 )
 from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
@@ -57,6 +58,7 @@ _MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
+_FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX = "invalid_alignment:"
 _GROUNDING_STATUS_PREFIX = "invalid_grounding:"
 _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA = "Mean($close, 5) - Mean($close, 20)"
 _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
@@ -551,6 +553,11 @@ class AlphaResearcher:
 
         try:
             recipe = FormulaRecipe(**recipe_payload)
+            alignment_error = validate_formula_recipe_alignment(
+                recipe,
+                hypothesis=str(rendered_note.get("hypothesis") or ""),
+                economic_intuition=str(rendered_note.get("economic_intuition") or ""),
+            )
             rendered_note["proposed_formula"] = render_formula_recipe(recipe)
             family_gene = build_family_gene(recipe)
             variant_gene = build_variant_gene(recipe)
@@ -560,6 +567,8 @@ class AlphaResearcher:
                 "family_gene_key": build_family_gene_key(family_gene),
                 "variant_gene_key": build_variant_gene_key(variant_gene),
             }
+            if alignment_error is not None:
+                rendered_note["status"] = f"{_FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX}{alignment_error}"
         except Exception as exc:
             rendered_note["status"] = f"{_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX}{exc}"
             rendered_note["proposed_formula"] = _FACTOR_ALGEBRA_RECIPE_PLACEHOLDER_FORMULA
@@ -613,6 +622,14 @@ class AlphaResearcher:
             return None
         detail = status.removeprefix(_FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX).strip() or "invalid_formula_recipe"
         return f"FormulaSketch recipe 无效：{detail}"
+
+    @staticmethod
+    def _factor_algebra_alignment_rejection_reason(note: FactorResearchNote) -> str | None:
+        status = note.status or ""
+        if not status.startswith(_FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX):
+            return None
+        detail = status.removeprefix(_FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX).strip() or "invalid_factor_alignment"
+        return f"Factor-algebra alignment 无效：{detail}"
 
     @staticmethod
     def _grounding_rejection_reason(note: FactorResearchNote) -> str | None:
@@ -854,6 +871,17 @@ class AlphaResearcher:
                     sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", recipe_reason, subspace))
                 continue
 
+            alignment_reason = self._factor_algebra_alignment_rejection_reason(note)
+            if alignment_reason is not None:
+                rejection_counts["alignment"] += 1
+                subspace = _note_subspace_value(note)
+                rejection_counts_by_filter_and_subspace["alignment"][subspace] += 1
+                if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                    sample_rejections.append(
+                        self._build_stage2_rejection_sample(note, "alignment", alignment_reason, subspace)
+                    )
+                continue
+
             grounding_reason = self._grounding_rejection_reason(note)
             if grounding_reason is not None:
                 rejection_counts["grounding"] += 1
@@ -1026,6 +1054,41 @@ class AlphaResearcher:
                     seen_hints.add(hint)
             if "volume_confirmation requires interaction_mode='mul'" in reason_lower:
                 hint = "- 当 transform_family=volume_confirmation 时，interaction_mode 必须为 mul。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "mean_spread cannot claim return delta or acceleration" in reason_lower:
+                hint = "- mean_spread 只能描述均价/均线差，不要把它写成收益率差、相对收益或动量加速度。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "volatility_state cannot claim momentum or return-delta effects" in reason_lower:
+                hint = "- volatility_state 只能描述长短期波动状态差，不要把它写成价格动量、收益率变化或趋势延续。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "hypothesis mentions normalization but recipe.normalization='none'" in reason_lower:
+                hint = "- 如果 hypothesis 说标准化/归一化，就必须在 recipe 中显式使用 rank 或 quantile normalization。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "hypothesis mentions volume/liquidity but recipe has no volume proxy" in reason_lower:
+                hint = "- 如果 hypothesis 说量价或流动性确认，recipe 必须实际使用 $volume 或 $amount。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism" in reason_lower:
+                hint = "- transform_family=volume_confirmation 时，hypothesis/economic_intuition 必须明确说明成交量或流动性确认机制。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "volume_confirmation cannot claim relative volume change" in reason_lower:
+                hint = "- 目前的 volume_confirmation 表达的是量价差值确认，不要写成相对成交量变化或量能比。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "ratio_momentum should not be described as a mean spread" in reason_lower:
+                hint = "- ratio_momentum 应描述相对强弱或比值动量，不要写成均线差或价差。"
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)

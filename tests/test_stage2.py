@@ -459,15 +459,15 @@ def test_factor_algebra_factor_gene_diagnostics_include_gene_bundle():
     mock_response = MagicMock()
     mock_response.content = '''{
         "notes": [
-            {
-                "note_id": "gene_ok",
-                "island": "momentum",
-                "iteration": 1,
-                "hypothesis": "gene",
-                "economic_intuition": "gene",
-                "formula_recipe": {
-                    "base_field": "$close",
-                    "secondary_field": "$volume",
+                {
+                    "note_id": "gene_ok",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "价格动量需要成交量确认，量价共振时趋势更可信",
+                    "economic_intuition": "成交量放大确认价格趋势，量价同步上行时信号更稳",
+                    "formula_recipe": {
+                        "base_field": "$close",
+                        "secondary_field": "$volume",
                     "lookback_short": 5,
                     "lookback_long": 20,
                     "transform_family": "volume_confirmation",
@@ -795,6 +795,89 @@ def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     assert "FormulaSketch recipe 无效" in captured_user_messages[1]
     assert "lookback_short < lookback_long" in captured_user_messages[1]
     assert "InvalidRecipe" not in captured_user_messages[1]
+
+
+def test_factor_algebra_alignment_mismatch_triggers_bounded_retry():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_alignment",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "捕捉短期与长期收益率的差值，刻画价格动量加速度",
+            "economic_intuition": "收益率差越大，趋势越强",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "bad alignment"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_alignment",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "捕捉短期均价与长期均价的偏离，衡量均线差扩张",
+            "economic_intuition": "均价差持续扩张时，趋势状态更可能延续",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "good alignment"
+    }'''
+
+    async def capture_ainvoke(messages):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Std, Mul"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good_alignment"
+    assert mock_chat.ainvoke.await_count == 2
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("alignment", 0) >= 1
+    assert "Factor-algebra alignment 无效" in captured_user_messages[1]
+    assert "收益率差、相对收益或动量加速度" in captured_user_messages[1]
 
 
 def test_factor_algebra_rejects_free_form_only_path_and_retries():
