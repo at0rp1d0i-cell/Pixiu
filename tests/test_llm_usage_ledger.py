@@ -94,6 +94,9 @@ def test_usage_callback_records_run_scoped_usage(monkeypatch):
             "round": 2,
             "agent_role": "alpha_researcher",
             "llm_profile": "researcher",
+            "island": "momentum",
+            "subspace": "factor_algebra",
+            "note_id": "mom_fa_001",
             "provider": "openai_compatible",
             "model": "gpt-test",
         },
@@ -121,6 +124,9 @@ def test_usage_callback_records_run_scoped_usage(monkeypatch):
     assert event["round"] == 2
     assert event["agent_role"] == "alpha_researcher"
     assert event["llm_profile"] == "researcher"
+    assert event["island"] == "momentum"
+    assert event["subspace"] == "factor_algebra"
+    assert event["note_id"] == "mom_fa_001"
     assert event["provider"] == "openai_compatible"
     assert event["model"] == "gpt-test"
     assert event["total_tokens"] == 1500
@@ -148,6 +154,7 @@ def test_usage_callback_records_error_call_event(monkeypatch):
             "round": 0,
             "agent_role": "market_analyst",
             "llm_profile": "market_analyst",
+            "island": "momentum",
             "provider": "openai_compatible",
             "model": "gpt-test",
         },
@@ -170,6 +177,9 @@ def test_usage_callback_records_error_call_event(monkeypatch):
     assert event["round"] == 0
     assert event["agent_role"] == "market_analyst"
     assert event["llm_profile"] == "market_analyst"
+    assert event["island"] == "momentum"
+    assert event["subspace"] is None
+    assert event["note_id"] is None
     assert event["provider"] == "openai_compatible"
     assert event["model"] == "gpt-test"
     assert event["success"] is False

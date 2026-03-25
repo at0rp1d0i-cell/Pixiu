@@ -248,6 +248,9 @@ def _build_call_event(
     llm_profile = _to_optional_str(metadata.get("llm_profile")) or _extract_tag_value(tags, "profile:")
     provider = _to_optional_str(metadata.get("provider")) or "openai_compatible"
     agent_role = _to_optional_str(metadata.get("agent_role"))
+    island = _to_optional_str(metadata.get("island"))
+    subspace = _to_optional_str(metadata.get("subspace"))
+    note_id = _to_optional_str(metadata.get("note_id"))
 
     return {
         "call_id": callback_run_id or f"call-{int(time.time() * 1000)}",
@@ -256,6 +259,9 @@ def _build_call_event(
         "round": _to_optional_int(metadata.get("round")),
         "agent_role": agent_role,
         "llm_profile": llm_profile,
+        "island": island,
+        "subspace": subspace,
+        "note_id": note_id,
         "provider": provider,
         "model": _to_optional_str(model_name) or _to_optional_str(metadata.get("model")),
         "prompt_tokens": _safe_int(prompt_tokens),
