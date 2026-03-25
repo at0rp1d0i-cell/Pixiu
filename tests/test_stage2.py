@@ -1089,6 +1089,14 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
                 "reason": "FormulaSketch recipe 无效：volume_confirmation requires interaction_mode='mul'",
             },
             {
+                "filter": "alignment",
+                "reason": "Factor-algebra alignment 无效：volume_confirmation must describe a price-spread signal confirmed by volume/liquidity spread",
+            },
+            {
+                "filter": "alignment",
+                "reason": "Factor-algebra alignment 无效：volume_confirmation cannot claim momentum, trend continuation, or return-delta effects",
+            },
+            {
                 "filter": "validator",
                 "reason": "FormulaSketch recipe 无效：Unsupported quantile_qscore: 0.75",
             },
@@ -1111,6 +1119,8 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
     assert "必须提供 formula_recipe 对象" in feedback
     assert "lookback_short < lookback_long" in feedback
     assert "interaction_mode 必须为 mul" in feedback
+    assert "价格均值差/价差" in feedback
+    assert "不要出现‘动量’或‘趋势延续’" in feedback
     assert "quantile_qscore 仅允许：0.2, 0.5, 0.8" in feedback
     assert "normalization_window 仅允许固定窗口桶：5, 10, 20, 30, 60" in feedback
     assert "base_field/secondary_field 仅允许" in feedback
@@ -2712,6 +2722,115 @@ def test_factor_algebra_fast_feedback_requests_and_keeps_single_note(monkeypatch
     assert captured_messages
     human_message = captured_messages[0][1]
     assert "请提出 1 个差异化的 FactorResearchNote" in human_message.content
+
+
+def test_factor_algebra_fast_feedback_retry_bans_volume_confirmation_after_repeated_alignment_failures(monkeypatch):
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+    responses = [
+        """{
+            "notes": [
+                {
+                    "note_id": "fa_1",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "量价确认趋势延续",
+                    "economic_intuition": "价格动量叠加成交量确认有助于过滤弱趋势",
+                    "proposed_formula": "placeholder",
+                    "formula_recipe": {
+                        "base_field": "$close",
+                        "secondary_field": "$volume",
+                        "lookback_short": 5,
+                        "lookback_long": 20,
+                        "transform_family": "volume_confirmation",
+                        "interaction_mode": "mul",
+                        "normalization": "rank",
+                        "normalization_window": 20
+                    },
+                    "risk_factors": [],
+                    "market_context_date": "2026-03-25",
+                    "applicable_regimes": ["bull_trend"],
+                    "invalid_regimes": ["range_bound"]
+                },
+                {
+                    "note_id": "fa_2",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "量价确认趋势延续",
+                    "economic_intuition": "成交量配合时价格趋势更容易延续",
+                    "proposed_formula": "placeholder",
+                    "formula_recipe": {
+                        "base_field": "$vwap",
+                        "secondary_field": "$amount",
+                        "lookback_short": 10,
+                        "lookback_long": 30,
+                        "transform_family": "volume_confirmation",
+                        "interaction_mode": "mul",
+                        "normalization": "rank",
+                        "normalization_window": 20
+                    },
+                    "risk_factors": [],
+                    "market_context_date": "2026-03-25",
+                    "applicable_regimes": ["bull_trend"],
+                    "invalid_regimes": ["range_bound"]
+                }
+            ],
+            "generation_rationale": "retry-trigger"
+        }""",
+        """{
+            "notes": [
+                {
+                    "note_id": "fa_3",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "短期均价相对长期均价走弱，反映价差收敛",
+                    "economic_intuition": "短长窗口均值差收敛可刻画趋势放缓",
+                    "proposed_formula": "placeholder",
+                    "formula_recipe": {
+                        "base_field": "$close",
+                        "lookback_short": 5,
+                        "lookback_long": 20,
+                        "transform_family": "mean_spread",
+                        "interaction_mode": "none",
+                        "normalization": "none"
+                    },
+                    "risk_factors": [],
+                    "market_context_date": "2026-03-25",
+                    "applicable_regimes": ["bull_trend"],
+                    "invalid_regimes": ["range_bound"]
+                }
+            ],
+            "generation_rationale": "retry-fixed"
+        }""",
+    ]
+
+    async def capture_ainvoke(messages, **kwargs):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = responses[len(captured_messages) - 1]
+        return response
+
+    monkeypatch.setenv("PIXIU_EXPERIMENT_PROFILE_KIND", "fast_feedback")
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}, clear=False):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "fa_3"
+    assert len(captured_messages) == 2
+    retry_human_message = captured_messages[1][1]
+    assert "本次重试禁止使用以下 transform_family：volume_confirmation" in retry_human_message.content
 
 
 def test_alpha_researcher_injects_island_skill_marker():

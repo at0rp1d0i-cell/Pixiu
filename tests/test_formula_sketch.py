@@ -133,6 +133,25 @@ def test_validate_formula_recipe_alignment_rejects_missing_volume_mechanism_for_
     assert reason == "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"
 
 
+def test_validate_formula_recipe_alignment_rejects_missing_price_spread_wording_for_volume_confirmation() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        secondary_field="$volume",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="volume_confirmation",
+        interaction_mode="mul",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="成交量确认价格信号更可靠",
+        economic_intuition="流动性配合时价格信号更容易兑现",
+    )
+
+    assert reason == "volume_confirmation must describe a price-spread signal confirmed by volume/liquidity spread"
+
+
 def test_validate_formula_recipe_alignment_rejects_momentum_wording_for_volume_confirmation() -> None:
     recipe = FormulaRecipe(
         base_field="$close",
@@ -150,6 +169,30 @@ def test_validate_formula_recipe_alignment_rejects_momentum_wording_for_volume_c
     )
 
     assert reason == "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
+
+
+def test_formula_recipe_rejects_non_price_base_for_volume_confirmation() -> None:
+    with pytest.raises(ValueError, match="volume_confirmation requires a price base_field"):
+        FormulaRecipe(
+            base_field="$amount",
+            secondary_field="$volume",
+            lookback_short=5,
+            lookback_long=20,
+            transform_family="volume_confirmation",
+            interaction_mode="mul",
+        )
+
+
+def test_formula_recipe_rejects_non_volume_secondary_for_volume_confirmation() -> None:
+    with pytest.raises(ValueError, match="volume_confirmation requires a volume/liquidity secondary_field"):
+        FormulaRecipe(
+            base_field="$close",
+            secondary_field="$vwap",
+            lookback_short=5,
+            lookback_long=20,
+            transform_family="volume_confirmation",
+            interaction_mode="mul",
+        )
 
 
 def test_validate_formula_recipe_alignment_rejects_generic_price_only_ratio_momentum_on_momentum_island() -> None:

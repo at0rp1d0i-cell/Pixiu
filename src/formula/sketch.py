@@ -71,6 +71,10 @@ class FormulaRecipe:
             raise ValueError("volume_confirmation requires secondary_field")
         if self.transform_family == "volume_confirmation" and self.interaction_mode != "mul":
             raise ValueError("volume_confirmation requires interaction_mode='mul'")
+        if self.transform_family == "volume_confirmation" and self.base_field not in _PRICE_PROXY_FIELDS:
+            raise ValueError("volume_confirmation requires a price base_field")
+        if self.transform_family == "volume_confirmation" and self.secondary_field not in _VOLUME_PROXY_FIELDS:
+            raise ValueError("volume_confirmation requires a volume/liquidity secondary_field")
         if self.transform_family != "volume_confirmation" and self.secondary_field is not None:
             raise ValueError("secondary_field is only supported for volume_confirmation")
         if self.normalization == "none":
@@ -166,6 +170,8 @@ def validate_formula_recipe_alignment(
             return "volume_confirmation cannot claim relative volume change"
         if any(token in text for token in _MOMENTUM_TOKENS + _RETURN_TOKENS + _ACCELERATION_TOKENS):
             return "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
+        if not any(token in text for token in _MEAN_SPREAD_TOKENS):
+            return "volume_confirmation must describe a price-spread signal confirmed by volume/liquidity spread"
 
     return None
 

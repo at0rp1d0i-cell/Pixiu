@@ -233,6 +233,24 @@ def _legacy_low_value_family_key_from_formula(formula: str) -> str | None:
         return f"factor_algebra|ratio_momentum|{ratio_rank.group(1)}|null|none|rank"
     return None
 
+
+def _build_factor_algebra_retry_family_bans(sample_rejections: list[dict[str, Any]]) -> list[str]:
+    volume_confirmation_alignment_hits = 0
+    for item in sample_rejections:
+        if not isinstance(item, dict):
+            continue
+        if item.get("filter") != "alignment":
+            continue
+        family_key = str(item.get("family_gene_key") or "")
+        reason = str(item.get("reason") or "").lower()
+        if family_key.startswith("factor_algebra|volume_confirmation|") and "volume_confirmation" in reason:
+            volume_confirmation_alignment_hits += 1
+
+    banned_families: list[str] = []
+    if volume_confirmation_alignment_hits >= 1:
+        banned_families.append("volume_confirmation")
+    return banned_families
+
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 
@@ -403,6 +421,7 @@ class AlphaResearcher:
         rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
         sample_rejections: list[dict[str, str]] = []
         requested_note_count = _requested_note_count_text(subspace_hint)
+        retry_banned_transform_families: list[str] = []
 
         for attempt in range(_MAX_LOCAL_RETRY + 1):
             user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
@@ -436,6 +455,9 @@ class AlphaResearcher:
                     "- 禁止 Zscore/MinMax/Neutralize/Demean\n"
                     "- 避免重复提交与本地预筛已拒绝原因相同的模式\n"
                 )
+                if retry_banned_transform_families:
+                    banned_text = ", ".join(retry_banned_transform_families)
+                    user_msg += f"- 本次重试禁止使用以下 transform_family：{banned_text}\n"
 
             response = await llm.ainvoke(
                 [
@@ -485,6 +507,10 @@ class AlphaResearcher:
                 local_rejection_feedback = self._build_local_rejection_feedback(
                     diagnostics.get("sample_rejections", [])
                 )
+                if _is_fast_feedback_factor_algebra(subspace_hint):
+                    retry_banned_transform_families = _build_factor_algebra_retry_family_bans(
+                        diagnostics.get("sample_rejections", [])
+                    )
                 logger.info(
                     "[AlphaResearcher] 本地预筛全拒绝，触发重试: island=%s, attempt=%d",
                     self.island,
@@ -1183,7 +1209,18 @@ class AlphaResearcher:
                     hints.append(hint)
                     seen_hints.add(hint)
             if "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism" in reason_lower:
-                hint = "- transform_family=volume_confirmation 时，hypothesis/economic_intuition 必须明确说明成交量或流动性确认机制。"
+                hint = (
+                    "- transform_family=volume_confirmation 时，hypothesis/economic_intuition 必须明确说明成交量或流动性确认机制；"
+                    "建议直接写成“短期价格均值差由成交量/金额差值确认”。"
+                )
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "volume_confirmation must describe a price-spread signal confirmed by volume/liquidity spread" in reason_lower:
+                hint = (
+                    "- volume_confirmation 必须明确写成“价格均值差/价差”由“成交量或流动性差值”确认；"
+                    "可直接使用“短期价格均值差在成交量差值配合下更可靠”这类表述。"
+                )
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
@@ -1193,7 +1230,10 @@ class AlphaResearcher:
                     hints.append(hint)
                     seen_hints.add(hint)
             if "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects" in reason_lower:
-                hint = "- volume_confirmation 只能描述量价差值/流动性确认，不要写成动量、趋势延续或收益率变化。"
+                hint = (
+                    "- volume_confirmation 只能描述量价差值/流动性确认，不要写成动量、趋势延续或收益率变化；"
+                    "改写为“价格均值差由成交量/金额差值确认”，不要出现‘动量’或‘趋势延续’。"
+                )
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
