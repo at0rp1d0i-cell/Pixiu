@@ -186,12 +186,14 @@ Last Reviewed: 2026-03-23
   - run 写面被重定向到 `data/runtime_namespaces/{namespace}/...`
   - 可只跑 `doctor + single`，并通过 `ACTIVE_ISLANDS` / `PIXIU_TARGET_SUBSPACES` 缩小验证范围
   - 可通过 `PIXIU_STAGE2_TOTAL_QUOTA` 进一步压低 Stage 2 单轮配额，避免 fast feedback 被宽 batch 吞吐拖慢
+  - 对已连续成为主 blocker 的 `factor_algebra` family，可在 `fast_feedback` 中临时缩小 transform_family surface；当前已暂停 `volume_confirmation`
 - `Why It Exists`:
   - 当前需要快速工程回路来验证 profile、contract、artifact、diagnostics 变化
   - 同时必须避免把 fast feedback 误当成 formal controlled run
 - `Risk If Kept`:
   - frozen/cached context 会削弱 live-data 真实性
   - isolated namespace 容易让使用者误以为“跑通 fast feedback = 研究主线稳定”
+  - 实验 profile 的 family surface 缩减不代表正式 research surface 已收敛
 - `Removal Trigger`:
   - formal controlled run 与 fast engineering validation 的产品边界进一步稳定
   - profile 层和控制平面能用更明确的正式/非正式运行模式替代当前 shortcut

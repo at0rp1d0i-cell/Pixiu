@@ -41,6 +41,7 @@ from src.formula.gene import (
 from src.formula.family_semantics import render_factor_algebra_family_semantics_block
 from src.formula.sketch import (
     ALLOWED_BASE_FIELDS,
+    ALLOWED_TRANSFORM_FAMILIES,
     ALLOWED_QUANTILE_QSCORES,
     ALLOWED_WINDOW_BUCKETS,
     FormulaRecipe,
@@ -75,6 +76,11 @@ _FACTOR_GENE_RUNTIME_FIELD = "__factor_gene_runtime"
 _FACTOR_GENE_DIAGNOSTICS_KEY = "factor_gene_by_note_id"
 _GROUNDING_RUNTIME_FIELD = "__grounding_runtime"
 _PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt_assets" / "researcher"
+_FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
+    "mean_spread",
+    "ratio_momentum",
+    "volatility_state",
+)
 
 
 def _is_fast_feedback_factor_algebra(subspace_hint: Optional[ExplorationSubspace]) -> bool:
@@ -183,8 +189,18 @@ def _read_prompt_asset(filename: str) -> str:
 
 
 def _build_factor_algebra_recipe_instruction() -> str:
+    return _build_factor_algebra_recipe_instruction_for_families(ALLOWED_TRANSFORM_FAMILIES)
+
+
+@lru_cache(maxsize=None)
+def _build_factor_algebra_recipe_instruction_for_families(
+    allowed_transform_families: tuple[str, ...],
+) -> str:
     return _read_prompt_asset("factor_algebra_contract.md").format(
-        factor_algebra_family_semantics_block=render_factor_algebra_family_semantics_block(),
+        allowed_transform_families_text=" | ".join(allowed_transform_families),
+        factor_algebra_family_semantics_block=render_factor_algebra_family_semantics_block(
+            allowed_transform_families
+        ),
     )
 
 
@@ -252,6 +268,22 @@ def _build_factor_algebra_retry_family_bans(sample_rejections: list[dict[str, An
     if volume_confirmation_alignment_hits >= 1:
         banned_families.append("volume_confirmation")
     return banned_families
+
+
+def _build_fast_feedback_factor_algebra_focus_section() -> str:
+    allowed = " | ".join(_FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
+    return (
+        "## fast_feedback 限制\n"
+        f"- 当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family：{allowed}\n"
+        "- 本 profile 暂停 volume_confirmation；不要提交 volume_confirmation recipe\n"
+        "- 优先产出价格代理的单变量结构，先验证 mean_spread / ratio_momentum / volatility_state 的质量"
+    )
+
+
+def _build_fast_feedback_factor_algebra_recipe_instruction() -> str:
+    return _build_factor_algebra_recipe_instruction_for_families(
+        _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES
+    )
 
 
 def _should_skip_fast_feedback_retry(
@@ -455,7 +487,11 @@ class AlphaResearcher:
                 requested_note_count=requested_note_count,
             )
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
-                user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+                if _is_fast_feedback_factor_algebra(subspace_hint):
+                    user_msg += "\n" + _build_fast_feedback_factor_algebra_recipe_instruction()
+                    user_msg += "\n\n" + _build_fast_feedback_factor_algebra_focus_section()
+                else:
+                    user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
                 anti_collapse_section = self._build_factor_algebra_anti_collapse_section()
                 if anti_collapse_section:
                     user_msg += "\n\n" + anti_collapse_section
@@ -720,6 +756,30 @@ class AlphaResearcher:
             return None
         detail = status.removeprefix(_GROUNDING_STATUS_PREFIX).strip() or "invalid_grounding_claim"
         return f"Mechanism grounding 无效：{detail}"
+
+    def _fast_feedback_factor_algebra_policy_rejection_reason(
+        self,
+        note: FactorResearchNote,
+    ) -> str | None:
+        if not _is_fast_feedback_profile():
+            return None
+        if note.exploration_subspace != ExplorationSubspace.FACTOR_ALGEBRA:
+            return None
+        factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
+        family_key = factor_gene.get("family_gene_key")
+        if not isinstance(family_key, str):
+            return None
+        parts = family_key.split("|")
+        if len(parts) < 2:
+            return None
+        transform_family = parts[1]
+        if transform_family in _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES:
+            return None
+        allowed = ", ".join(_FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
+        return (
+            "fast_feedback 暂停 "
+            f"transform_family={transform_family}; 当前 profile 仅允许 {allowed}"
+        )
 
     def _try_symbolic_mutation_batch(
         self,
@@ -1042,6 +1102,15 @@ class AlphaResearcher:
 
             subspace = _note_subspace_value(note)
             if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
+                policy_reason = self._fast_feedback_factor_algebra_policy_rejection_reason(note)
+                if policy_reason is not None:
+                    rejection_counts["value_density"] += 1
+                    rejection_counts_by_filter_and_subspace["value_density"][subspace] += 1
+                    if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                        sample_rejections.append(
+                            self._build_stage2_rejection_sample(note, "value_density", policy_reason, subspace)
+                        )
+                    continue
                 factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
                 family_key = factor_gene.get("family_gene_key")
                 if isinstance(family_key, str):

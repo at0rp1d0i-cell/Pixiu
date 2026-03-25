@@ -2045,6 +2045,68 @@ def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density(
     assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|quantile"
 
 
+def test_factor_algebra_fast_feedback_rejects_disallowed_volume_confirmation_family():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_volume_banned",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "价格均值差由成交量差值确认后更可靠。",
+            "economic_intuition": "量价差值共振有助于过滤弱信号。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "secondary_field": "$volume",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "volume_confirmation",
+                "interaction_mode": "mul",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "fast-feedback-policy"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "fast_feedback",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "fast_feedback 暂停 transform_family=volume_confirmation" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|volume_confirmation|$vwap|$volume|mul|rank"
+
+
 def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics():
     from src.agents.researcher import hypothesis_gen_node
 
@@ -2722,6 +2784,8 @@ def test_factor_algebra_fast_feedback_requests_and_keeps_single_note(monkeypatch
     assert captured_messages
     human_message = captured_messages[0][1]
     assert "请提出 1 个差异化的 FactorResearchNote" in human_message.content
+    assert "当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family" in human_message.content
+    assert "本 profile 暂停 volume_confirmation" in human_message.content
 
 
 def test_factor_algebra_fast_feedback_retry_bans_volume_confirmation_after_repeated_alignment_failures(monkeypatch):

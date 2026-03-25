@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Final
 
 FACTOR_ALGEBRA_FAMILY_SEMANTICS: Final[dict[str, dict[str, str]]] = {
@@ -26,9 +27,14 @@ def get_factor_algebra_family_semantics(transform_family: str) -> dict[str, str]
     return FACTOR_ALGEBRA_FAMILY_SEMANTICS.get(transform_family)
 
 
-def render_factor_algebra_family_semantics_block() -> str:
+def render_factor_algebra_family_semantics_block(
+    allowed_families: Iterable[str] | None = None,
+) -> str:
+    allowed = set(allowed_families) if allowed_families is not None else None
     lines = ["## family 语义对齐（必须遵守）"]
     for family, semantics in FACTOR_ALGEBRA_FAMILY_SEMANTICS.items():
+        if allowed is not None and family not in allowed:
+            continue
         lines.append(f"- `{family}`")
         lines.append(f"  - {semantics['allowed']}")
         lines.append(f"  - {semantics['forbidden']}")

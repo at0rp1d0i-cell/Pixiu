@@ -5,7 +5,7 @@
   - `base_field`
   - `lookback_short`
   - `lookback_long`
-  - `transform_family`: `mean_spread | ratio_momentum | volatility_state | volume_confirmation`
+  - `transform_family`: `{allowed_transform_families_text}`
   - `interaction_mode`: `none | mul | sub`
   - `normalization`: `none | rank | quantile`
   - `normalization_window`（`normalization != none` 时必填）
