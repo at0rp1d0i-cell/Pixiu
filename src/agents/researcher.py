@@ -2,12 +2,13 @@
 Pixiu v2: AlphaResearcher Agent（高通量批量生成版）
 
 Stage 2 设计哲学：Agent 不受"研究员同时只能研究一个方向"的约束。
-每次 LLM 调用强制生成 2-3 个差异化假设（AlphaResearcherBatch），
-6 个 Island 并行 → 每轮漏斗入口 12-18 个候选。
+默认每次 LLM 调用生成 2-3 个差异化假设（AlphaResearcherBatch），
+6 个 Island 并行 → 常规轮次漏斗入口约 12-18 个候选。
 """
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from collections import Counter, defaultdict
@@ -55,6 +56,7 @@ _SKILL_LOADER = SkillLoader()
 _MAX_STAGE2_REJECTION_SAMPLES = 5
 _MAX_LOCAL_RETRY = 1
 _MAX_ANTI_COLLAPSE_SKELETONS = 3
+_FAST_FEEDBACK_MAX_ANTI_COLLAPSE_SKELETONS = 2
 _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
@@ -65,6 +67,23 @@ _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
 _FACTOR_GENE_RUNTIME_FIELD = "__factor_gene_runtime"
 _FACTOR_GENE_DIAGNOSTICS_KEY = "factor_gene_by_note_id"
 _GROUNDING_RUNTIME_FIELD = "__grounding_runtime"
+
+
+def _is_fast_feedback_factor_algebra(subspace_hint: Optional[ExplorationSubspace]) -> bool:
+    return (
+        subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA
+        and os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() == "fast_feedback"
+    )
+
+
+def _requested_note_count_text(subspace_hint: Optional[ExplorationSubspace]) -> str:
+    if _is_fast_feedback_factor_algebra(subspace_hint):
+        return "1"
+    return "2-3"
+
+
+def _is_fast_feedback_profile() -> bool:
+    return os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() == "fast_feedback"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -88,7 +107,7 @@ ALPHA_RESEARCHER_SYSTEM_PROMPT = """你是 Pixiu 的 Alpha 研究员，专注于
 - 如果估值/基本面字段当前不可用，请退化到价量代理
 
 输出格式：返回一个 JSON 对象，包含字段：
-  - notes: 一个包含 2-3 个 FactorResearchNote 的数组
+  - notes: 一个包含目标数量个 FactorResearchNote 的数组
   - generation_rationale: 字符串，说明为何选择这几个研究方向
 
 每个 Note 的经济逻辑必须彼此差异化，禁止提交同一个公式的微小变体。
@@ -145,7 +164,7 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 ## 历史失败因子（避免重复）
 {failed_factors_section}
 
-请提出 2-3 个差异化的 FactorResearchNote，输出 AlphaResearcherBatch JSON。
+请提出 {requested_note_count} 个差异化的 FactorResearchNote，输出 AlphaResearcherBatch JSON。
 每个假设应捕捉 {island} 方向下不同的市场机制，而非同一思路的变体。
 每个假设必须声明 applicable_regimes（适用市场环境）和 invalid_regimes（失效环境）。
 """
@@ -297,7 +316,7 @@ class AlphaResearcher:
         subspace_hint: Optional[ExplorationSubspace] = None,
     ) -> AlphaResearcherBatch:
         """
-        调用 LLM 一次，生成 2-3 个差异化的 FactorResearchNote。
+        调用 LLM 一次，生成目标数量的差异化 FactorResearchNote。
         subspace_hint: 建议的探索方法，注入 prompt 引导生成方向。
         """
         from src.factor_pool.islands import ISLANDS
@@ -391,6 +410,7 @@ class AlphaResearcher:
         rejection_counts = Counter()
         rejection_counts_by_filter_and_subspace: dict[str, Counter] = defaultdict(Counter)
         sample_rejections: list[dict[str, str]] = []
+        requested_note_count = _requested_note_count_text(subspace_hint)
 
         for attempt in range(_MAX_LOCAL_RETRY + 1):
             user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
@@ -400,6 +420,7 @@ class AlphaResearcher:
                 market_context=mkt_ctx,
                 feedback_section=fb,
                 failed_factors_section=failed_section,
+                requested_note_count=requested_note_count,
             )
             if subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA:
                 user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
@@ -499,6 +520,8 @@ class AlphaResearcher:
 
         data = json.loads(match.group())
         notes_data = data.get("notes", [data])  # 兼容降级
+        if _is_fast_feedback_factor_algebra(subspace_hint):
+            notes_data = notes_data[:1]
 
         notes = []
         emitted_note_ids: set[str] = set()
@@ -790,7 +813,11 @@ class AlphaResearcher:
                 -len(item[1]["variants"]),
                 item[0],
             ),
-        )[:_MAX_ANTI_COLLAPSE_SKELETONS]
+        )[:(
+            _FAST_FEEDBACK_MAX_ANTI_COLLAPSE_SKELETONS
+            if _is_fast_feedback_profile()
+            else _MAX_ANTI_COLLAPSE_SKELETONS
+        )]
 
         lines = [
             "## FACTOR_ALGEBRA Anti-Collapse 提示",
@@ -798,9 +825,12 @@ class AlphaResearcher:
             "- 若命中下列 family，请优先改变 base_field、secondary_field、transform_family、interaction_mode 或 normalization_kind。",
             "- 当前已占满 family 示例：",
         ]
+        compact_mode = _is_fast_feedback_profile()
         for idx, (family_key, payload) in enumerate(ranked_families, start=1):
             lines.append(f"  {idx}. {family_key}")
             lines.append(f"     - summary: {_format_family_gene_summary(family_key)}")
+            if compact_mode:
+                continue
             variants = sorted(payload["variants"])
             if variants:
                 lines.append(f"     - seen variants: {', '.join(variants[:3])}")
@@ -1201,7 +1231,7 @@ async def _hypothesis_gen_async(state: dict) -> dict:
 
     batches: list = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # 展开：每个 batch 包含 2-3 个 notes，汇总为一个大列表
+    # 展开：每个 batch 包含目标数量个 notes，汇总为一个大列表
     all_notes: list[FactorResearchNote] = []
     subspace_results: dict[ExplorationSubspace, list[int, int]] = {
         s: [0, 0] for s in ExplorationSubspace
