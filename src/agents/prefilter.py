@@ -26,6 +26,7 @@ from src.formula.sketch import FormulaRecipe
 from src.schemas.research_note import FactorResearchNote
 from src.schemas.thresholds import THRESHOLDS
 from src.factor_pool.pool import FactorPool
+from src.llm.call_context import build_llm_call_config
 from src.llm.openai_compat import build_researcher_llm
 from src.schemas.stage_io import PrefilterDiagnostics, PrefilterOutput
 from src.skills.loader import SkillLoader
@@ -534,10 +535,20 @@ class AlignmentChecker:
             )
         try:
             llm = self._get_llm()
-            response = await llm.ainvoke([
-                SystemMessage(content=system_content),
-                HumanMessage(content=prompt),
-            ])
+            response = await llm.ainvoke(
+                [
+                    SystemMessage(content=system_content),
+                    HumanMessage(content=prompt),
+                ],
+                config=build_llm_call_config(
+                    stage="prefilter",
+                    round_index=note.iteration,
+                    agent_role="alignment_checker",
+                    llm_profile="alignment_checker",
+                    island=note.island,
+                    subspace=note.exploration_subspace.value if note.exploration_subspace is not None else None,
+                ),
+            )
             # 提取 JSON
             m = re.search(r'\{.*\}', response.content, re.DOTALL)
             if not m:

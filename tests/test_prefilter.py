@@ -268,11 +268,35 @@ def test_alignment_checker_failure_graceful():
     assert "失败" in reason
 
 
+def test_alignment_checker_passes_llm_runtime_metadata():
+    mock_response = MagicMock()
+    mock_response.content = '{"aligned": true, "reason": "ok"}'
+
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            checker = AlignmentChecker()
+            note = _make_note(iteration=4, exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA)
+            passed, _ = asyncio.run(checker.check(note))
+
+    assert passed
+    _, kwargs = mock_chat.ainvoke.call_args
+    config = kwargs["config"]
+    assert config["metadata"]["stage"] == "prefilter"
+    assert config["metadata"]["round"] == 4
+    assert config["metadata"]["agent_role"] == "alignment_checker"
+    assert config["metadata"]["llm_profile"] == "alignment_checker"
+    assert config["metadata"]["island"] == "momentum"
+    assert config["metadata"]["subspace"] == "factor_algebra"
+
+
 def test_alignment_checker_injects_prefilter_skill_into_system_prompt():
     """AlignmentChecker 的 LLM system prompt 应包含 prefilter guidance skill。"""
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = '{"aligned": true, "reason": "一致"}'
@@ -295,7 +319,7 @@ def test_alignment_checker_injects_prefilter_skill_into_system_prompt():
 def test_alignment_checker_injects_factor_family_context_for_volume_confirmation():
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = '{"aligned": true, "reason": "一致"}'

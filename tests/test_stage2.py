@@ -146,7 +146,7 @@ def test_alpha_researcher_with_feedback():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.extend(messages)
         resp = MagicMock()
         resp.content = '''{
@@ -193,7 +193,7 @@ def test_alpha_researcher_system_prompt_injects_runtime_available_fields():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.extend(messages)
         resp = MagicMock()
         resp.content = '''{
@@ -227,7 +227,7 @@ def test_alpha_researcher_system_prompt_injects_runtime_operator_block():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.extend(messages)
         resp = MagicMock()
         resp.content = '''{
@@ -262,6 +262,44 @@ def test_alpha_researcher_system_prompt_injects_runtime_operator_block():
     assert "Zscore/MinMax/Neutralize/Demean" in system_message.content
 
 
+def test_alpha_researcher_passes_llm_runtime_metadata():
+    from src.agents.researcher import AlphaResearcher
+
+    mock_response = MagicMock()
+    mock_response.content = '''{
+        "notes": [{
+            "note_id": "x", "island": "momentum", "iteration": 3,
+            "hypothesis": "test", "economic_intuition": "test",
+            "proposed_formula": "Mean($close, 5)",
+            "risk_factors": [], "market_context_date": "2026-03-25"
+        }],
+        "generation_rationale": "test"
+    }'''
+
+    with patch('src.agents.researcher.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=mock_response)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            researcher = AlphaResearcher(island="momentum")
+            asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=3,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    _, kwargs = mock_chat.ainvoke.call_args
+    config = kwargs["config"]
+    assert config["metadata"]["stage"] == "hypothesis_gen"
+    assert config["metadata"]["round"] == 3
+    assert config["metadata"]["agent_role"] == "alpha_researcher"
+    assert config["metadata"]["llm_profile"] == "researcher"
+    assert config["metadata"]["island"] == "momentum"
+    assert config["metadata"]["subspace"] == "factor_algebra"
+
+
 def test_stage2_subspace_context_avoids_legacy_cross_section_and_normalization_wording():
     from src.schemas.exploration import SubspaceRegistry
     from src.scheduling.subspace_context import (
@@ -287,7 +325,7 @@ def test_alpha_researcher_composed_prompt_avoids_legacy_skill_contracts():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.extend(messages)
         resp = MagicMock()
         resp.content = '''{
@@ -761,7 +799,7 @@ def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
         "generation_rationale": "good recipe"
     }'''
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_user_messages.append(messages[1].content)
         if len(captured_user_messages) == 1:
             return first
@@ -846,7 +884,7 @@ def test_factor_algebra_alignment_mismatch_triggers_bounded_retry():
         "generation_rationale": "good alignment"
     }'''
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_user_messages.append(messages[1].content)
         if len(captured_user_messages) == 1:
             return first
@@ -1000,9 +1038,22 @@ def test_factor_algebra_retry_feedback_includes_recipe_specific_hints():
 def test_factor_algebra_recipe_instruction_explicitly_lists_allowed_value_buckets():
     from src.agents.researcher import FACTOR_ALGEBRA_RECIPE_INSTRUCTION
 
-    assert "base_field/secondary_field` 仅允许：$close, $open, $high, $low, $vwap, $volume, $amount" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
-    assert "仅允许：5, 10, 20, 30, 60" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
-    assert "quantile_qscore` 仅允许：0.2, 0.5, 0.8" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+    assert "`base_field/secondary_field` 仅允许：`$close, $open, $high, $low, $vwap, $volume, $amount`" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+    assert "`lookback_short/lookback_long/normalization_window` 仅允许：`5, 10, 20, 30, 60`" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+    assert "`quantile_qscore` 仅允许：`0.2, 0.5, 0.8`" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+    assert "family 语义对齐" in FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+
+
+def test_cross_market_and_narrative_contract_blocks_load_from_prompt_assets():
+    from src.agents.researcher import (
+        CROSS_MARKET_GROUNDING_INSTRUCTION,
+        NARRATIVE_GROUNDING_INSTRUCTION,
+    )
+
+    assert "grounding_claim" in CROSS_MARKET_GROUNDING_INSTRUCTION
+    assert "跨市场机制模板名" in CROSS_MARKET_GROUNDING_INSTRUCTION
+    assert "grounding_claim" in NARRATIVE_GROUNDING_INSTRUCTION
+    assert "叙事类别名" in NARRATIVE_GROUNDING_INSTRUCTION
 
 
 def test_factor_algebra_invalid_base_field_triggers_retry_hint():
@@ -1054,7 +1105,7 @@ def test_factor_algebra_invalid_base_field_triggers_retry_hint():
         "generation_rationale": "good field"
     }'''
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_user_messages.append(messages[1].content)
         if len(captured_user_messages) == 1:
             return first
@@ -1182,7 +1233,7 @@ def test_cross_market_missing_grounding_claim_triggers_retry():
         "generation_rationale": "fixed grounding"
     }'''
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_user_messages.append(messages[-1].content)
         return first if len(captured_user_messages) == 1 else second
 
@@ -1336,7 +1387,7 @@ def test_alpha_researcher_local_prescreen_retries_once_on_full_reject():
         "generation_rationale": "second"
     }'''
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_user_messages.append(messages[1].content)
         if len(captured_user_messages) == 1:
             return first
@@ -1676,7 +1727,7 @@ def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = """{
@@ -2309,7 +2360,7 @@ def test_alpha_researcher_injects_market_regime_skill_from_context():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = """{
@@ -2356,7 +2407,7 @@ def test_factor_algebra_fast_feedback_requests_and_keeps_single_note(monkeypatch
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = """{
@@ -2435,7 +2486,7 @@ def test_alpha_researcher_injects_island_skill_marker():
 
     captured_messages = []
 
-    async def capture_ainvoke(messages):
+    async def capture_ainvoke(messages, **kwargs):
         captured_messages.append(messages)
         response = MagicMock()
         response.content = """{

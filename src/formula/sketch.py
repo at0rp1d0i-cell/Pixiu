@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.formula.family_semantics import get_factor_algebra_family_semantics
+
 _VOLUME_PROXY_FIELDS = {"$volume", "$amount"}
 _RETURN_TOKENS = ("收益率", "回报率", "return", "ret", "涨跌幅", "相对收益")
 _ACCELERATION_TOKENS = ("加速度", "acceleration")
@@ -153,3 +155,10 @@ def validate_formula_recipe_alignment(
             return "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
 
     return None
+
+
+def describe_factor_algebra_family_semantics(transform_family: str) -> str:
+    semantics = get_factor_algebra_family_semantics(transform_family)
+    if semantics is None:
+        return ""
+    return f"{semantics['allowed']} {semantics['forbidden']}"

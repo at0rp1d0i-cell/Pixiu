@@ -56,18 +56,20 @@
 
 ## family 语义对齐（必须遵守）
 
+下列 family 语义的 runtime 真相由 [family_semantics.py](/home/torpedo/Workspace/ML/Pixiu/src/formula/family_semantics.py) 维护；本 skill 只做镜像说明。
+
 - `mean_spread`
-  - 只能描述均价/均线差、价差扩张/收敛
-  - 不要写成收益率差、相对收益变化、动量加速度
+  - 只能描述均价/均线差、价差扩张或收敛
+  - 不要写成收益率变化、相对收益差或动量加速度
 - `ratio_momentum`
-  - 只能描述相对强弱、比值动量、短强长弱
+  - 只能描述长短窗口相对强弱、比值动量、短强长弱
   - 不要写成均线差、均价差或纯价差扩张
 - `volatility_state`
-  - 只能描述长短期波动状态变化
+  - 只能描述长短窗口波动状态变化
   - 不要写成价格动量、收益率变化，或“用波动率标准化动量”
 - `volume_confirmation`
-  - 必须明确说明成交量/流动性确认机制
-  - 当前表达的是量价差值确认，不要写成“相对成交量变化”“量能比”
+  - 必须明确描述成交量/流动性对价格信号的确认；当前 canonical form 是量价差值确认
+  - 不要写成相对成交量变化、量能比、generic momentum 或趋势延续
 
 ---
 

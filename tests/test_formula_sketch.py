@@ -4,6 +4,7 @@ import pytest
 
 from src.formula.sketch import (
     FormulaRecipe,
+    describe_factor_algebra_family_semantics,
     render_formula_recipe,
     validate_formula_recipe_alignment,
 )
@@ -149,3 +150,10 @@ def test_validate_formula_recipe_alignment_rejects_momentum_wording_for_volume_c
     )
 
     assert reason == "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
+
+
+def test_describe_factor_algebra_family_semantics_comes_from_shared_runtime_source() -> None:
+    semantics = describe_factor_algebra_family_semantics("volume_confirmation")
+
+    assert "成交量/流动性对价格信号的确认" in semantics
+    assert "相对成交量变化" in semantics

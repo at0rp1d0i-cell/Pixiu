@@ -13,6 +13,8 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -35,6 +37,7 @@ from src.formula.gene import (
     build_variant_gene,
     build_variant_gene_key,
 )
+from src.formula.family_semantics import render_factor_algebra_family_semantics_block
 from src.formula.sketch import (
     ALLOWED_BASE_FIELDS,
     ALLOWED_QUANTILE_QSCORES,
@@ -43,6 +46,7 @@ from src.formula.sketch import (
     render_formula_recipe,
     validate_formula_recipe_alignment,
 )
+from src.llm.call_context import build_llm_call_config
 from src.llm.openai_compat import build_researcher_llm
 from src.scheduling.subspace_scheduler import SubspaceScheduler, SchedulerState
 from src.scheduling.subspace_context import build_subspace_context
@@ -67,6 +71,7 @@ _FACTOR_ALGEBRA_ALLOWED_FIELDS_TEXT = ", ".join(ALLOWED_BASE_FIELDS)
 _FACTOR_GENE_RUNTIME_FIELD = "__factor_gene_runtime"
 _FACTOR_GENE_DIAGNOSTICS_KEY = "factor_gene_by_note_id"
 _GROUNDING_RUNTIME_FIELD = "__grounding_runtime"
+_PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt_assets" / "researcher"
 
 
 def _is_fast_feedback_factor_algebra(subspace_hint: Optional[ExplorationSubspace]) -> bool:
@@ -169,53 +174,28 @@ ALPHA_RESEARCHER_USER_TEMPLATE = """
 每个假设必须声明 applicable_regimes（适用市场环境）和 invalid_regimes（失效环境）。
 """
 
-FACTOR_ALGEBRA_RECIPE_INSTRUCTION = """
-## FACTOR_ALGEBRA 专用输出约束（必须遵守）
-- 本子空间必须输出 `formula_recipe` 对象，由系统渲染 `proposed_formula`
-- 不接受只提供自由字符串 `proposed_formula` 的路径
-- `formula_recipe` 字段：
-  - base_field
-  - lookback_short
-  - lookback_long
-  - transform_family: mean_spread | ratio_momentum | volatility_state | volume_confirmation
-  - interaction_mode: none | mul | sub
-  - normalization: none | rank | quantile
-  - normalization_window（normalization != none 时必填）
-  - quantile_qscore（normalization = quantile 时必填）
-  - secondary_field（仅 volume_confirmation 时必填）
-- `base_field/secondary_field` 仅允许：$close, $open, $high, $low, $vwap, $volume, $amount
-- 窗口字段 `lookback_short/lookback_long/normalization_window` 仅允许：5, 10, 20, 30, 60
-- `quantile_qscore` 仅允许：0.2, 0.5, 0.8
-- 必须满足 `lookback_short < lookback_long`
-- `proposed_formula` 会被系统覆盖渲染，填写占位字符串即可
-- 如果 hypothesis 想引用 ROE / PB / float_mv / turnover_rate 等字段，请在本子空间改用价量代理；不要把这些字段写进 formula_recipe
-"""
+@lru_cache(maxsize=None)
+def _read_prompt_asset(filename: str) -> str:
+    return (_PROMPT_ASSETS_DIR / filename).read_text(encoding="utf-8").strip()
 
-CROSS_MARKET_GROUNDING_INSTRUCTION = """
-## CROSS_MARKET 专用 grounding 约束（必须遵守）
-- 本子空间必须输出 `grounding_claim` 对象
-- `grounding_claim` 字段：
-  - mechanism_source: 必须选择一个已给出的跨市场机制模板名
-  - proxy_fields: 公式实际使用的运行时字段列表
-  - proxy_rationale: 为什么这些代理字段能承接该跨市场机制
-  - formula_claim: 用一句话说明公式如何实现该机制
-- `proxy_fields` 必须全部来自当前运行时可用字段
-- `proposed_formula` 必须实际使用 `proxy_fields` 中至少一个字段
-- 禁止只写“海外逻辑迁移到A股”而不给出明确代理字段
-"""
 
-NARRATIVE_GROUNDING_INSTRUCTION = """
-## NARRATIVE_MINING 专用 grounding 约束（必须遵守）
-- 本子空间必须输出 `grounding_claim` 对象
-- `grounding_claim` 字段：
-  - mechanism_source: 必须选择一个已给出的叙事类别名
-  - proxy_fields: 公式实际使用的运行时字段列表
-  - proxy_rationale: 为什么这些代理字段能承接该叙事机制
-  - formula_claim: 用一句话说明公式如何实现该叙事传导
-- `proxy_fields` 必须全部来自当前运行时可用字段
-- `proposed_formula` 必须实际使用 `proxy_fields` 中至少一个字段
-- 禁止只写定性叙事，不给出可检验代理
-"""
+def _build_factor_algebra_recipe_instruction() -> str:
+    return _read_prompt_asset("factor_algebra_contract.md").format(
+        factor_algebra_family_semantics_block=render_factor_algebra_family_semantics_block(),
+    )
+
+
+def _build_cross_market_grounding_instruction() -> str:
+    return _read_prompt_asset("cross_market_grounding_contract.md")
+
+
+def _build_narrative_mining_grounding_instruction() -> str:
+    return _read_prompt_asset("narrative_mining_grounding_contract.md")
+
+
+FACTOR_ALGEBRA_RECIPE_INSTRUCTION = _build_factor_algebra_recipe_instruction()
+CROSS_MARKET_GROUNDING_INSTRUCTION = _build_cross_market_grounding_instruction()
+NARRATIVE_GROUNDING_INSTRUCTION = _build_narrative_mining_grounding_instruction()
 
 
 def _formula_skeleton(formula: str) -> str:
@@ -445,10 +425,20 @@ class AlphaResearcher:
                     "- 避免重复提交与本地预筛已拒绝原因相同的模式\n"
                 )
 
-            response = await llm.ainvoke([
-                SystemMessage(content=system_content),
-                HumanMessage(content=user_msg),
-            ])
+            response = await llm.ainvoke(
+                [
+                    SystemMessage(content=system_content),
+                    HumanMessage(content=user_msg),
+                ],
+                config=build_llm_call_config(
+                    stage="hypothesis_gen",
+                    round_index=iteration,
+                    agent_role="alpha_researcher",
+                    llm_profile="researcher",
+                    island=self.island,
+                    subspace=subspace_hint.value if subspace_hint is not None else None,
+                ),
+            )
 
             parsed_batch = self._parse_batch(response.content, iteration, subspace_hint)
             approved_notes, diagnostics = self._local_prescreen_notes(parsed_batch.notes)
