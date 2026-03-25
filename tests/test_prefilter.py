@@ -9,6 +9,7 @@ import pytest
 
 from src.schemas.research_note import FactorResearchNote
 from src.agents.prefilter import Validator, NoveltyFilter, AlignmentChecker, PreFilter
+from src.schemas.hypothesis import ExplorationSubspace
 from src.formula.capabilities import get_runtime_formula_capabilities
 
 pytestmark = pytest.mark.unit
@@ -289,6 +290,36 @@ def test_alignment_checker_injects_prefilter_skill_into_system_prompt():
     assert captured_messages
     system_message = captured_messages[0][0]
     assert "<!-- SKILL:PREFILTER_GUIDANCE -->" in system_message.content
+
+
+def test_alignment_checker_injects_factor_family_context_for_volume_confirmation():
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = '{"aligned": true, "reason": "一致"}'
+        return response
+
+    note = _make_note(
+        hypothesis="量价确认后更容易延续",
+        proposed_formula="Mul(Mean($close, 5) - Mean($close, 20), Mean($volume, 5) - Mean($volume, 20))",
+        exploration_subspace=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+
+    with patch('src.agents.prefilter.build_researcher_llm') as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test', 'RESEARCHER_API_KEY': 'test'}):
+            checker = AlignmentChecker()
+            asyncio.run(checker.check(note))
+
+    assert captured_messages
+    human_message = captured_messages[0][1]
+    assert "因子家族：" in human_message.content
+    assert "factor_algebra|volume_confirmation|$close|$volume|mul|none" in human_message.content
+    assert "Mul 在当前运行时允许" in human_message.content
 
 
 # ─────────────────────────────────────────────

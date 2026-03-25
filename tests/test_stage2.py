@@ -463,8 +463,8 @@ def test_factor_algebra_factor_gene_diagnostics_include_gene_bundle():
                     "note_id": "gene_ok",
                     "island": "momentum",
                     "iteration": 1,
-                    "hypothesis": "价格动量需要成交量确认，量价共振时趋势更可信",
-                    "economic_intuition": "成交量放大确认价格趋势，量价同步上行时信号更稳",
+                    "hypothesis": "价格均值差需要成交量确认，量价共振时信号更可信",
+                    "economic_intuition": "成交量放大确认价格均值差扩张，量价同步时信号更稳",
                     "formula_recipe": {
                         "base_field": "$close",
                         "secondary_field": "$volume",

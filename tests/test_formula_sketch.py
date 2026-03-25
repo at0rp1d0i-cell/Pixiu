@@ -130,3 +130,22 @@ def test_validate_formula_recipe_alignment_rejects_missing_volume_mechanism_for_
     )
 
     assert reason == "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"
+
+
+def test_validate_formula_recipe_alignment_rejects_momentum_wording_for_volume_confirmation() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        secondary_field="$volume",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="volume_confirmation",
+        interaction_mode="mul",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="捕捉量价动量确认和趋势延续",
+        economic_intuition="成交量放大时价格趋势更容易延续",
+    )
+
+    assert reason == "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"

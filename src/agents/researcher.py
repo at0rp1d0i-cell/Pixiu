@@ -1117,6 +1117,11 @@ class AlphaResearcher:
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
+            if "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects" in reason_lower:
+                hint = "- volume_confirmation 只能描述量价差值/流动性确认，不要写成动量、趋势延续或收益率变化。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
             if "ratio_momentum should not be described as a mean spread" in reason_lower:
                 hint = "- ratio_momentum 应描述相对强弱或比值动量，不要写成均线差或价差。"
                 if hint not in seen_hints:

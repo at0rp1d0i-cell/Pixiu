@@ -149,5 +149,7 @@ def validate_formula_recipe_alignment(
             return "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"
         if any(token in text for token in _RELATIVE_VOLUME_TOKENS):
             return "volume_confirmation cannot claim relative volume change"
+        if any(token in text for token in _MOMENTUM_TOKENS + _RETURN_TOKENS + _ACCELERATION_TOKENS):
+            return "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
 
     return None
