@@ -9,9 +9,8 @@ Sources:
   - tests/test_research_note_hypothesis_bridge.py
   - tests/test_stage2_hypothesis_output.py
 """
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1974,14 +1973,14 @@ def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density(
             "note_id": "fa_low_value",
             "island": "momentum",
             "iteration": 1,
-            "hypothesis": "短期价格相对强弱持续占优，且已经过时序分位数压缩。",
-            "economic_intuition": "比值动量刻画长短窗口相对强弱。",
+            "hypothesis": "短期均价高于长期均价，说明均价差持续偏强。",
+            "economic_intuition": "均价差可以刻画短强长弱的价差状态。",
             "proposed_formula": "placeholder",
             "formula_recipe": {
                 "base_field": "$vwap",
                 "lookback_short": 10,
                 "lookback_long": 30,
-                "transform_family": "ratio_momentum",
+                "transform_family": "mean_spread",
                 "interaction_mode": "none",
                 "normalization": "quantile",
                 "normalization_window": 60,
@@ -2000,15 +1999,19 @@ def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density(
     mock_pool.get_island_factors.return_value = [
         {
             "factor_id": "mom_lv_1",
-            "formula": "Quantile(Mean($vwap, 10) / Mean($vwap, 30) - 1, 60, 0.8)",
+            "formula": "Quantile(Mean($vwap, 10) - Mean($vwap, 30), 60, 0.8)",
             "subspace_origin": "factor_algebra",
             "failure_mode": "low_sharpe",
+            "family_gene_key": "factor_algebra|mean_spread|$vwap|null|none|quantile",
+            "variant_gene_key": "10|30|60|0.8",
         },
         {
             "factor_id": "mom_lv_2",
-            "formula": "Quantile(Mean($vwap, 10) / Mean($vwap, 30) - 1, 60, 0.8)",
+            "formula": "Quantile(Mean($vwap, 10) - Mean($vwap, 30), 60, 0.8)",
             "subspace_origin": "factor_algebra",
             "failure_mode": "low_sharpe",
+            "family_gene_key": "factor_algebra|mean_spread|$vwap|null|none|quantile",
+            "variant_gene_key": "10|30|60|0.8",
         },
     ]
 
@@ -2042,7 +2045,7 @@ def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density(
     assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
     sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
     assert "historical low-value family" in sample["reason"]
-    assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|quantile"
+    assert sample["family_gene_key"] == "factor_algebra|mean_spread|$vwap|null|none|quantile"
 
 
 def test_factor_algebra_fast_feedback_rejects_disallowed_volume_confirmation_family():
@@ -2166,6 +2169,67 @@ def test_factor_algebra_fast_feedback_rejects_disallowed_volatility_state_family
     sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
     assert "fast_feedback 暂停 transform_family=volatility_state" in sample["reason"]
     assert sample["family_gene_key"] == "factor_algebra|volatility_state|$close|null|none|rank"
+
+
+def test_factor_algebra_fast_feedback_rejects_disallowed_ratio_momentum_family():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_ratio_banned",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期相对长期更强，体现相对强弱延续。",
+            "economic_intuition": "长短窗口比值变化刻画相对强弱。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "recent-novelty-repeat"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "fast_feedback",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "fast_feedback 暂停 transform_family=ratio_momentum" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|rank"
 
 
 def test_factor_algebra_fast_feedback_rejects_volatility_state_without_volatility_wording():
@@ -2906,7 +2970,8 @@ def test_factor_algebra_fast_feedback_requests_and_keeps_single_note(monkeypatch
     human_message = captured_messages[0][1]
     assert "请提出 1 个差异化的 FactorResearchNote" in human_message.content
     assert "当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family" in human_message.content
-    assert "本 profile 暂停 volume_confirmation" in human_message.content
+    assert "mean_spread" in human_message.content
+    assert "暂停 volume_confirmation / volatility_state / ratio_momentum" in human_message.content
 
 
 def test_factor_algebra_fast_feedback_retry_bans_volume_confirmation_after_repeated_alignment_failures(monkeypatch):

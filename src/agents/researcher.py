@@ -78,7 +78,6 @@ _GROUNDING_RUNTIME_FIELD = "__grounding_runtime"
 _PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt_assets" / "researcher"
 _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
     "mean_spread",
-    "ratio_momentum",
 )
 
 
@@ -274,8 +273,8 @@ def _build_fast_feedback_factor_algebra_focus_section() -> str:
     return (
         "## fast_feedback 限制\n"
         f"- 当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family：{allowed}\n"
-        "- 本 profile 暂停 volume_confirmation；不要提交 volume_confirmation recipe\n"
-        "- 优先产出价格代理的单变量结构，先验证 mean_spread / ratio_momentum / volatility_state 的质量"
+        "- 本 profile 暂停 volume_confirmation / volatility_state / ratio_momentum；不要提交这些 recipe\n"
+        "- 当前只验证 mean_spread 的表达、对齐和回测价值"
     )
 
 
@@ -1168,7 +1167,6 @@ class AlphaResearcher:
                                 )
                             )
                         continue
-
             if novelty_filter is not None:
                 passed, reason = novelty_filter.check(note)
                 if not passed:
