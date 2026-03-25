@@ -63,6 +63,7 @@ _MAX_ANTI_COLLAPSE_SKELETONS = 3
 _FAST_FEEDBACK_MAX_ANTI_COLLAPSE_SKELETONS = 2
 _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
+_FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES = 2
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX = "invalid_alignment:"
 _GROUNDING_STATUS_PREFIX = "invalid_grounding:"
@@ -220,6 +221,17 @@ def _format_family_gene_summary(family_key: str) -> str:
         f"interaction_mode={interaction_mode}, "
         f"normalization_kind={normalization_kind}"
     )
+
+
+def _legacy_low_value_family_key_from_formula(formula: str) -> str | None:
+    compact = re.sub(r"\s+", "", formula)
+    ratio_rank = re.fullmatch(
+        r"Rank\((\$\w+)/Ref\(\1,(\d+)\)-1,(\d+)\)",
+        compact,
+    )
+    if ratio_rank is not None:
+        return f"factor_algebra|ratio_momentum|{ratio_rank.group(1)}|null|none|rank"
+    return None
 
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
@@ -570,6 +582,7 @@ class AlphaResearcher:
                 recipe,
                 hypothesis=str(rendered_note.get("hypothesis") or ""),
                 economic_intuition=str(rendered_note.get("economic_intuition") or ""),
+                island=str(rendered_note.get("island") or self.island or ""),
             )
             rendered_note["proposed_formula"] = render_formula_recipe(recipe)
             family_gene = build_family_gene(recipe)
@@ -793,7 +806,9 @@ class AlphaResearcher:
             if len(bucket["labels"]) < 2 and str(label) not in bucket["labels"]:
                 bucket["labels"].append(str(label))
 
-        if not family_samples:
+        low_value_family_counts = self._load_island_low_value_family_counts()
+
+        if not family_samples and not low_value_family_counts:
             return ""
 
         ranked_families = sorted(
@@ -809,12 +824,15 @@ class AlphaResearcher:
             else _MAX_ANTI_COLLAPSE_SKELETONS
         )]
 
-        lines = [
-            "## FACTOR_ALGEBRA Anti-Collapse 提示",
-            "- 当前岛上已有一些已占满的 factor_gene family；如果你的新 recipe 只是改 lookback_short/lookback_long/normalization_window/quantile_qscore，请不要提交。",
-            "- 若命中下列 family，请优先改变 base_field、secondary_field、transform_family、interaction_mode 或 normalization_kind。",
-            "- 当前已占满 family 示例：",
-        ]
+        lines = ["## FACTOR_ALGEBRA Anti-Collapse 提示"]
+        if family_samples:
+            lines.extend(
+                [
+                    "- 当前岛上已有一些已占满的 factor_gene family；如果你的新 recipe 只是改 lookback_short/lookback_long/normalization_window/quantile_qscore，请不要提交。",
+                    "- 若命中下列 family，请优先改变 base_field、secondary_field、transform_family、interaction_mode 或 normalization_kind。",
+                    "- 当前已占满 family 示例：",
+                ]
+            )
         compact_mode = _is_fast_feedback_profile()
         for idx, (family_key, payload) in enumerate(ranked_families, start=1):
             lines.append(f"  {idx}. {family_key}")
@@ -826,6 +844,23 @@ class AlphaResearcher:
                 lines.append(f"     - seen variants: {', '.join(variants[:3])}")
             if payload["labels"]:
                 lines.append(f"     - examples: {', '.join(payload['labels'])}")
+        if low_value_family_counts:
+            ranked_low_value_families = sorted(
+                low_value_family_counts.items(),
+                key=lambda item: (-int(item[1]), item[0]),
+            )[:(
+                _FAST_FEEDBACK_MAX_ANTI_COLLAPSE_SKELETONS
+                if _is_fast_feedback_profile()
+                else _MAX_ANTI_COLLAPSE_SKELETONS
+            )]
+            lines.append("- 当前已知低价值 family（多次进入执行后仍因 LOW_SHARPE/弱 IC 被归档）：")
+            for idx, (family_key, count) in enumerate(ranked_low_value_families, start=1):
+                lines.append(f"  {idx}. {family_key}")
+                lines.append(f"     - summary: {_format_family_gene_summary(family_key)}")
+                lines.append(
+                    "     - warning: "
+                    f"historical low-value count={count}; 若无强新机制，不要继续提交同类 generic 变体"
+                )
         return "\n".join(lines)
 
     def _load_island_family_variant_counts(self) -> dict[str, int]:
@@ -862,6 +897,34 @@ class AlphaResearcher:
 
         return {family_key: len(variants) for family_key, variants in family_to_variants.items()}
 
+    def _load_island_low_value_family_counts(self) -> dict[str, int]:
+        """Return low-value factor_algebra family counts grouped by family key."""
+        if self.factor_pool is None:
+            return {}
+        from src.agents.prefilter import NoveltyFilter
+
+        try:
+            existing = list(self.factor_pool.get_island_factors(island=self.island, limit=120))
+        except Exception as exc:
+            logger.debug("[AlphaResearcher] get_island_factors failed for value density: %s", exc)
+            return {}
+
+        counts: Counter[str] = Counter()
+        for item in existing:
+            if item.get("subspace_origin") != ExplorationSubspace.FACTOR_ALGEBRA.value:
+                continue
+            failure_mode = str(item.get("failure_mode") or "").strip().lower()
+            if failure_mode != "low_sharpe":
+                continue
+            family_key, _variant_key = NoveltyFilter._resolve_factor_gene_keys_from_factor(item)
+            if family_key is None:
+                formula = item.get("formula")
+                if isinstance(formula, str) and formula.strip():
+                    family_key = _legacy_low_value_family_key_from_formula(formula)
+            if isinstance(family_key, str):
+                counts[family_key] += 1
+        return dict(counts)
+
     def _local_prescreen_notes(
         self, notes: list[FactorResearchNote]
     ) -> tuple[list[FactorResearchNote], dict[str, Any]]:
@@ -879,6 +942,7 @@ class AlphaResearcher:
         )
         novelty_filter = NoveltyFilter(pool=self.factor_pool) if self.factor_pool is not None else None
         historical_family_variant_counts = self._load_island_family_variant_counts()
+        low_value_family_counts = self._load_island_low_value_family_counts()
         kept_factor_algebra_families: set[str] = set()
 
         for note in notes:
@@ -954,6 +1018,27 @@ class AlphaResearcher:
                                         "historical saturated family: "
                                         f"{family_key} (variant_count={historical_count} "
                                         f">= {_FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS})"
+                                    ),
+                                    subspace,
+                                )
+                            )
+                        continue
+                    low_value_count = low_value_family_counts.get(family_key, 0)
+                    if (
+                        _is_fast_feedback_profile()
+                        and low_value_count >= _FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES
+                    ):
+                        rejection_counts["value_density"] += 1
+                        rejection_counts_by_filter_and_subspace["value_density"][subspace] += 1
+                        if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                            sample_rejections.append(
+                                self._build_stage2_rejection_sample(
+                                    note,
+                                    "value_density",
+                                    (
+                                        "historical low-value family: "
+                                        f"{family_key} (low_sharpe_count={low_value_count} "
+                                        f">= {_FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES})"
                                     ),
                                     subspace,
                                 )
@@ -1114,6 +1199,11 @@ class AlphaResearcher:
                     seen_hints.add(hint)
             if "ratio_momentum should not be described as a mean spread" in reason_lower:
                 hint = "- ratio_momentum 应描述相对强弱或比值动量，不要写成均线差或价差。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "ratio_momentum on momentum island must describe a comparative relative-strength mechanism" in reason_lower:
+                hint = "- momentum island 下的 ratio_momentum 不能只写成泛化动量或趋势延续；必须明确说明相对强弱、比值比较或短强长弱机制。"
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)

@@ -12,6 +12,8 @@ _VOLUME_TOKENS = ("成交量", "量能", "放量", "缩量", "volume", "amount",
 _RELATIVE_VOLUME_TOKENS = ("相对变化", "相对成交量", "量能比", "volume ratio", "relative volume")
 _MEAN_SPREAD_TOKENS = ("均线差", "均值差", "价差", "均价差", "差值", "spread")
 _MOMENTUM_TOKENS = ("动量", "momentum", "趋势", "trend")
+_RATIO_COMPARATIVE_TOKENS = ("相对强弱", "比值", "relative strength", "短强长弱", "long-short", "短期强于长期")
+_PRICE_PROXY_FIELDS = {"$close", "$open", "$high", "$low", "$vwap"}
 
 ALLOWED_BASE_FIELDS = (
     "$close",
@@ -124,6 +126,7 @@ def validate_formula_recipe_alignment(
     *,
     hypothesis: str,
     economic_intuition: str,
+    island: str | None = None,
 ) -> str | None:
     text = f"{hypothesis} {economic_intuition}".strip().lower()
     if not text:
@@ -143,6 +146,16 @@ def validate_formula_recipe_alignment(
     elif recipe.transform_family == "ratio_momentum":
         if any(token in text for token in _MEAN_SPREAD_TOKENS):
             return "ratio_momentum should not be described as a mean spread"
+        if (
+            island == "momentum"
+            and recipe.base_field in _PRICE_PROXY_FIELDS
+            and any(token in text for token in _MOMENTUM_TOKENS)
+            and not any(token in text for token in _RATIO_COMPARATIVE_TOKENS)
+        ):
+            return (
+                "ratio_momentum on momentum island must describe a comparative relative-strength mechanism, "
+                "not generic momentum/trend continuation"
+            )
     elif recipe.transform_family == "volatility_state":
         if any(token in text for token in _RETURN_TOKENS + _ACCELERATION_TOKENS + _MOMENTUM_TOKENS):
             return "volatility_state cannot claim momentum or return-delta effects"

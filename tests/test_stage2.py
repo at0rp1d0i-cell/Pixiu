@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 def _stage2_test_capabilities():
     return MagicMock(
         available_fields=("$close", "$volume", "$vwap"),
-        approved_operators=("Mean", "Std", "Mul", "Sub", "Rank", "Quantile", "Ref"),
+        approved_operators=("Mean", "Std", "Mul", "Sub", "Div", "Rank", "Quantile", "Ref"),
     )
 
 
@@ -918,6 +918,89 @@ def test_factor_algebra_alignment_mismatch_triggers_bounded_retry():
     assert "收益率差、相对收益或动量加速度" in captured_user_messages[1]
 
 
+def test_factor_algebra_generic_price_only_ratio_momentum_triggers_bounded_retry():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_ratio_momentum",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "捕捉价格动量延续，趋势强的股票后续更可能继续上涨",
+            "economic_intuition": "短期趋势越强，后续延续概率越高",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "ratio_momentum",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "bad value density"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_ratio_momentum",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "捕捉短强长弱的相对强弱，比值越高说明短期价格相对长期均值更强",
+            "economic_intuition": "短强长弱时，相对强势更可能继续占优",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "ratio_momentum",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "good value density"
+    }'''
+
+    async def capture_ainvoke(messages, **kwargs):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch("src.agents.researcher.format_available_fields_for_prompt", return_value="  基础价量字段：$close, $vwap, $volume"):
+            with patch("src.agents.researcher.format_available_operators_for_prompt", return_value="  常用稳定算子：Mean, Rank"):
+                with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+                    researcher = AlphaResearcher(
+                        island="momentum",
+                        capabilities=_stage2_test_capabilities(),
+                    )
+                    batch = asyncio.run(
+                        researcher.generate_batch(
+                            context=None,
+                            iteration=1,
+                            subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                        )
+                    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good_ratio_momentum"
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("alignment", 0) >= 1
+    assert "相对强弱、比值比较或短强长弱机制" in captured_user_messages[1]
+
+
 def test_factor_algebra_rejects_free_form_only_path_and_retries():
     from src.agents.researcher import AlphaResearcher
 
@@ -1799,6 +1882,157 @@ def test_factor_algebra_prompt_injects_anti_collapse_context_from_factor_pool():
     assert "seen variants: 10|30|20|null, 5|20|20|null" in human_message.content
     assert "examples: mom_alg_001, mom_alg_002" in human_message.content
     assert "skeleton" not in human_message.content.lower()
+
+
+def test_factor_algebra_prompt_injects_low_value_family_memory():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages, **kwargs):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = """{
+            "notes": [{
+                "note_id": "factor_algebra_try_1",
+                "island": "momentum",
+                "iteration": 1,
+                "hypothesis": "test",
+                "economic_intuition": "test",
+                "proposed_formula": "placeholder",
+                "formula_recipe": {
+                    "base_field": "$close",
+                    "lookback_short": 5,
+                    "lookback_long": 20,
+                    "transform_family": "mean_spread",
+                    "interaction_mode": "sub",
+                    "normalization": "rank",
+                    "normalization_window": 20
+                },
+                "risk_factors": [],
+                "market_context_date": "2026-03-23",
+                "applicable_regimes": ["bull_trend"],
+                "invalid_regimes": ["range_bound"]
+            }],
+            "generation_rationale": "test"
+        }"""
+        return response
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "mom_low_1",
+            "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+        },
+        {
+            "factor_id": "mom_low_2",
+            "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+        },
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+            asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert captured_messages
+    human_message = captured_messages[0][1]
+    assert "当前已知低价值 family" in human_message.content
+    assert "historical low-value count=2" in human_message.content
+
+
+def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_low_value",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期价格相对强弱持续占优，且已经过时序分位数压缩。",
+            "economic_intuition": "比值动量刻画长短窗口相对强弱。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "quantile",
+                "normalization_window": 60,
+                "quantile_qscore": 0.8
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "low-value-family"
+    }'''
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "mom_lv_1",
+            "formula": "Quantile(Mean($vwap, 10) / Mean($vwap, 30) - 1, 60, 0.8)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+        },
+        {
+            "factor_id": "mom_lv_2",
+            "formula": "Quantile(Mean($vwap, 10) / Mean($vwap, 30) - 1, 60, 0.8)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+        },
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response, response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "fast_feedback",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "historical low-value family" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|quantile"
 
 
 def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics():

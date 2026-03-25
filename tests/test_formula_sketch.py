@@ -152,6 +152,29 @@ def test_validate_formula_recipe_alignment_rejects_momentum_wording_for_volume_c
     assert reason == "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
 
 
+def test_validate_formula_recipe_alignment_rejects_generic_price_only_ratio_momentum_on_momentum_island() -> None:
+    recipe = FormulaRecipe(
+        base_field="$vwap",
+        lookback_short=10,
+        lookback_long=30,
+        transform_family="ratio_momentum",
+        normalization="rank",
+        normalization_window=20,
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="捕捉价格动量延续，趋势强的股票后续更可能继续上涨",
+        economic_intuition="短期趋势越强，后续延续概率越高",
+        island="momentum",
+    )
+
+    assert reason == (
+        "ratio_momentum on momentum island must describe a comparative relative-strength mechanism, "
+        "not generic momentum/trend continuation"
+    )
+
+
 def test_describe_factor_algebra_family_semantics_comes_from_shared_runtime_source() -> None:
     semantics = describe_factor_algebra_family_semantics("volume_confirmation")
 

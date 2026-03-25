@@ -19,3 +19,7 @@
 - 如果 hypothesis 想引用 `ROE / PB / float_mv / turnover_rate` 等字段，请在本子空间改用价量代理；不要把这些字段写进 `formula_recipe`
 
 {factor_algebra_family_semantics_block}
+
+## value-density steering（当前最小约束）
+- 在 `momentum` island 下，如果 `transform_family=ratio_momentum` 且只使用单一价格代理（如 `$close/$vwap`），不要写成泛化动量、趋势延续或“价格继续上涨/下跌”。
+- 这类 recipe 必须明确说明相对强弱、短强长弱、长短窗口比值比较，或其他可检验的 comparative mechanism。
