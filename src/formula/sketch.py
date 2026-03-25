@@ -13,6 +13,7 @@ _RELATIVE_VOLUME_TOKENS = ("相对变化", "相对成交量", "量能比", "volu
 _MEAN_SPREAD_TOKENS = ("均线差", "均值差", "价差", "均价差", "差值", "spread")
 _MOMENTUM_TOKENS = ("动量", "momentum", "趋势", "trend")
 _RATIO_COMPARATIVE_TOKENS = ("相对强弱", "比值", "relative strength", "短强长弱", "long-short", "短期强于长期")
+_VOLATILITY_TOKENS = ("波动", "波动率", "震荡", "volatility", "turbulence", "波幅")
 _PRICE_PROXY_FIELDS = {"$close", "$open", "$high", "$low", "$vwap"}
 
 ALLOWED_BASE_FIELDS = (
@@ -71,6 +72,8 @@ class FormulaRecipe:
             raise ValueError("volume_confirmation requires secondary_field")
         if self.transform_family == "volume_confirmation" and self.interaction_mode != "mul":
             raise ValueError("volume_confirmation requires interaction_mode='mul'")
+        if self.transform_family != "volume_confirmation" and self.interaction_mode != "none":
+            raise ValueError(f"{self.transform_family} requires interaction_mode='none'")
         if self.transform_family == "volume_confirmation" and self.base_field not in _PRICE_PROXY_FIELDS:
             raise ValueError("volume_confirmation requires a price base_field")
         if self.transform_family == "volume_confirmation" and self.secondary_field not in _VOLUME_PROXY_FIELDS:
@@ -163,6 +166,8 @@ def validate_formula_recipe_alignment(
     elif recipe.transform_family == "volatility_state":
         if any(token in text for token in _RETURN_TOKENS + _ACCELERATION_TOKENS + _MOMENTUM_TOKENS):
             return "volatility_state cannot claim momentum or return-delta effects"
+        if not any(token in text for token in _VOLATILITY_TOKENS):
+            return "volatility_state must explicitly describe a volatility-state mechanism"
     elif recipe.transform_family == "volume_confirmation":
         if not any(token in text for token in _VOLUME_TOKENS):
             return "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"

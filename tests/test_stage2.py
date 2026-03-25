@@ -2107,6 +2107,66 @@ def test_factor_algebra_fast_feedback_rejects_disallowed_volume_confirmation_fam
     assert sample["family_gene_key"] == "factor_algebra|volume_confirmation|$vwap|$volume|mul|rank"
 
 
+def test_factor_algebra_fast_feedback_rejects_volatility_state_without_volatility_wording():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_vol_bad",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期价格方向转弱，信号可能进入切换。",
+            "economic_intuition": "价格上行动能减弱时更容易进入下一阶段。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "volatility_state",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "fast-feedback-volatility"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "fast_feedback",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("alignment", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "alignment")
+    assert "volatility_state must explicitly describe a volatility-state mechanism" in sample["reason"]
+
+
 def test_hypothesis_gen_node_passes_factor_pool_and_returns_stage2_diagnostics():
     from src.agents.researcher import hypothesis_gen_node
 

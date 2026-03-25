@@ -67,6 +67,7 @@
   - 在 `momentum` island 下，如果只用单一价格代理（如 `$close/$vwap`），不要写成泛化动量或趋势延续；必须明确说明相对强弱、短强长弱或比值比较机制
 - `volatility_state`
   - 只能描述长短窗口波动状态变化
+  - hypothesis/economic_intuition 必须显式写出“波动/波动率/震荡/volatility”机制
   - 不要写成价格动量、收益率变化，或“用波动率标准化动量”
 - `volume_confirmation`
   - 必须明确描述成交量/流动性对价格均值差/价差信号的确认；当前 canonical form 是量价差值确认
@@ -84,4 +85,5 @@
 - **禁止**：`base_field/secondary_field` 使用白名单以外字段（例如 `$roe`, `$float_mv`, `$turnover_rate`）
 - **禁止**：`quantile_qscore` 不在 `{0.2, 0.5, 0.8}` 内（例如 `0.75`）
 - **禁止**：`volume_confirmation` 搭配非 `mul` 交互模式
+- **禁止**：`mean_spread / ratio_momentum / volatility_state` 使用非 `none` 的 `interaction_mode`
 - **禁止**：使用未在运行时可用列表中的字段

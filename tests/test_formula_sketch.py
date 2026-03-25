@@ -97,6 +97,17 @@ def test_reject_free_form_div_interaction_mode() -> None:
         )
 
 
+def test_formula_recipe_rejects_non_none_interaction_for_volatility_state() -> None:
+    with pytest.raises(ValueError, match="volatility_state requires interaction_mode='none'"):
+        FormulaRecipe(
+            base_field="$close",
+            lookback_short=5,
+            lookback_long=20,
+            transform_family="volatility_state",
+            interaction_mode="sub",
+        )
+
+
 def test_validate_formula_recipe_alignment_rejects_return_delta_for_mean_spread() -> None:
     recipe = FormulaRecipe(
         base_field="$close",
@@ -131,6 +142,23 @@ def test_validate_formula_recipe_alignment_rejects_missing_volume_mechanism_for_
     )
 
     assert reason == "volume_confirmation must explicitly mention a volume/liquidity confirmation mechanism"
+
+
+def test_validate_formula_recipe_alignment_rejects_missing_volatility_wording_for_volatility_state() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="volatility_state",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="短期价格方向相对长期更弱，信号可能进入切换。",
+        economic_intuition="价格上行动能减弱时更容易进入下一阶段。",
+    )
+
+    assert reason == "volatility_state must explicitly describe a volatility-state mechanism"
 
 
 def test_validate_formula_recipe_alignment_rejects_missing_price_spread_wording_for_volume_confirmation() -> None:

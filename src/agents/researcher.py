@@ -1297,6 +1297,11 @@ class AlphaResearcher:
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)
+            if "volatility_state must explicitly describe a volatility-state mechanism" in reason_lower:
+                hint = "- volatility_state 的 hypothesis/economic_intuition 必须直接写出“波动/波动率/震荡/volatility”机制，不要只写价格变化方向。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
             if "hypothesis mentions normalization but recipe.normalization='none'" in reason_lower:
                 hint = "- 如果 hypothesis 说标准化/归一化，就必须在 recipe 中显式使用 rank 或 quantile normalization。"
                 if hint not in seen_hints:
