@@ -693,6 +693,60 @@ class TestNoveltyFilterGeneAware:
         assert passed is True
         assert reason == "通过新颖性检查"
 
+    def test_factor_algebra_cross_family_history_skips_generic_token_similarity_rejection(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        note = _make_note(
+            formula="Rank(Mean($vwap, 5) - Mean($vwap, 20), 20)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.FACTOR_ALGEBRA,
+                "mutation_record": {
+                    "family_gene_key": "factor_algebra|mean_spread|$vwap|null|none|rank",
+                    "variant_gene_key": "5|20|20|null",
+                },
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "mom_alg_001",
+                "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+                "family_gene_key": "factor_algebra|ratio_momentum|$close|null|none|rank",
+                "variant_gene_key": "5|20|20|null",
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is True
+        assert reason == "通过新颖性检查"
+
+    def test_factor_algebra_skips_token_jaccard_for_cross_family_history(self):
+        from src.agents.prefilter import NoveltyFilter
+
+        self.filter = NoveltyFilter(pool=self.pool, threshold=0.1)
+        note = _make_note(
+            formula="Rank(Mean($vwap, 5) - Mean($vwap, 20), 20)",
+            island="momentum",
+        ).model_copy(
+            update={
+                "exploration_subspace": ExplorationSubspace.FACTOR_ALGEBRA,
+            }
+        )
+        self.pool.get_island_factors.return_value = [
+            {
+                "factor_id": "existing_ratio_family",
+                "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+                "subspace_origin": ExplorationSubspace.FACTOR_ALGEBRA.value,
+            }
+        ]
+
+        passed, reason = self.filter.check(note)
+
+        assert passed is True
+        assert reason == "通过新颖性检查"
+
 
 # ─────────────────────────────────────────────
 # 5. End-to-end: verdict → constraint → prefilter

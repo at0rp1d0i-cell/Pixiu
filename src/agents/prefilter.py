@@ -249,6 +249,7 @@ class NoveltyFilter:
 
         # 从 FactorPool 获取同 Island 的历史因子
         existing = self.pool.get_island_factors(island=note.island, limit=50)
+        note_family_key: str | None = None
 
         if note.exploration_subspace == ExplorationSubspace.FACTOR_ALGEBRA:
             note_family_key, note_variant_key = self._resolve_factor_gene_keys_from_note(note)
@@ -279,6 +280,10 @@ class NoveltyFilter:
             existing_formula = existing_factor.get("formula", "")
             if not existing_formula:
                 continue
+            if note_family_key is not None:
+                existing_family_key, _existing_variant_key = self._resolve_factor_gene_keys_from_factor(existing_factor)
+                if isinstance(existing_family_key, str) and existing_family_key != note_family_key:
+                    continue
             tokens_existing = self._tokenize(existing_formula)
             similarity = self._jaccard(tokens_new, tokens_existing)
             if similarity > self.threshold:

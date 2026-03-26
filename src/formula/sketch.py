@@ -144,10 +144,9 @@ def validate_formula_recipe_alignment(
     if any(token in text for token in _NORMALIZATION_TOKENS) and recipe.normalization == "none":
         return "hypothesis mentions normalization but recipe.normalization='none'"
 
-    if any(token in text for token in _VOLUME_TOKENS) and not uses_volume_proxy:
-        return "hypothesis mentions volume/liquidity but recipe has no volume proxy"
-
     if recipe.transform_family == "mean_spread":
+        if any(token in text for token in _VOLUME_TOKENS) and not uses_volume_proxy:
+            return "mean_spread cannot claim volume/liquidity confirmation without a volume proxy"
         if any(token in text for token in _RETURN_TOKENS + _ACCELERATION_TOKENS):
             return "mean_spread cannot claim return delta or acceleration"
     elif recipe.transform_family == "ratio_momentum":
@@ -177,6 +176,8 @@ def validate_formula_recipe_alignment(
             return "volume_confirmation cannot claim momentum, trend continuation, or return-delta effects"
         if not any(token in text for token in _MEAN_SPREAD_TOKENS):
             return "volume_confirmation must describe a price-spread signal confirmed by volume/liquidity spread"
+    elif any(token in text for token in _VOLUME_TOKENS) and not uses_volume_proxy:
+        return "hypothesis mentions volume/liquidity but recipe has no volume proxy"
 
     return None
 

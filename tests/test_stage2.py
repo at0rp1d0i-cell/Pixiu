@@ -917,6 +917,87 @@ def test_factor_algebra_alignment_mismatch_triggers_bounded_retry():
     assert "收益率差、相对收益或动量加速度" in captured_user_messages[1]
 
 
+def test_factor_algebra_mean_spread_volume_wording_triggers_bounded_retry():
+    from src.agents.researcher import AlphaResearcher
+
+    captured_user_messages = []
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "bad_mean_spread_volume",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期价格均值差在成交量配合下更可靠，量价确认后信号更稳。",
+            "economic_intuition": "流动性放大时价格扩散更容易兑现。",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "bad mean-spread volume wording"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "good_mean_spread_volume",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期均价高于长期均价，说明均价差持续偏强。",
+            "economic_intuition": "均价差可以刻画短强长弱的价差状态。",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "normalization": "none"
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "good mean-spread wording"
+    }'''
+
+    async def capture_ainvoke(messages, **kwargs):
+        captured_user_messages.append(messages[1].content)
+        if len(captured_user_messages) == 1:
+            return first
+        return second
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "good_mean_spread_volume"
+    assert mock_chat.ainvoke.await_count == 2
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 1
+    assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("alignment", 0) >= 1
+    assert "Factor-algebra alignment 无效" in captured_user_messages[1]
+    assert "mean_spread 只能描述价格均值差/均线差；不要写量价确认" in captured_user_messages[1]
+
+
 def test_factor_algebra_generic_price_only_ratio_momentum_triggers_bounded_retry():
     from src.agents.researcher import AlphaResearcher
 
@@ -1661,6 +1742,69 @@ def test_alpha_researcher_local_novelty_uses_factor_gene_duplicate_reason_for_fa
     assert sample["filter"] == "novelty"
     assert "相似度过高" in sample["reason"]
     assert "factor_gene 完全重复" in sample["reason"]
+
+
+def test_alpha_researcher_local_novelty_ignores_cross_family_factor_algebra_history():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "mean_spread_candidate",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期均价高于长期均价，说明价差状态走强。",
+            "economic_intuition": "均价差刻画短强长弱的价格扩散。",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "mean_spread",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "cross-family-novelty"
+    }'''
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "mom_alg_001",
+            "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+            "subspace_origin": "factor_algebra",
+            "family_gene_key": "factor_algebra|ratio_momentum|$close|null|none|rank",
+            "variant_gene_key": "5|20|20|null",
+        }
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(return_value=response)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}, clear=False):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 1
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("novelty", 0) == 0
+    assert batch.notes[0].note_id == "mean_spread_candidate"
 
 
 def test_factor_algebra_same_batch_family_budget_rejects_extra_variants_as_anti_collapse():

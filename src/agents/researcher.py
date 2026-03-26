@@ -274,7 +274,8 @@ def _build_fast_feedback_factor_algebra_focus_section() -> str:
         "## fast_feedback 限制\n"
         f"- 当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family：{allowed}\n"
         "- 本 profile 暂停 volume_confirmation / volatility_state / ratio_momentum；不要提交这些 recipe\n"
-        "- 当前只验证 mean_spread 的表达、对齐和回测价值"
+        "- 当前只验证 mean_spread 的表达、对齐和回测价值\n"
+        "- mean_spread 只能描述价格均值差/均线差，不要写量价确认、成交量放大或流动性配合"
     )
 
 
@@ -1286,6 +1287,11 @@ class AlphaResearcher:
                     seen_hints.add(hint)
             if "mean_spread cannot claim return delta or acceleration" in reason_lower:
                 hint = "- mean_spread 只能描述均价/均线差，不要把它写成收益率差、相对收益或动量加速度。"
+                if hint not in seen_hints:
+                    hints.append(hint)
+                    seen_hints.add(hint)
+            if "mean_spread cannot claim volume/liquidity confirmation without a volume proxy" in reason_lower:
+                hint = "- mean_spread 只能描述价格均值差/均线差；不要写量价确认、成交量放大或流动性配合。"
                 if hint not in seen_hints:
                     hints.append(hint)
                     seen_hints.add(hint)

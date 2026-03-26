@@ -125,6 +125,23 @@ def test_validate_formula_recipe_alignment_rejects_return_delta_for_mean_spread(
     assert reason == "mean_spread cannot claim return delta or acceleration"
 
 
+def test_validate_formula_recipe_alignment_rejects_volume_wording_for_mean_spread() -> None:
+    recipe = FormulaRecipe(
+        base_field="$close",
+        lookback_short=5,
+        lookback_long=20,
+        transform_family="mean_spread",
+    )
+
+    reason = validate_formula_recipe_alignment(
+        recipe,
+        hypothesis="短期价格均值差在成交量配合下更可靠，量价确认后信号更稳",
+        economic_intuition="流动性放大时价格扩散更容易兑现",
+    )
+
+    assert reason == "mean_spread cannot claim volume/liquidity confirmation without a volume proxy"
+
+
 def test_validate_formula_recipe_alignment_rejects_missing_volume_mechanism_for_volume_confirmation() -> None:
     recipe = FormulaRecipe(
         base_field="$close",
