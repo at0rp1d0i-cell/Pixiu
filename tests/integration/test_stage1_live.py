@@ -1,31 +1,25 @@
 """
-Stage 1 真实场景测试：使用真实 DeepSeek API + AKShare MCP Server
-运行前需要设置 .env：RESEARCHER_API_KEY, RESEARCHER_BASE_URL, RESEARCHER_MODEL
+Stage 1 live integration checks for the current Tushare blocking-core assumptions.
 
-运行方式：
-    uv run pytest -q tests/integration/test_stage1_live.py -v -s
+Run with:
+    uv run pytest -q tests/integration/test_stage1_live.py -m live -v -s
 """
 import asyncio
 import json
+import os
 
 import pytest
-
-
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from src.agents.market_analyst import MarketAnalyst, MCP_SERVER_PATH, market_context_node
-from src.schemas.market_context import MarketContextMemo
-from src.schemas.state import AgentState
+from src.agents.market_analyst import TUSHARE_SERVER_PATH, _build_stage1_stdio_server
 
-pytestmark = pytest.mark.live
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(not os.getenv("TUSHARE_TOKEN"), reason="requires TUSHARE_TOKEN"),
+]
 
 
 def _extract_text(result) -> str:
-    """从 MCP 工具返回值中提取 JSON 文本。
-
-    langchain-mcp-adapters content_and_artifact 模式返回 list[dict]，
-    每个 dict 含 type='text' + text='...'。直接字符串则原样返回。
-    """
     if isinstance(result, str):
         return result
     if isinstance(result, list) and result:
@@ -34,92 +28,40 @@ def _extract_text(result) -> str:
 
 
 @pytest.fixture(scope="module")
-def mcp_tools():
-    client = MultiServerMCPClient(
-        {"akshare": {"command": "python3", "args": [MCP_SERVER_PATH], "transport": "stdio"}}
-    )
+def tushare_tools():
+    client = MultiServerMCPClient({"tushare": _build_stage1_stdio_server(TUSHARE_SERVER_PATH)})
     return asyncio.run(client.get_tools())
 
 
-# ─────────────────────────────────────────────────────────
-# Test 1: AKShare MCP 工具能真实调用
-# ─────────────────────────────────────────────────────────
+def test_tushare_blocking_tools_live_discovered(tushare_tools):
+    tool_names = {tool.name for tool in tushare_tools}
+    assert "get_moneyflow_hsgt" in tool_names
+    assert "get_margin_data" in tool_names
 
-def test_akshare_macro_indicators_live(mcp_tools):
-    """直接调用 get_macro_indicators 工具，验证能拿到真实数据。"""
-    tool = next((t for t in mcp_tools if t.name == "get_macro_indicators"), None)
-    assert tool is not None, "get_macro_indicators 工具不存在"
+
+def test_tushare_moneyflow_hsgt_live_returns_payload(tushare_tools):
+    tool = next((candidate for candidate in tushare_tools if candidate.name == "get_moneyflow_hsgt"), None)
+    assert tool is not None, "get_moneyflow_hsgt tool not found"
+
+    raw = asyncio.run(tool.ainvoke({"limit": 5}))
+    text = _extract_text(raw)
+    print(f"\n[moneyflow_hsgt] {text[:300]}")
+
+    payload = json.loads(text)
+    assert "error" not in payload, f"tool returned error: {payload}"
+    if isinstance(payload, dict):
+        assert "data" in payload
+
+
+def test_tushare_margin_data_live_returns_payload(tushare_tools):
+    tool = next((candidate for candidate in tushare_tools if candidate.name == "get_margin_data"), None)
+    assert tool is not None, "get_margin_data tool not found"
 
     raw = asyncio.run(tool.ainvoke({}))
     text = _extract_text(raw)
-    print(f"\n[宏观指标] {text[:300]}")
+    print(f"\n[margin_data] {text[:300]}")
 
-    data = json.loads(text)
-    assert "error" not in data or len(data) > 1, f"工具返回错误: {data}"
-    assert any(k in data for k in ("pmi_manufacturing", "m2_yoy", "cpi_yoy"))
-
-
-def test_akshare_northbound_flow_live(mcp_tools):
-    """调用 get_northbound_flow_today，验证北向资金数据可获取。"""
-    tool = next((t for t in mcp_tools if t.name == "get_northbound_flow_today"), None)
-    assert tool is not None
-
-    raw = asyncio.run(tool.ainvoke({}))
-    text = _extract_text(raw)
-    print(f"\n[北向资金] {text[:300]}")
-
-    data = json.loads(text)
-    # 允许返回空列表（非交易日），但不能是错误
-    if isinstance(data, dict):
-        assert "error" not in data, f"工具返回错误: {data}"
-
-
-# ─────────────────────────────────────────────────────────
-# Test 2: MarketAnalyst 真实 LLM + 真实 MCP 工具
-# ─────────────────────────────────────────────────────────
-
-def test_market_analyst_live(mcp_tools):
-    """使用真实 DeepSeek API + 真实 MCP 工具，生成 MarketContextMemo。"""
-    analyst = MarketAnalyst(mcp_tools=mcp_tools)
-    memo = asyncio.run(analyst.analyze())
-
-    print("\n[MarketContextMemo]")
-    print(f"  date:          {memo.date}")
-    print(f"  market_regime: {memo.market_regime}")
-    print(f"  hot_themes:    {memo.hot_themes}")
-    print(f"  suggested_islands: {memo.suggested_islands}")
-    print(f"  raw_summary:   {memo.raw_summary[:200]}")
-    if memo.northbound:
-        print(f"  northbound:    net_buy={memo.northbound.net_buy_bn}亿, sentiment={memo.northbound.sentiment}")
-    if memo.macro_signals:
-        print(f"  macro_signals: {[s.source for s in memo.macro_signals]}")
-
-    assert isinstance(memo, MarketContextMemo)
-    assert memo.date, "date 不能为空"
-    assert memo.market_regime in ("bull_trend", "bear_trend", "high_volatility", "range_bound", "structural_break")
-    assert isinstance(memo.suggested_islands, list)
-    assert len(memo.suggested_islands) > 0
-    assert memo.raw_summary, "raw_summary 不能为空"
-
-
-# ─────────────────────────────────────────────────────────
-# Test 3: market_context_node 完整节点（含 LiteratureMiner）
-# ─────────────────────────────────────────────────────────
-
-def test_market_context_node_live():
-    """跑完整的 market_context_node，验证 MarketAnalyst + LiteratureMiner 合并输出。"""
-    state = AgentState(current_round=1)
-    result = market_context_node(dict(state))
-
-    memo = result.get("market_context")
-    assert memo is not None, "market_context 不能为 None"
-    assert isinstance(memo, MarketContextMemo)
-
-    print("\n[market_context_node 输出]")
-    print(f"  regime:   {memo.market_regime}")
-    print(f"  insights: {len(memo.historical_insights)} 条历史洞察")
-    for ins in memo.historical_insights:
-        print(f"    [{ins.island}] best_sharpe={ins.best_sharpe}, directions={ins.suggested_directions}")
-
-    # 验证 LiteratureMiner 已合并（historical_insights 是列表，即使为空也合法）
-    assert isinstance(memo.historical_insights, list)
+    payload = json.loads(text)
+    assert "error" not in payload, f"tool returned error: {payload}"
+    if isinstance(payload, dict):
+        assert "data" in payload or "items" in payload

@@ -106,6 +106,14 @@ _DEFAULT_STAGE1_CONTEXT_MODE = "live"
 _STAGE1_CONTEXT_MODES = {"live", "cached", "frozen"}
 
 
+class Stage1BlockingToolsUnavailable(RuntimeError):
+    """Raised when Stage 1 cannot discover the expected blocking tools."""
+
+    def __init__(self, message: str, *, diagnostics: dict | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
+
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
 
@@ -195,6 +203,11 @@ def _build_stage1_stdio_server(server_path: str) -> dict[str, object]:
     }
 
 
+def _available_stage1_tool_names(tools: list) -> list[str]:
+    names = [getattr(tool, "name", "") for tool in tools]
+    return sorted(name for name in names if name)
+
+
 def _select_stage1_tools(tools: list) -> dict[str, list]:
     """Split Stage 1 tools into blocking and enrichment allowlists."""
     selected = {"blocking": [], "enrichment": []}
@@ -226,8 +239,12 @@ def _empty_stage1_reliability() -> dict:
     return {
         "blocking_required": False,
         "blocking_tools_expected": [],
+        "blocking_tools_discovered": [],
         "blocking_tools_used": [],
         "enrichment_tools_used": [],
+        "configured_servers": [],
+        "available_tools": [],
+        "tushare_enabled": False,
         "context_mode": _DEFAULT_STAGE1_CONTEXT_MODE,
         "context_source": "live_tools",
         "cache_written": False,
@@ -634,25 +651,50 @@ async def _run_market_context_once(state: dict) -> dict:
     """Execute one market-context fetch attempt without outer timeout handling."""
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
+    tushare_enabled = bool(os.getenv("TUSHARE_TOKEN"))
     servers: dict = {
         "akshare": _build_stage1_stdio_server(MCP_SERVER_PATH),
     }
     if _stage1_rss_enabled():
         servers["rss"] = _build_stage1_stdio_server(RSS_SERVER_PATH)
-    if os.getenv("TUSHARE_TOKEN"):
+    if tushare_enabled:
         servers["tushare"] = _build_stage1_stdio_server(TUSHARE_SERVER_PATH)
     mcp_client = MultiServerMCPClient(servers)
-    selected_tools = _select_stage1_tools(await mcp_client.get_tools())
+    all_tools = await mcp_client.get_tools()
+    selected_tools = _select_stage1_tools(all_tools)
     blocking_tools = selected_tools["blocking"]
     enrichment_tools = selected_tools["enrichment"]
     if not blocking_tools:
-        raise RuntimeError("No Stage 1 blocking tools available")
+        diagnostics = {
+            "blocking_required": True,
+            "blocking_tools_expected": sorted(_STAGE1_BLOCKING_TOOL_NAMES),
+            "blocking_tools_discovered": [],
+            "configured_servers": sorted(servers.keys()),
+            "available_tools": _available_stage1_tool_names(all_tools),
+            "tushare_enabled": tushare_enabled,
+        }
+        if not tushare_enabled:
+            raise Stage1BlockingToolsUnavailable(
+                "No Stage 1 blocking tools available: TUSHARE_TOKEN missing; tushare server not registered",
+                diagnostics=diagnostics,
+            )
+        raise Stage1BlockingToolsUnavailable(
+            "No Stage 1 blocking tools available: tushare server registered but blocking tools were not discovered",
+            diagnostics=diagnostics,
+        )
     analyst = MarketAnalyst(mcp_tools=[*blocking_tools, *enrichment_tools])
     memo = await analyst.analyze()
     reliability = analyst.get_reliability_diagnostics()
+    reliability["blocking_required"] = True
     reliability["blocking_tools_expected"] = sorted(
         [getattr(tool, "name", "") for tool in blocking_tools if getattr(tool, "name", "")]
     )
+    reliability["blocking_tools_discovered"] = sorted(
+        [getattr(tool, "name", "") for tool in blocking_tools if getattr(tool, "name", "")]
+    )
+    reliability["configured_servers"] = sorted(servers.keys())
+    reliability["available_tools"] = _available_stage1_tool_names(all_tools)
+    reliability["tushare_enabled"] = tushare_enabled
     logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
     return {"market_context": memo, "stage1_reliability": reliability}
 
@@ -731,6 +773,20 @@ async def _market_context_async(state: dict) -> dict:
             ),
             "stage1_reliability": {
                 **_empty_stage1_reliability(),
+                "context_mode": context_mode,
+                "context_source": "live_tools",
+                "degraded": True,
+                "degrade_reason": reason,
+            },
+        }
+    except Stage1BlockingToolsUnavailable as e:
+        logger.warning("[Stage 1] Blocking tool discovery failed: %s", e)
+        reason = str(e)
+        return {
+            "market_context": _empty_memo(reason, active_islands=active_islands),
+            "stage1_reliability": {
+                **_empty_stage1_reliability(),
+                **dict(e.diagnostics),
                 "context_mode": context_mode,
                 "context_source": "live_tools",
                 "degraded": True,

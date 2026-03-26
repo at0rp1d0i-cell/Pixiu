@@ -7,12 +7,14 @@ Sources:
 """
 import asyncio
 import math
+import os
 import sys
 from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
 from src.schemas.market_context import MarketContextMemo, HistoricalInsight, MarketRegime
 from src.agents.literature_miner import LiteratureMiner
@@ -322,14 +324,14 @@ def test_market_context_node_converts_blocking_tool_error_to_degraded_memo():
 
 
 def test_run_market_context_once_uses_akshare_only_by_default():
-    from src.agents.market_analyst import _run_market_context_once
+    from src.agents.market_analyst import Stage1BlockingToolsUnavailable, _run_market_context_once
 
     mock_client = MagicMock()
     mock_client.get_tools = AsyncMock(return_value=[])
 
     with patch.dict("os.environ", {}, clear=True):
         with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
-            with pytest.raises(RuntimeError, match="No Stage 1 blocking tools available"):
+            with pytest.raises(Stage1BlockingToolsUnavailable) as excinfo:
                 asyncio.run(_run_market_context_once({}))
 
     servers = mock_ctor.call_args.args[0]
@@ -338,6 +340,12 @@ def test_run_market_context_once_uses_akshare_only_by_default():
     assert "tushare" not in servers
     assert servers["akshare"]["command"] == sys.executable
     assert isinstance(servers["akshare"]["env"], dict)
+    assert "TUSHARE_TOKEN missing" in str(excinfo.value)
+    assert excinfo.value.diagnostics["blocking_tools_expected"] == [
+        "get_margin_data",
+        "get_moneyflow_hsgt",
+    ]
+    assert excinfo.value.diagnostics["tushare_enabled"] is False
 
 
 def test_run_market_context_once_includes_rss_when_opted_in():
@@ -394,7 +402,30 @@ def test_run_market_context_once_includes_tushare_when_token_present():
     assert servers["tushare"]["env"].get("TUSHARE_TOKEN") == "test-token"
     assert isinstance(result["market_context"], MarketContextMemo)
     assert result["stage1_reliability"]["blocking_tools_expected"] == ["get_moneyflow_hsgt"]
+    assert result["stage1_reliability"]["blocking_tools_discovered"] == ["get_moneyflow_hsgt"]
+    assert result["stage1_reliability"]["configured_servers"] == ["akshare", "tushare"]
+    assert result["stage1_reliability"]["available_tools"] == ["get_moneyflow_hsgt"]
+    assert result["stage1_reliability"]["tushare_enabled"] is True
     assert result["stage1_reliability"]["tool_calls_total"] == 1
+
+
+def test_run_market_context_once_reports_missing_blocking_tools_even_with_tushare_enabled():
+    from src.agents.market_analyst import Stage1BlockingToolsUnavailable, _run_market_context_once
+
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[])
+
+    with patch.dict("os.environ", {"TUSHARE_TOKEN": "test-token"}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client) as mock_ctor:
+            with pytest.raises(Stage1BlockingToolsUnavailable) as excinfo:
+                asyncio.run(_run_market_context_once({}))
+
+    servers = mock_ctor.call_args.args[0]
+    assert "tushare" in servers
+    assert "registered but blocking tools were not discovered" in str(excinfo.value)
+    assert excinfo.value.diagnostics["configured_servers"] == ["akshare", "tushare"]
+    assert excinfo.value.diagnostics["available_tools"] == []
+    assert excinfo.value.diagnostics["tushare_enabled"] is True
 
 
 def test_run_market_context_once_can_disable_enrichment_tools():
@@ -646,6 +677,80 @@ def test_select_stage1_tools_uses_allowlists():
         "get_news",
         "get_market_hot_topics",
     ]
+
+
+def test_resolve_run_env_truth_applies_layered_env_defaults(tmp_path: Path):
+    from src.core.orchestrator._entrypoints import _resolve_run_env_truth
+
+    repo_env_path = tmp_path / ".env"
+    repo_env_path.write_text("TUSHARE_TOKEN=repo-token\n", encoding="utf-8")
+    target_env: dict[str, str] = {}
+
+    resolved = _resolve_run_env_truth(
+        process_env={},
+        target_env=target_env,
+        runtime_env_path=tmp_path / "runtime.env",
+        repo_env_path=repo_env_path,
+    )
+
+    assert target_env["TUSHARE_TOKEN"] == "repo-token"
+    assert resolved.sources["TUSHARE_TOKEN"] == "repo_env"
+    assert target_env["QLIB_DATA_DIR"].endswith("data/qlib_bin")
+    assert resolved.sources["QLIB_DATA_DIR"] == "default"
+
+
+def test_pixiu_run_single_cli_resolves_env_truth_before_stage1_entry(monkeypatch, tmp_path: Path):
+    from src.cli.main import app
+    from src.core.env import ResolvedEnv
+
+    captured: dict[str, str] = {}
+
+    def fake_resolve_and_apply_layered_env(**kwargs):
+        target = kwargs.get("target_env") or os.environ
+        target["TUSHARE_TOKEN"] = "repo-token"
+        target["QLIB_DATA_DIR"] = str(tmp_path / "qlib_bin")
+        return ResolvedEnv(
+            values={
+                "TUSHARE_TOKEN": "repo-token",
+                "QLIB_DATA_DIR": str(tmp_path / "qlib_bin"),
+            },
+            sources={
+                "TUSHARE_TOKEN": "repo_env",
+                "QLIB_DATA_DIR": "default",
+            },
+            runtime_env_path=tmp_path / "runtime.env",
+            repo_env_path=tmp_path / ".env",
+        )
+
+    class FakeGraph:
+        async def ainvoke(self, _state, config=None):
+            captured["TUSHARE_TOKEN"] = os.getenv("TUSHARE_TOKEN", "")
+            captured["QLIB_DATA_DIR"] = os.getenv("QLIB_DATA_DIR", "")
+            captured["thread_id"] = str((config or {}).get("configurable", {}).get("thread_id", ""))
+            return {"current_round": 0}
+
+    monkeypatch.setattr(
+        "src.core.orchestrator._entrypoints.resolve_and_apply_layered_env",
+        fake_resolve_and_apply_layered_env,
+    )
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._runtime.reset_scheduler", lambda: None)
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._runtime.reset_current_run_id", lambda: None)
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._runtime.get_graph", lambda: FakeGraph())
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._runtime.set_graph_config", lambda _cfg: None)
+    monkeypatch.setattr(
+        "src.core.orchestrator._entrypoints._runtime.get_graph_config",
+        lambda: {"configurable": {"thread_id": "pixiu_single_momentum_test"}},
+    )
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._runtime.set_current_run_id", lambda _run_id: None)
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._control_plane._ensure_run_record", lambda mode="single": f"run-{mode}")
+    monkeypatch.setattr("src.core.orchestrator._entrypoints._control_plane._update_run_record", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(app, ["run", "--mode", "single", "--island", "momentum"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["TUSHARE_TOKEN"] == "repo-token"
+    assert captured["QLIB_DATA_DIR"] == str(tmp_path / "qlib_bin")
+    assert captured["thread_id"] == "pixiu_single_momentum_test"
 
 
 # ─────────────────────────────────────────────────────────
