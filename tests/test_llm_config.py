@@ -1,7 +1,9 @@
 """Unit tests for shared OpenAI-compatible LLM config helpers."""
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 pytestmark = pytest.mark.unit
 
@@ -46,8 +48,8 @@ def test_get_researcher_llm_kwargs_applies_profile_defaults():
         with patch.dict(
             'os.environ',
             {
-                'DEEPSEEK_API_BASE': 'https://api.deepseek.com',
-                'DEEPSEEK_API_KEY': 'test-key',
+                'OPENAI_API_BASE': 'https://api.example-openai.com/v1',
+                'OPENAI_API_KEY': 'test-key',
             },
             clear=True,
         ):
@@ -60,9 +62,9 @@ def test_get_researcher_llm_kwargs_applies_profile_defaults():
     assert kwargs['max_retries'] == 1
     assert kwargs["metadata"]["llm_profile"] == "alignment_checker"
     assert kwargs["metadata"]["agent_role"] == "alignment_checker"
-    assert kwargs["metadata"]["provider"] == "deepseek"
-    assert kwargs["model"] == "deepseek-chat"
-    assert kwargs["base_url"] == "https://api.deepseek.com"
+    assert kwargs["metadata"]["provider"] == "openai"
+    assert kwargs["model"] == "gpt-5.4"
+    assert kwargs["base_url"] == "https://api.example-openai.com/v1"
     assert kwargs["api_key"] == "test-key"
 
 
@@ -202,7 +204,7 @@ def test_get_researcher_llm_kwargs_loads_dotenv_first():
 def test_build_researcher_llm_passes_through_shared_kwargs():
     from src.llm.openai_compat import build_researcher_llm
 
-    with patch('src.llm.openai_compat.ChatOpenAI') as MockLLM:
+    with patch('src.llm.openai_compat.LiteLLMChatModel') as MockLLM:
         instance = MagicMock()
         MockLLM.return_value = instance
 
@@ -223,6 +225,78 @@ def test_build_researcher_llm_passes_through_shared_kwargs():
     assert kwargs['base_url'] == 'https://api.deepseek.com'
     assert kwargs['api_key'] == 'test-key'
     assert kwargs['temperature'] == 0.5
+    assert result is instance
+
+
+def test_build_researcher_llm_anthropic_profile_uses_litellm_model():
+    from src.llm.openai_compat import build_researcher_llm
+
+    with patch('src.llm.openai_compat.LiteLLMChatModel') as MockLLM:
+        instance = MagicMock()
+        MockLLM.return_value = instance
+
+        with patch('src.llm.openai_compat.load_dotenv_if_available'):
+            with patch.dict(
+                'os.environ',
+                {
+                    'PIXIU_LLM_DEFAULT_PROVIDER': 'anthropic',
+                    'ANTHROPIC_API_BASE': 'https://api.anthropic.example',
+                    'ANTHROPIC_API_KEY': 'anthropic-key',
+                },
+                clear=True,
+            ):
+                result = build_researcher_llm(profile='exploration_agent')
+
+    _, kwargs = MockLLM.call_args
+    assert kwargs['model'] == 'anthropic/claude-3.5-sonnet'
+    assert kwargs['base_url'] == 'https://api.anthropic.example'
+    assert kwargs['api_key'] == 'anthropic-key'
+    assert kwargs["metadata"]["provider"] == "anthropic"
+    assert result is instance
+
+
+def test_build_researcher_llm_anthropic_profile_uses_default_base_url_when_env_missing():
+    from src.llm.openai_compat import build_researcher_llm
+    from src.llm.runtime_settings import (
+        LLMRuntimeSettings,
+        ProviderDefaults,
+        RoleSelection,
+        resolve_role_provider_connection as real_resolve_role_provider_connection,
+    )
+
+    settings = LLMRuntimeSettings(
+        default_provider="openai",
+        provider_defaults={
+            "openai": ProviderDefaults(model="gpt-5.4"),
+            "anthropic": ProviderDefaults(model="anthropic/claude-3.5-sonnet"),
+        },
+        roles={
+            "exploration_agent": RoleSelection(provider="anthropic"),
+        },
+    )
+
+    with patch('src.llm.openai_compat.LiteLLMChatModel') as MockLLM:
+        instance = MagicMock()
+        MockLLM.return_value = instance
+
+        with patch('src.llm.openai_compat.load_dotenv_if_available'):
+            with patch(
+                'src.llm.openai_compat.resolve_role_provider_connection',
+                side_effect=lambda role: real_resolve_role_provider_connection(role=role, settings=settings),
+            ):
+                with patch.dict(
+                    'os.environ',
+                    {
+                        'ANTHROPIC_API_KEY': 'anthropic-key',
+                    },
+                    clear=True,
+                ):
+                    result = build_researcher_llm(profile='exploration_agent')
+
+    _, kwargs = MockLLM.call_args
+    assert kwargs['model'] == 'anthropic/claude-3.5-sonnet'
+    assert kwargs['base_url'] == 'https://api.anthropic.com'
+    assert kwargs['api_key'] == 'anthropic-key'
     assert result is instance
 
 
@@ -269,3 +343,173 @@ def test_get_researcher_llm_kwargs_preserves_existing_callbacks():
     assert sum(
         1 for cb in kwargs["callbacks"] if isinstance(cb, UsageLedgerCallback)
     ) == 1
+
+
+def test_litellm_chat_model_ainvoke_routes_anthropic_provider_through_litellm():
+    from src.llm.litellm_chat import LiteLLMChatModel
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "model": kwargs["model"],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "ok",
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }
+
+    model = LiteLLMChatModel(
+        model="anthropic/claude-3.5-sonnet",
+        base_url="https://api.anthropic.example",
+        api_key="anthropic-key",
+        temperature=0.0,
+    )
+
+    with patch("src.llm.litellm_chat.litellm.acompletion", side_effect=fake_acompletion):
+        message = asyncio.run(model.ainvoke([HumanMessage(content="ping")]))
+
+    assert message.content == "ok"
+    assert captured["model"] == "anthropic/claude-3.5-sonnet"
+    assert captured["base_url"] == "https://api.anthropic.example"
+    assert captured["api_key"] == "anthropic-key"
+    assert captured["messages"][0]["role"] == "user"
+
+
+def test_litellm_chat_model_bind_tools_passes_openai_tool_schema():
+    from src.llm.litellm_chat import LiteLLMChatModel
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "model": kwargs["model"],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_margin_data",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 3,
+                "total_tokens": 8,
+            },
+        }
+
+    model = LiteLLMChatModel(
+        model="gpt-5.4",
+        base_url="https://api.example-openai.com/v1",
+        api_key="openai-key",
+        temperature=0.0,
+    )
+    tool_schema = {
+        "name": "get_margin_data",
+        "description": "Fetch margin data",
+        "parameters": {"type": "object", "properties": {}},
+    }
+
+    bound = model.bind_tools([tool_schema], tool_choice="get_margin_data")
+
+    with patch("src.llm.litellm_chat.litellm.acompletion", side_effect=fake_acompletion):
+        message = asyncio.run(bound.ainvoke([HumanMessage(content="call tool")]))
+
+    assert captured["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "get_margin_data"},
+    }
+    assert captured["tools"][0]["function"]["name"] == "get_margin_data"
+    assert message.tool_calls[0]["name"] == "get_margin_data"
+
+
+def test_build_researcher_llm_market_analyst_bind_tools_routes_through_litellm():
+    from src.llm.openai_compat import build_researcher_llm
+
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "model": kwargs["model"],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_margin_data",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 7,
+                "completion_tokens": 4,
+                "total_tokens": 11,
+            },
+        }
+
+    with patch('src.llm.openai_compat.load_dotenv_if_available'):
+        with patch.dict(
+            'os.environ',
+            {
+                'OPENAI_API_BASE': 'https://api.example-openai.com/v1',
+                'OPENAI_API_KEY': 'openai-key',
+            },
+            clear=True,
+        ):
+            model = build_researcher_llm(profile='market_analyst')
+
+    bound = model.bind_tools(
+        [
+            {
+                "name": "get_margin_data",
+                "description": "Fetch margin data",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ],
+        tool_choice="get_margin_data",
+    )
+
+    with patch("src.llm.litellm_chat.litellm.acompletion", side_effect=fake_acompletion):
+        message = asyncio.run(bound.ainvoke([HumanMessage(content="call tool")]))
+
+    assert captured["model"] == "gpt-5.4"
+    assert captured["base_url"] == "https://api.example-openai.com/v1"
+    assert captured["api_key"] == "openai-key"
+    assert captured["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "get_margin_data"},
+    }
+    assert captured["tools"][0]["function"]["name"] == "get_margin_data"
+    assert message.tool_calls[0]["name"] == "get_margin_data"

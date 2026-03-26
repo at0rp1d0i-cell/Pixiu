@@ -1,13 +1,14 @@
-"""Helpers for building OpenAI-compatible LLM clients with consistent env resolution."""
+"""Helpers for building researcher-facing LLM clients with consistent env resolution."""
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
 from typing import Any
 
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.core.env import load_dotenv_if_available
+from .litellm_chat import LiteLLMChatModel
 from .runtime_settings import resolve_role_provider_connection
 from .settings import get_llm_profile_settings
 from .usage_ledger import UsageLedgerCallback, get_usage_ledger_callback
@@ -131,9 +132,9 @@ def build_researcher_llm(
     max_tokens: int | None = None,
     profile: str | None = None,
     **overrides: Any,
-) -> ChatOpenAI:
-    """Create a ChatOpenAI client using the shared OpenAI-compatible config."""
-    return ChatOpenAI(
+) -> BaseChatModel:
+    """Create a researcher-facing chat model using the shared runtime config."""
+    return LiteLLMChatModel(
         **get_researcher_llm_kwargs(
             temperature=temperature,
             max_tokens=max_tokens,

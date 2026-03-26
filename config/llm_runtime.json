@@ -1,11 +1,14 @@
 {
-  "default_provider": "deepseek",
+  "default_provider": "openai",
   "provider_defaults": {
+    "openai": {
+      "model": "gpt-5.4"
+    },
     "deepseek": {
       "model": "deepseek-chat"
     },
-    "openai": {
-      "model": "gpt-5.4"
+    "anthropic": {
+      "model": "anthropic/claude-3.5-sonnet"
     }
   },
   "roles": {

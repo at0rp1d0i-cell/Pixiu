@@ -13,8 +13,9 @@ _DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "config" / "llm_runtime.json"
 
 @dataclass(frozen=True)
 class ProviderEnvSpec:
-    base_url_env: str
+    base_url_env: str | None
     api_key_env: str
+    default_base_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class LLMRuntimeSettings:
 class ResolvedRuntimeProvider:
     provider: str
     model: str
-    base_url: str
+    base_url: str | None
     api_key: str
 
 
@@ -47,10 +48,16 @@ PROVIDER_ENV_SPECS: dict[str, ProviderEnvSpec] = {
     "deepseek": ProviderEnvSpec(
         base_url_env="DEEPSEEK_API_BASE",
         api_key_env="DEEPSEEK_API_KEY",
+        default_base_url="https://api.deepseek.com",
     ),
     "openai": ProviderEnvSpec(
         base_url_env="OPENAI_API_BASE",
         api_key_env="OPENAI_API_KEY",
+    ),
+    "anthropic": ProviderEnvSpec(
+        base_url_env="ANTHROPIC_API_BASE",
+        api_key_env="ANTHROPIC_API_KEY",
+        default_base_url="https://api.anthropic.com",
     ),
 }
 
@@ -159,15 +166,14 @@ def resolve_role_provider_connection(
         return None
     model = selection.model or provider_defaults.model
 
-    base_url = _as_str(env.get(provider_env.base_url_env))
+    base_url = _as_str(env.get(provider_env.base_url_env)) if provider_env.base_url_env else None
     api_key = _as_str(env.get(provider_env.api_key_env))
-    if not (model and base_url and api_key):
+    if not (model and api_key):
         return None
 
     return ResolvedRuntimeProvider(
         provider=provider,
         model=model,
-        base_url=base_url,
+        base_url=base_url or provider_env.default_base_url,
         api_key=api_key,
     )
-
