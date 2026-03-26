@@ -224,6 +224,102 @@ def _formula_skeleton(formula: str) -> str:
     return compact
 
 
+def _strip_json_fences(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def _extract_outer_json_object(content: str) -> str | None:
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return content[start : end + 1]
+
+
+def _find_matching_bracket(source: str, start_idx: int, *, open_char: str, close_char: str) -> int | None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start_idx, len(source)):
+        ch = source[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == open_char:
+            depth += 1
+            continue
+        if ch == close_char:
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _extract_complete_json_objects(array_source: str) -> list[str]:
+    objects: list[str] = []
+    idx = 0
+    while idx < len(array_source):
+        start = array_source.find("{", idx)
+        if start == -1:
+            break
+        end = _find_matching_bracket(array_source, start, open_char="{", close_char="}")
+        if end is None:
+            break
+        objects.append(array_source[start : end + 1])
+        idx = end + 1
+    return objects
+
+
+def _extract_generation_rationale(raw_json: str) -> str:
+    match = re.search(r'"generation_rationale"\s*:\s*"((?:\\.|[^"\\])*)"', raw_json, re.DOTALL)
+    if not match:
+        return ""
+    try:
+        return json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return match.group(1)
+
+
+def _recover_alpha_researcher_batch_payload(raw_json: str) -> dict[str, Any] | None:
+    notes_key_idx = raw_json.find('"notes"')
+    if notes_key_idx == -1:
+        return None
+    array_start = raw_json.find("[", notes_key_idx)
+    if array_start == -1:
+        return None
+    array_end = _find_matching_bracket(raw_json, array_start, open_char="[", close_char="]")
+    array_source = raw_json[array_start + 1 : array_end] if array_end is not None else raw_json[array_start + 1 :]
+
+    notes_payload: list[dict[str, Any]] = []
+    for obj_source in _extract_complete_json_objects(array_source):
+        try:
+            parsed = json.loads(obj_source)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            notes_payload.append(parsed)
+
+    if not notes_payload:
+        return None
+
+    return {
+        "notes": notes_payload,
+        "generation_rationale": _extract_generation_rationale(raw_json),
+    }
+
+
 def _format_family_gene_summary(family_key: str) -> str:
     parts = family_key.split("|")
     if len(parts) != 6:
@@ -266,6 +362,23 @@ def _build_factor_algebra_retry_family_bans(sample_rejections: list[dict[str, An
     if volume_confirmation_alignment_hits >= 1:
         banned_families.append("volume_confirmation")
     return banned_families
+
+
+def _build_factor_algebra_retry_banned_family_keys(
+    sample_rejections: list[dict[str, Any]],
+) -> set[str]:
+    banned_family_keys: set[str] = set()
+    for item in sample_rejections:
+        if not isinstance(item, dict):
+            continue
+        if item.get("exploration_subspace") != ExplorationSubspace.FACTOR_ALGEBRA.value:
+            continue
+        if item.get("filter") not in {"novelty", "anti_collapse"}:
+            continue
+        family_key = item.get("family_gene_key")
+        if isinstance(family_key, str) and family_key.startswith("factor_algebra|"):
+            banned_family_keys.add(family_key)
+    return banned_family_keys
 
 
 def _build_fast_feedback_factor_algebra_focus_section() -> str:
@@ -474,6 +587,7 @@ class AlphaResearcher:
         sample_rejections: list[dict[str, str]] = []
         requested_note_count = _requested_note_count_text(subspace_hint)
         retry_banned_transform_families: list[str] = []
+        retry_banned_family_gene_keys: set[str] = set()
 
         for attempt in range(_MAX_LOCAL_RETRY + 1):
             user_msg = ALPHA_RESEARCHER_USER_TEMPLATE.format(
@@ -514,6 +628,16 @@ class AlphaResearcher:
                 if retry_banned_transform_families:
                     banned_text = ", ".join(retry_banned_transform_families)
                     user_msg += f"- 本次重试禁止使用以下 transform_family：{banned_text}\n"
+                if retry_banned_family_gene_keys:
+                    family_text = "\n".join(
+                        f"  - {family_key}"
+                        for family_key in sorted(retry_banned_family_gene_keys)
+                    )
+                    user_msg += (
+                        "- 本次重试禁止重复以下 factor_algebra family_gene_key；"
+                        "不要再提交同一 family 的微调变体：\n"
+                        f"{family_text}\n"
+                    )
 
             response = await llm.ainvoke(
                 [
@@ -531,7 +655,10 @@ class AlphaResearcher:
             )
 
             parsed_batch = self._parse_batch(response.content, iteration, subspace_hint)
-            approved_notes, diagnostics = self._local_prescreen_notes(parsed_batch.notes)
+            approved_notes, diagnostics = self._local_prescreen_notes(
+                parsed_batch.notes,
+                retry_banned_family_gene_keys=retry_banned_family_gene_keys,
+            )
 
             total_generated_count += diagnostics["generated_count"]
             rejection_counts.update(diagnostics["rejection_counts_by_filter"])
@@ -576,6 +703,11 @@ class AlphaResearcher:
                     retry_banned_transform_families = _build_factor_algebra_retry_family_bans(
                         diagnostics.get("sample_rejections", [])
                     )
+                retry_banned_family_gene_keys.update(
+                    _build_factor_algebra_retry_banned_family_keys(
+                        diagnostics.get("sample_rejections", [])
+                    )
+                )
                 logger.info(
                     "[AlphaResearcher] 本地预筛全拒绝，触发重试: island=%s, attempt=%d",
                     self.island,
@@ -607,11 +739,25 @@ class AlphaResearcher:
         解析 LLM 输出为 AlphaResearcherBatch。
         支持降级：若 LLM 只输出单个 Note，包装为长度为 1 的 Batch。
         """
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if not match:
+        normalized_content = _strip_json_fences(content)
+        raw_json = _extract_outer_json_object(normalized_content)
+        if raw_json is None:
             raise ValueError(f"AlphaResearcher 输出不含 JSON：{content[:200]}")
-
-        data = json.loads(match.group())
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            recovered = _recover_alpha_researcher_batch_payload(raw_json)
+            if recovered is None:
+                raise ValueError(
+                    f"AlphaResearcher JSON 解析失败：{exc.msg} (line {exc.lineno}, column {exc.colno})"
+                ) from exc
+            logger.warning(
+                "[AlphaResearcher] recovered partial batch after malformed JSON: island=%s, subspace=%s, notes=%d",
+                self.island,
+                subspace_hint.value if subspace_hint is not None else "unknown",
+                len(recovered.get("notes", [])),
+            )
+            data = recovered
         notes_data = data.get("notes", [data])  # 兼容降级
         if _is_fast_feedback_factor_algebra(subspace_hint):
             notes_data = notes_data[:1]
@@ -1041,7 +1187,10 @@ class AlphaResearcher:
         return dict(counts)
 
     def _local_prescreen_notes(
-        self, notes: list[FactorResearchNote]
+        self,
+        notes: list[FactorResearchNote],
+        *,
+        retry_banned_family_gene_keys: Optional[set[str]] = None,
     ) -> tuple[list[FactorResearchNote], dict[str, Any]]:
         """Stage 2 本地预筛：复用 Stage 3 的 canonical validator/novelty 规则。"""
         from src.agents.prefilter import NoveltyFilter, Validator
@@ -1113,6 +1262,19 @@ class AlphaResearcher:
                 factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
                 family_key = factor_gene.get("family_gene_key")
                 if isinstance(family_key, str):
+                    if retry_banned_family_gene_keys and family_key in retry_banned_family_gene_keys:
+                        rejection_counts["anti_collapse"] += 1
+                        rejection_counts_by_filter_and_subspace["anti_collapse"][subspace] += 1
+                        if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                            sample_rejections.append(
+                                self._build_stage2_rejection_sample(
+                                    note,
+                                    "anti_collapse",
+                                    f"retry banned family repeated after local rejection: {family_key}",
+                                    subspace,
+                                )
+                            )
+                        continue
                     if family_key in kept_factor_algebra_families:
                         rejection_counts["anti_collapse"] += 1
                         rejection_counts_by_filter_and_subspace["anti_collapse"][subspace] += 1

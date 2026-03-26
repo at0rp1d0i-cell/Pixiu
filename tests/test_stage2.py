@@ -749,6 +749,53 @@ def test_factor_algebra_gene_sidecar_keys_match_emitted_note_ids():
     assert all(gene_map[note_id]["family_gene_key"].startswith("factor_algebra|") for note_id in emitted_note_ids)
 
 
+def test_factor_algebra_parse_batch_recovers_complete_notes_from_malformed_json():
+    from src.agents.researcher import AlphaResearcher
+
+    content = """```json
+{
+  "notes": [
+    {
+      "note_id": "recover_ok",
+      "island": "momentum",
+      "iteration": 1,
+      "hypothesis": "短期均价高于长期均价，说明价差状态走强。",
+      "economic_intuition": "均价差扩张可以刻画短强长弱。",
+      "formula_recipe": {
+        "base_field": "$close",
+        "lookback_short": 5,
+        "lookback_long": 20,
+        "transform_family": "mean_spread",
+        "normalization": "none"
+      },
+      "risk_factors": [],
+      "market_context_date": "2026-03-26",
+      "applicable_regimes": ["bull_trend"],
+      "invalid_regimes": ["range_bound"]
+    },
+    {
+      "note_id": "broken_tail",
+      "island": "momentum",
+      "iteration": 1,
+      "hypothesis": "unterminated
+```"""
+
+    researcher = AlphaResearcher(
+        island="momentum",
+        capabilities=_stage2_test_capabilities(),
+    )
+    batch = researcher._parse_batch(
+        content=content,
+        iteration=1,
+        subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+    )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "recover_ok"
+    gene_map = researcher._factor_gene_by_note_id
+    assert gene_map["recover_ok"]["family_gene_key"] == "factor_algebra|mean_spread|$close|null|none|none"
+
+
 def test_factor_algebra_invalid_recipe_values_trigger_bounded_retry():
     from src.agents.researcher import AlphaResearcher
 
@@ -1805,6 +1852,101 @@ def test_alpha_researcher_local_novelty_ignores_cross_family_factor_algebra_hist
     diag = researcher.last_generation_diagnostics
     assert diag["rejection_counts_by_filter"].get("novelty", 0) == 0
     assert batch.notes[0].note_id == "mean_spread_candidate"
+
+
+def test_factor_algebra_retry_bans_previous_rejected_family_gene_keys():
+    from src.agents.researcher import AlphaResearcher
+
+    first = MagicMock()
+    first.content = '''{
+        "notes": [{
+            "note_id": "ratio_retry_a",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期相对长期更强，体现相对强弱延续。",
+            "economic_intuition": "长短窗口比值变化刻画相对强弱。",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-26",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "first"
+    }'''
+    second = MagicMock()
+    second.content = '''{
+        "notes": [{
+            "note_id": "ratio_retry_b",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期相对长期更强，体现相对强弱延续。",
+            "economic_intuition": "长短窗口比值变化刻画相对强弱。",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-26",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "second"
+    }'''
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "existing_ratio_family",
+            "formula": "Rank(Mean($close, 5) / Mean($close, 20) - 1, 20)",
+            "subspace_origin": "factor_algebra",
+            "family_gene_key": "factor_algebra|ratio_momentum|$close|null|none|rank",
+            "variant_gene_key": "5|20|20|null",
+        }
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[first, second])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["local_retry_count"] == 1
+    assert diag["rejection_counts_by_filter"].get("novelty", 0) >= 1
+    assert diag["rejection_counts_by_filter"].get("anti_collapse", 0) >= 1
+    anti_collapse = [
+        item for item in diag["sample_rejections"] if item["filter"] == "anti_collapse"
+    ]
+    assert anti_collapse
+    assert "retry banned family repeated after local rejection" in anti_collapse[0]["reason"]
+    assert anti_collapse[0]["family_gene_key"] == "factor_algebra|ratio_momentum|$close|null|none|rank"
 
 
 def test_factor_algebra_same_batch_family_budget_rejects_extra_variants_as_anti_collapse():
