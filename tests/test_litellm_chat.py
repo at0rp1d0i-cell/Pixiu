@@ -80,6 +80,48 @@ async def test_litellm_chat_model_async_roundtrip_with_tools():
 
 
 @pytest.mark.asyncio
+async def test_litellm_chat_model_normalizes_null_tool_content():
+    model = LiteLLMChatModel(
+        model="openai/gpt-5.4",
+        api_key="openai-key",
+        base_url="https://api.example.com/v1",
+    )
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {
+                                "name": "get_margin_data",
+                                "arguments": {"limit": 1},
+                            },
+                        }
+                    ],
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12},
+    }
+
+    with patch(
+        "src.llm.litellm_chat.litellm.acompletion",
+        new=AsyncMock(return_value=response),
+    ):
+        runnable = model.bind_tools(
+            [{"type": "function", "function": {"name": "get_margin_data", "parameters": {"type": "object"}}}],
+            tool_choice="get_margin_data",
+        )
+        result = await runnable.ainvoke([HumanMessage(content="call the tool")])
+
+    assert result.content == ""
+    assert result.tool_calls
+    assert result.tool_calls[0]["name"] == "get_margin_data"
+
+
+@pytest.mark.asyncio
 async def test_litellm_chat_model_converts_message_roles():
     model = LiteLLMChatModel(
         model="deepseek/deepseek-chat",

@@ -127,9 +127,13 @@ def _extract_tool_calls(message: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def _message_content(message: Any) -> str | list[str | dict] | None:
+def _message_content(message: Any) -> str | list[str | dict]:
     content = _read_attr_or_key(message, "content")
-    if isinstance(content, (str, list)) or content is None:
+    if content is None:
+        # Tool-call-only assistant turns frequently come back with null content.
+        # LangChain AIMessage rejects None, so normalize to an empty string.
+        return ""
+    if isinstance(content, (str, list)):
         return content
     return str(content)
 

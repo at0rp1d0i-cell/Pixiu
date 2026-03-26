@@ -706,9 +706,11 @@ def test_pixiu_run_single_cli_resolves_env_truth_before_stage1_entry(monkeypatch
     captured: dict[str, str] = {}
 
     def fake_resolve_and_apply_layered_env(**kwargs):
-        target = kwargs.get("target_env") or os.environ
-        target["TUSHARE_TOKEN"] = "repo-token"
-        target["QLIB_DATA_DIR"] = str(tmp_path / "qlib_bin")
+        # Use monkeypatch-managed env writes so pytest restores process env
+        # after this test. Direct os.environ mutation leaks into later
+        # Prefilter/Validator tests and empties runtime field allowlists.
+        monkeypatch.setenv("TUSHARE_TOKEN", "repo-token")
+        monkeypatch.setenv("QLIB_DATA_DIR", str(tmp_path / "qlib_bin"))
         return ResolvedEnv(
             values={
                 "TUSHARE_TOKEN": "repo-token",
