@@ -121,11 +121,11 @@ uv run uvicorn src.api.server:app --reload
 
 Recommended execution order:
 
-1. Expand Stage 2 data access: RSS / MCP direct consumption still only exists in Stage 1; upgrading `AlphaResearcher` tool access is the next architecture step
-2. Converge richer contracts (`BacktestReport / CriticVerdict / FactorPoolRecord`) and finish end-to-end `subspace_origin` writeback
-3. Expand control plane to stable data plane
-4. Run Phase 4B controlled experiments before deciding on MiroFish Go/No-Go
-5. Only then expand Dashboard and broader data-source surface area
+1. Reset truth anchors first: keep `docs/overview/05_spec-execution-audit.md`, `docs/overview/06_runtime-concessions.md`, and `docs/plans/current_implementation_plan.md` aligned to current runtime evidence
+2. Close `Stage 1 live` under `default/controlled`: env truth, blocking tool discovery, and current Tushare-based live tests
+3. Close controlled-run `Stage 2`: novelty waste, JSON/output robustness, and `approved -> low_sharpe` value density
+4. Close validation runtime: make `candidate -> promote` real with OOS / PIT / A-share execution boundaries
+5. Only then optimize throughput/cost or expand Stage 2 data-source surface, MiroFish, Dashboard, and broader product layers
 
 ## Worker Output Requirements
 

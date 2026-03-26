@@ -136,16 +136,19 @@ Last Reviewed: 2026-03-23
 - `Status`: `active`
 - `Scope`: `Stage 2 generation`
 - `Current Behavior`:
-  - Stage 2 在本地复用 Stage 3 canonical validator/novelty 规则做 pre-screen
+  - Stage 2 在本地复用 canonical validator/novelty/alignment 规则做 pre-screen
+  - `factor_algebra` 已叠加最小 anti-collapse / value-density stop-loss
   - 整批全灭时最多只做一次 bounded retry
 - `Why It Exists`:
-  - 在 FormulaSketch 和 anti-collapse 还没进入主线前，先减少明显废料送入 Stage 3
+  - 即使 FormulaSketch Lite 和 anti-collapse v1 已进入主线，controlled run 仍有大量 `novelty/alignment/validator` waste
+  - 当前本地 pre-screen 仍是防止低价值候选继续烧远端 LLM 和 Stage 4 回测的止血层
 - `Risk If Kept`:
   - 这只是止血层，不是最终生成架构
   - 容易继续掩盖上游 contract 问题
 - `Removal Trigger`:
-  - FormulaSketch Lite 进入主线
-  - anti-collapse memory 与更强结构化生成生效
+  - controlled-run `Stage 2` 主拒绝不再由 `novelty/alignment/validator` 主导
+  - family steering / value-density control 能在生成分布层稳定生效
+  - bounded retry 不再是主要止血手段
 - `Related Settings`:
   - `src/agents/researcher.py` 内部诊断与 retry 逻辑
 - `Evidence`:
