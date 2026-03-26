@@ -157,6 +157,14 @@ def _build_reason_codes(
     if report.status != "success":
         codes.append("PARSE_INCOMPLETE" if report.failure_stage == "parse" else "RUN_FAILED")
 
+    if not report.error_message and not failed_checks:
+        if report.oos_passed is True:
+            codes.append("OOS_PASSED")
+        elif report.oos_passed is False:
+            codes.append("OOS_FAILED")
+        elif report.oos_window is not None or report.metrics_scope == "discovery":
+            codes.append("PENDING_OOS")
+
     return codes or [f"FAILED_{check.metric.upper()}" for check in failed_checks]
 
 
@@ -171,6 +179,8 @@ def _decide(
     if overall_passed:
         if report.oos_passed is True:
             return "promote" if score >= THRESHOLDS.min_promote_score else "archive"
+        if report.oos_passed is False:
+            return "archive"
         return "candidate"
     if failed_checks and any(check.metric == "sharpe" and check.value <= 0 for check in failed_checks):
         return "reject"

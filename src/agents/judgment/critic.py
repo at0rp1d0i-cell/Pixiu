@@ -32,11 +32,22 @@ class Critic:
         tags = [f"island:{report.island}"]
         tags.append("passed" if overall_passed else f"failed:{failure_mode.value if failure_mode else 'unknown'}")
         tags.append(f"decision:{decision}")
+        if report.oos_passed is True:
+            tags.append("validation:oos_passed")
+        elif report.oos_passed is False:
+            tags.append("validation:oos_failed")
+        elif report.oos_window is not None or report.metrics_scope == "discovery":
+            tags.append("validation:pending_oos")
 
         if overall_passed and decision == "promote":
             summary = f"{report.factor_id} passed deterministic and OOS checks with score {score:.2f}."
         elif overall_passed and decision == "candidate":
             summary = f"{report.factor_id} passed deterministic checks and is pending OOS validation."
+        elif overall_passed and decision == "archive" and report.oos_passed is False:
+            summary = (
+                f"{report.factor_id} passed discovery checks but failed out-of-sample validation"
+                f" (oos_degradation={report.oos_degradation if report.oos_degradation is not None else 'n/a'})."
+            )
         elif overall_passed:
             summary = f"{report.factor_id} passed deterministic checks with score {score:.2f}."
         else:

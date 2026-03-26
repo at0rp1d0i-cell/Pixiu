@@ -61,6 +61,15 @@ class ReportWriter:
             highlights.append(
                 f"{archived_count} factor(s) passed deterministic checks but were archived instead of promoted."
             )
+        oos_failed_count = sum(
+            1
+            for verdict in non_promoted_verdicts
+            if "OOS_FAILED" in verdict.reason_codes
+        )
+        if oos_failed_count:
+            highlights.append(
+                f"{oos_failed_count} factor(s) passed discovery checks but failed OOS validation."
+            )
 
         risks = []
         for verdict in non_promoted_verdicts[:3]:
@@ -110,6 +119,7 @@ class ReportWriter:
         best_formula = best_report.factor_spec.formula if best_report and best_report.factor_spec else (best_report.formula if best_report else "N/A")
         best_hypothesis = best_report.factor_spec.hypothesis if best_report and best_report.factor_spec else "N/A"
         best_rationale = best_report.factor_spec.economic_rationale if best_report and best_report.factor_spec else "N/A"
+        report_by_factor = {report.factor_id: report for report in state.backtest_reports}
         lines = [
             f"# CIO Review: round-{state.current_round}",
             "",
@@ -136,9 +146,26 @@ class ReportWriter:
 
         if non_promoted_verdicts:
             for verdict in non_promoted_verdicts:
+                report = report_by_factor.get(verdict.factor_id)
+                validation_bits = []
+                if verdict.decision == "candidate":
+                    validation_bits.append("pending OOS validation")
+                elif verdict.decision == "archive" and "OOS_FAILED" in verdict.reason_codes:
+                    validation_bits.append("failed OOS validation")
+                if report is not None:
+                    if report.oos_passed is not None:
+                        validation_bits.append(f"oos_passed={report.oos_passed}")
+                    if report.oos_degradation is not None:
+                        validation_bits.append(f"oos_degradation={report.oos_degradation}")
+                    if report.metrics_scope:
+                        validation_bits.append(f"metrics_scope={report.metrics_scope}")
+                validation_suffix = (
+                    f" [{', '.join(validation_bits)}]" if validation_bits else ""
+                )
                 lines.append(
                     f"- {verdict.factor_id}: {verdict.failure_mode or 'unknown'} "
                     f"(decision={verdict.decision or 'n/a'}, score={verdict.score:.2f})"
+                    f"{validation_suffix}"
                 )
         else:
             lines.append("- None")

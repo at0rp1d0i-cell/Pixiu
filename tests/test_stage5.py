@@ -92,6 +92,18 @@ def test_critic_promotes_oos_passed_report():
     assert "decision:promote" in verdict.pool_tags
 
 
+def test_critic_archives_oos_failed_report():
+    report = _make_report(oos_passed=False)
+
+    verdict = asyncio.run(Critic().evaluate(report))
+
+    assert verdict.overall_passed is True
+    assert verdict.decision == "archive"
+    assert "decision:archive" in verdict.pool_tags
+    assert "OOS_FAILED" in verdict.reason_codes
+    assert "out-of-sample" in verdict.summary.lower()
+
+
 def test_critic_reports_execution_failure():
     report = _make_report(error_message="SyntaxError")
 
@@ -192,6 +204,36 @@ def test_report_writer_surfaces_candidate_without_approval():
     assert allocation.total_factors == 0
     assert cio_report.new_factors_approved == 0
     assert "Candidate factors: 1" in cio_report.full_report_markdown
+    assert "pending OOS validation" in cio_report.full_report_markdown
+
+
+def test_report_writer_surfaces_oos_archived_factor_details():
+    report = _make_report(factor_id="momentum_oos_failed", sharpe=2.8, oos_passed=False)
+    report = report.model_copy(
+        update={
+            "metrics_scope": "discovery",
+            "oos_degradation": 1.1,
+        }
+    )
+    verdict = asyncio.run(Critic().evaluate(report))
+    state = AgentState(
+        current_round=3,
+        backtest_reports=[report],
+        critic_verdicts=[verdict],
+    )
+
+    allocation = asyncio.run(PortfolioManager().rebalance(state))
+    cio_report = asyncio.run(
+        ReportWriter().generate_cio_report(
+            state.model_copy(update={"portfolio_allocation": allocation})
+        )
+    )
+
+    assert verdict.decision == "archive"
+    assert cio_report.new_factors_approved == 0
+    assert "failed OOS validation" in cio_report.full_report_markdown
+    assert "oos_passed=False" in cio_report.full_report_markdown
+    assert "oos_degradation=1.1" in cio_report.full_report_markdown
 
 
 def test_report_writer_ignores_failed_verdicts_when_picking_best_factor():

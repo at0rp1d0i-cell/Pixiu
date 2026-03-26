@@ -241,6 +241,66 @@ def test_coder_derives_validation_flags_from_metrics_only(mock_note):
     assert report.oos_degradation == 0.3
 
 
+def test_coder_preserves_explicit_oos_failure_from_payload(mock_note):
+    coder = Coder()
+
+    payload = {
+        "metrics_scope": "discovery",
+        "metrics": {
+            "sharpe": 1.3,
+            "annualized_return": 0.18,
+            "max_drawdown": 0.1,
+            "ic_mean": 0.012,
+            "ic_std": 0.03,
+            "icir": 0.4,
+            "turnover_rate": 0.14,
+            "coverage": 0.93,
+        },
+        "oos_metrics": {
+            "sharpe": 0.3,
+            "annualized_return": 0.02,
+            "max_drawdown": 0.16,
+            "ic_mean": 0.001,
+            "ic_std": 0.02,
+            "icir": 0.05,
+            "turnover_rate": 0.19,
+            "coverage": 0.81,
+        },
+        "discovery_window": {
+            "start_date": "2021-01-01",
+            "end_date": "2024-03-31",
+            "coverage": 0.93,
+            "notes": "Discovery window",
+        },
+        "oos_window": {
+            "start_date": "2024-04-01",
+            "end_date": "2025-03-31",
+            "coverage": 0.81,
+            "notes": "Out-of-sample validation window",
+        },
+        "discovery_passed": True,
+        "oos_passed": False,
+        "oos_degradation": 1.0,
+        "error": None,
+    }
+    mock_stdout = "Some logs...\nBACKTEST_RESULT_JSON:" + json.dumps(payload)
+    mock_exec_result = ExecutionResult(
+        success=True,
+        stdout=mock_stdout,
+        stderr="",
+        returncode=0,
+        duration_seconds=9.0,
+    )
+
+    with patch.object(coder.runner, "run_python", return_value=mock_exec_result):
+        report = asyncio.run(coder.run_backtest(mock_note))
+
+    assert report.passed is True
+    assert report.discovery_passed is True
+    assert report.oos_passed is False
+    assert report.oos_degradation == 1.0
+
+
 def test_coder_template_uses_current_qlib_features_signature(mock_note):
     coder = Coder()
 

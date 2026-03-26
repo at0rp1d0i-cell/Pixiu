@@ -212,6 +212,20 @@ class TestReads:
                 coverage=1.0,
             ),
             passed=True,
+            metrics_scope="discovery",
+            oos_metrics=BacktestMetrics(
+                sharpe=2.4,
+                annualized_return=0.16,
+                max_drawdown=0.14,
+                ic_mean=0.02,
+                ic_std=0.03,
+                icir=0.4,
+                turnover_rate=0.21,
+                coverage=0.86,
+            ),
+            oos_degradation=0.6,
+            discovery_passed=True,
+            oos_passed=True,
             execution_time_seconds=1.0,
             qlib_output_raw="{}",
         )
@@ -248,6 +262,64 @@ class TestReads:
         assert meta["coverage"] == 1.0
         assert meta["execution_succeeded"] is True
         assert meta["economic_rationale"] == "资金流和惯性共同驱动。"
+        assert meta["metrics_scope"] == "discovery"
+        assert meta["discovery_passed"] is True
+        assert meta["oos_passed"] is True
+        assert meta["oos_degradation"] == 0.6
+
+    def test_register_factor_marks_candidate_as_pending_oos_in_metadata(self, pool):
+        report = BacktestReport(
+            report_id="report-candidate",
+            note_id="note-candidate",
+            factor_id="factor-candidate",
+            island="momentum",
+            formula="$close",
+            metrics=BacktestMetrics(
+                sharpe=2.9,
+                annualized_return=0.19,
+                max_drawdown=0.12,
+                ic_mean=0.03,
+                ic_std=0.03,
+                icir=0.5,
+                turnover_rate=0.2,
+                coverage=0.95,
+            ),
+            passed=True,
+            metrics_scope="discovery",
+            discovery_passed=True,
+            oos_passed=None,
+            execution_time_seconds=1.0,
+            qlib_output_raw="{}",
+        )
+        verdict = CriticVerdict(
+            report_id="report-candidate",
+            factor_id="factor-candidate",
+            note_id="note-candidate",
+            overall_passed=True,
+            decision="candidate",
+            score=0.88,
+            checks=[],
+            register_to_pool=True,
+            pool_tags=["decision:candidate"],
+            reason_codes=["PENDING_OOS"],
+        )
+        risk = RiskAuditReport(
+            factor_id="factor-candidate",
+            overfitting_score=0.1,
+            overfitting_flag=False,
+            correlation_flags=[],
+            recommendation="observe",
+            audit_notes="pending oos",
+        )
+
+        pool.register_factor(report=report, verdict=verdict, risk_report=risk)
+
+        rows = pool._collection.get(where={"factor_id": "factor-candidate"}, include=["metadatas"])
+        meta = rows["metadatas"][0]
+        assert meta["candidate"] is True
+        assert meta["passed"] is False
+        assert meta["oos_status"] == "pending"
+        assert meta["validation_status"] == "pending_oos"
 
     def test_register_factor_keeps_execution_succeeded_separate_from_quality(self, pool):
         report = BacktestReport(

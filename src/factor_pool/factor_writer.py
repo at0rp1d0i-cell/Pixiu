@@ -13,6 +13,26 @@ from src.schemas.research_note import FactorResearchNote
 logger = logging.getLogger(__name__)
 
 
+def _validation_status(report: BacktestReport, verdict: CriticVerdict) -> str:
+    if verdict.decision == "promote":
+        return "promoted"
+    if verdict.decision == "candidate":
+        return "pending_oos"
+    if report.oos_passed is False:
+        return "oos_failed"
+    if report.discovery_passed is False:
+        return "discovery_failed"
+    return verdict.decision or "observed"
+
+
+def _oos_status(report: BacktestReport) -> str:
+    if report.oos_passed is True:
+        return "passed"
+    if report.oos_passed is False:
+        return "failed"
+    return "pending"
+
+
 def build_factor_record(
     report: BacktestReport,
     verdict: CriticVerdict,
@@ -67,6 +87,7 @@ def write_factor(
         ids=[report.factor_id],
         documents=[record.formula],
         metadatas=[{
+            "factor_id": report.factor_id,
             "island": report.island,
             "note_id": record.note_id,
             "formula": record.formula,
@@ -95,6 +116,16 @@ def write_factor(
             "beats_baseline": verdict.overall_passed,
             "parse_success": record.execution_succeeded,
             "ic": report.metrics.ic_mean,
+            "metrics_scope": report.metrics_scope,
+            "discovery_passed": report.discovery_passed,
+            "oos_passed": report.oos_passed if report.oos_passed is not None else "",
+            "oos_status": _oos_status(report),
+            "oos_degradation": report.oos_degradation,
+            "discovery_start": report.discovery_window.start_date.isoformat() if report.discovery_window else "",
+            "discovery_end": report.discovery_window.end_date.isoformat() if report.discovery_window else "",
+            "oos_start": report.oos_window.start_date.isoformat() if report.oos_window else "",
+            "oos_end": report.oos_window.end_date.isoformat() if report.oos_window else "",
+            "validation_status": _validation_status(report, verdict),
         }],
     )
     logger.info(
