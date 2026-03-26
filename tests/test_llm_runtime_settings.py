@@ -135,3 +135,30 @@ def test_resolve_role_provider_connection_returns_none_when_env_missing(tmp_path
         environ={"OPENAI_API_BASE": "https://api.example.com/v1"},
     )
     assert resolved is None
+
+
+def test_resolve_role_provider_connection_anthropic_uses_default_base_url(tmp_path: Path):
+    config = tmp_path / "llm_runtime.json"
+    config.write_text(
+        (
+            "{"
+            "\"default_provider\":\"anthropic\","
+            "\"provider_defaults\":{\"anthropic\":{\"model\":\"anthropic/claude-3.5-sonnet\"}},"
+            "\"roles\":{}"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+    settings = load_llm_runtime_settings(config)
+    assert settings is not None
+
+    resolved = resolve_role_provider_connection(
+        role="researcher",
+        settings=settings,
+        environ={"ANTHROPIC_API_KEY": "key"},
+    )
+    assert resolved is not None
+    assert resolved.provider == "anthropic"
+    assert resolved.model == "anthropic/claude-3.5-sonnet"
+    assert resolved.base_url == "https://api.anthropic.com"
+    assert resolved.api_key == "key"
