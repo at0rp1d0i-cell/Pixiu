@@ -98,10 +98,10 @@ Read these first:
 Use repo-local Codex workflow too:
 
 - [/.codex/README.md](/home/torpedo/Workspace/ML/Pixiu/.codex/README.md)
-- [pixiu-official-source-gate](/home/torpedo/Workspace/ML/Pixiu/.codex/skills/pixiu-official-source-gate/SKILL.md)
-- [pixiu-harness-first](/home/torpedo/Workspace/ML/Pixiu/.codex/skills/pixiu-harness-first/SKILL.md)
-- [pixiu-runtime-concession-check](/home/torpedo/Workspace/ML/Pixiu/.codex/skills/pixiu-runtime-concession-check/SKILL.md)
-- [pixiu-worker-brief](/home/torpedo/Workspace/ML/Pixiu/.codex/skills/pixiu-worker-brief/SKILL.md)
+- [pixiu-official-source-gate](/home/torpedo/Workspace/ML/Pixiu/.agents/skills/pixiu-official-source-gate/SKILL.md)
+- [pixiu-harness-first](/home/torpedo/Workspace/ML/Pixiu/.agents/skills/pixiu-harness-first/SKILL.md)
+- [pixiu-runtime-concession-check](/home/torpedo/Workspace/ML/Pixiu/.agents/skills/pixiu-runtime-concession-check/SKILL.md)
+- [pixiu-worker-brief](/home/torpedo/Workspace/ML/Pixiu/.agents/skills/pixiu-worker-brief/SKILL.md)
 
 ---
 
