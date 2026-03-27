@@ -17,7 +17,11 @@ Do not treat `docs/archive/` as the source of truth for current implementation.
 
 ## Repo-local Codex Workflow
 
-This repository also carries repo-local Codex workflow skills under `/.codex/skills/`.
+This repository carries repo-local Codex skills under `/.agents/skills/`.
+
+Use `/.agents/skills/` as the canonical repo-local skill discovery surface. Keep `/.codex/` for Codex config, role bindings, bridge metadata, and repo-specific workflow notes.
+
+The Codex-native team runtime is installed in that repo-local skill surface. Repo workflow skills such as `pixiu-harness-first` also belong there. Use `team-lead` as the single visible entrypoint when you want the Lead -> Ops -> Specialists workflow.
 
 When the task involves external system semantics, experiment-mainline validation, runtime concessions, or worker delegation quality, check `/.codex/README.md` first and use the relevant repo-local skill before proceeding.
 
