@@ -16,7 +16,7 @@ local uv + repo env truth
 
 ## Scenarios Tested
 
-- Stage 1 live closure targeted verification: unit Stage 1 coverage, live Tushare blocking-core path, doctor/preflight, and controlled single entry reaching Stage 2 without Stage 1 degradation.
+- Stage 1 unit coverage, live Tushare blocking-core path, doctor/preflight env truth, controlled single entering Stage 2, and live-env helper alignment
 
 ## Issues Found
 

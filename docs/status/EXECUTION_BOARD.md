@@ -8,7 +8,7 @@ qa
 
 ## Active Work
 
-- Stage1 live closure QA passed
+- Stage1 live closure QA
 
 ## Completed
 
