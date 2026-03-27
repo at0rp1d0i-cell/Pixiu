@@ -1,7 +1,6 @@
 """Helpers for live / e2e researcher environment setup."""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
 import pytest
@@ -24,8 +23,14 @@ def load_researcher_dotenv() -> None:
 
 
 def researcher_api_key_available() -> bool:
-    """Return whether the live researcher API key is available."""
-    return bool(os.getenv("RESEARCHER_API_KEY"))
+    """Return whether the live researcher LLM can resolve credentials."""
+    from src.llm.openai_compat import get_researcher_llm_kwargs
+
+    try:
+        kwargs = get_researcher_llm_kwargs(profile="researcher")
+    except Exception:
+        return False
+    return bool(kwargs.get("api_key"))
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +43,7 @@ def researcher_live_env_ready() -> bool:
 def ensure_researcher_live_env_or_skip() -> None:
     """Skip the current live/e2e test when researcher credentials are unavailable."""
     if not researcher_live_env_ready():
-        pytest.skip("RESEARCHER_API_KEY 未设置，跳过真实场景测试")
+        pytest.skip("researcher LLM 凭据未就绪，跳过真实场景测试")
 
 
 def clear_proxy_env(monkeypatch) -> None:

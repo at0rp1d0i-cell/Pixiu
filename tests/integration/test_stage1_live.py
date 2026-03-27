@@ -11,11 +11,22 @@ import os
 import pytest
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from src.agents.market_analyst import TUSHARE_SERVER_PATH, _build_stage1_stdio_server
+from scripts.doctor import resolve_doctor_env_truth
+from src.agents.market_analyst import (
+    TUSHARE_SERVER_PATH,
+    _build_stage1_stdio_server,
+    _run_market_context_once,
+    is_degraded_market_context,
+)
+
+_STAGE1_LIVE_ENV_TRUTH = resolve_doctor_env_truth(process_env=dict(os.environ))
 
 pytestmark = [
     pytest.mark.live,
-    pytest.mark.skipif(not os.getenv("TUSHARE_TOKEN"), reason="requires TUSHARE_TOKEN"),
+    pytest.mark.skipif(
+        not _STAGE1_LIVE_ENV_TRUTH.values.get("TUSHARE_TOKEN"),
+        reason="requires TUSHARE_TOKEN via layered env truth",
+    ),
 ]
 
 
@@ -65,3 +76,15 @@ def test_tushare_margin_data_live_returns_payload(tushare_tools):
     assert "error" not in payload, f"tool returned error: {payload}"
     if isinstance(payload, dict):
         assert "data" in payload or "items" in payload
+
+
+def test_stage1_live_blocking_path_returns_non_degraded_context():
+    result = asyncio.run(_run_market_context_once({"active_islands": ["momentum"]}))
+
+    memo = result["market_context"]
+    reliability = result["stage1_reliability"]
+
+    assert not is_degraded_market_context(memo)
+    assert reliability["tushare_enabled"] is True
+    assert reliability["blocking_tools_discovered"] == ["get_margin_data", "get_moneyflow_hsgt"]
+    assert reliability["blocking_tools_used"] == ["get_margin_data", "get_moneyflow_hsgt"]

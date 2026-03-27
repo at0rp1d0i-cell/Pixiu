@@ -4,11 +4,11 @@ _This file can be updated manually or via `scripts/team_state.py board`._
 
 ## Current Stage
 
-plan
+qa
 
 ## Active Work
 
-- team runtime onboarding and workflow reset
+- Stage1 live closure QA passed
 
 ## Completed
 

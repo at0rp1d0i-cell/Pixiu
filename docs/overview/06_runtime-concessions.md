@@ -3,7 +3,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-23
+Last Reviewed: 2026-03-27
 
 # Runtime Concessions
 
@@ -86,13 +86,13 @@ Last Reviewed: 2026-03-23
 - `Status`: `active`
 - `Scope`: `Stage 1 market context`
 - `Current Behavior`:
-  - Stage 1 按 `blocking core + async enrichment` 运行
+  - Stage 1 按 `blocking core prefetch + async enrichment` 运行
   - `async enrichment` 不做同轮 late merge，只影响下一轮
   - 同日、非 degraded 的 `market_context` 会在 round 0 之后被复用，避免重复慢 MCP
   - profile 可通过 `PIXIU_STAGE1_CONTEXT_MODE` / `PIXIU_STAGE1_CONTEXT_PATH` 固定 `live | cached | frozen` context policy
 - `Why It Exists`:
-  - 当前 Stage 1 数据面和工具面还不够稳定
-  - 先保证实验入口可跑、blocking red light 语义清楚
+  - 当前 Stage 1 已先把已知 Tushare blocking-core 路径收口成 deterministic prefetch
+  - 但 enrichment 仍是 next-round concession，context policy 仍需显式保留
 - `Risk If Kept`:
   - 上下文密度受限
   - 同日缓存会削弱“每轮都拿到全新上下文”的真实性
@@ -107,6 +107,7 @@ Last Reviewed: 2026-03-23
 - `Evidence`:
   - [20_stage-1-market-context.md](/home/torpedo/Workspace/ML/Pixiu/docs/design/20_stage-1-market-context.md)
   - [stage1.py](/home/torpedo/Workspace/ML/Pixiu/src/core/orchestrator/nodes/stage1.py)
+  - [market_analyst.py](/home/torpedo/Workspace/ML/Pixiu/src/agents/market_analyst.py)
 
 ### EXP-002
 

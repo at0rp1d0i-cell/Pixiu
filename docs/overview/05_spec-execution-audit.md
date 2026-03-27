@@ -5,7 +5,7 @@ Status: active
 Audience: both
 Canonical: yes
 Owner: core docs
-Last Reviewed: 2026-03-26
+Last Reviewed: 2026-03-27
 
 建立“哪些设计能直接指导当前实现”的统一判断口径。
 
@@ -31,7 +31,7 @@ Last Reviewed: 2026-03-26
 | `11_interface-contracts.md` | implemented | 已明确 canonical objects 与 transitional objects，但代码主干仍主要消费兼容对象；Stage I/O TypedDicts 已建立（src/schemas/stage_io.py），12个节点返回类型全部收紧为 partial update，{**state} 扩散已消除 |
 | `12_orchestrator.md` | implemented/partial | 主图已存在，且已开始写入最小 control-plane state；主图已拆分为包（src/core/orchestrator/），当前已引入 `config.py / runtime.py / control_plane.py`，并保留 package-root compatibility facade；审批链已切到 `report -> human_gate` + control-plane 决策轮询 |
 | `13_control-plane.md` | implemented/partial | 最小 `state_store` 已落地，但当前运行真相仍更多存在于 round artifact；control plane 读面明显落后于 harness/profile/artifact 真相 |
-| `20_stage-1-market-context.md` | implemented/partial | Stage 1 已进入 `blocking core + async enrichment` 主干；当前真实主风险不是 API 本身，而是 `pixiu run` live CLI 路径的 env truth 与 tool discovery policy 仍不稳，controlled single 仍可能直接 degraded |
+| `20_stage-1-market-context.md` | implemented/partial | Stage 1 已进入 `blocking core prefetch + async enrichment` 主干；当前 `pixiu run` / `doctor` / `preflight` / live tests 已对齐到同一套 layered env truth，当前已知 Tushare blocking-core 路径不再在 controlled single 入口直接 degraded |
 | `21_stage-2-hypothesis-expansion.md` | implemented/partial | FormulaSketch Lite、factor gene、anti-collapse、grounding claim 已进入主干；`fast_feedback` 局部面已收敛，但 controlled run 仍存在大规模 `novelty/alignment/validator` waste，且 `approved -> low_sharpe` 显示 value density 仍不足 |
 | `22_stage-3-prefilter.md` | implemented/partial | 主过滤链已实现，且当前不再是主瓶颈；Stage 3 现在更多是在暴露上游 Stage 2 contract/value-density 问题，而不是自己卡主链 |
 | `23_stage-4-execution.md` | implemented/partial | 已收敛到 `src/execution/` 主路径，并有最小 discovery/OOS split；但 validation runtime 仍是 MVP，walk-forward/PIT/A 股执行约束还未闭环 |
@@ -65,8 +65,8 @@ Last Reviewed: 2026-03-26
   - `Stage 2/3` 局部面基本健康
   - 当前主问题是 `approved -> low_sharpe`
 - `controlled single`
-  - 仍不健康
-  - `Stage 1 live degraded`
+  - `Stage 1 live closure` 已落地
+  - 但整体仍不健康
   - `Stage 2` 仍有大规模 `novelty/alignment/validator` waste
   - `Stage 5` 仍以 `low_sharpe` 为主死因
 
@@ -80,7 +80,7 @@ Last Reviewed: 2026-03-26
 
 当前最重要的三件事是：
 
-- `Stage 1 live` 的 env truth 与 blocking tool discovery closure
+- 维持 `Stage 1 live closure`，不要让 env truth / blocking-core 路径再次漂移
 - controlled-run `Stage 2` 的 novelty waste、JSON robustness 和 `approved -> low_sharpe` value density
 - `candidate -> promote` 的 validation runtime closure
 
@@ -116,8 +116,8 @@ pytest 现在是必要条件，不再是充分条件。
 ## 推荐执行顺序
 
 1. 先做 truth reset：更新 canonical docs、主线优先级、profile 边界和 runtime concessions。
-2. 先做 `Stage 1 live closure`：修 `pixiu run` env truth，再收 blocking tool discovery，再补真实 live test。
-3. 再做 `controlled-run Stage 2 closure`：重点收 novelty waste、JSON robustness、`approved -> low_sharpe`。
+2. 保持 `Stage 1 live closure`：不要回退 `pixiu run` env truth、blocking tool discovery 和 live test 真相口径。
+3. 继续做 `controlled-run Stage 2 closure`：重点收 novelty waste、JSON robustness、`approved -> low_sharpe`。
 4. 再做 `validation closure`：让 `candidate -> promote` 进入真实 runtime，并继续补 OOS / walk-forward / PIT / A 股执行边界。
 5. 之后再做 throughput/cost 优化；不要在 validation closure 前优先做性能优化。
 6. `Stage 2` 工具化、MiroFish、Dashboard、更广数据面扩展均后置到主线稳定之后。

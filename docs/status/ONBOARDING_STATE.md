@@ -1,4 +1,4 @@
-# Onboarding State: Pixiu onboarding
+# Onboarding State: Pixiu mainline under team-lead
 
 ## Stage
 
@@ -6,12 +6,12 @@ discovery
 
 ## Last Scan
 
-bounded-discovery-reset
+mainline-resume-discovery
 
 ## Pending Decisions
 
-- Approve plan generation for team runtime onboarding and branch-based execution model
+- Select the next bounded mainline slice for planning under team-lead
 
 ## Notes
 
-Bounded discovery reset started under team-lead. Canonical state drift, runtime truth, and team runtime installability are being reconciled before planning.
+Mainline resume has replaced stale team-runtime onboarding as the active repo context. Helm4Codex is treated as the current collaboration mode for this session, while Pixiu mainline priorities continue to follow current_implementation_plan and spec-execution-audit.

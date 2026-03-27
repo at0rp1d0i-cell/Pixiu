@@ -36,6 +36,11 @@ _STAGE1_BLOCKING_TOOL_NAMES = frozenset(
         "get_margin_data",
     }
 )
+_STAGE1_BLOCKING_TOOL_ARGS = {
+    "get_moneyflow_hsgt": {"limit": 5},
+    "get_margin_data": {},
+}
+_STAGE1_TOOL_CALL_TIMEOUT_SEC = 15.0
 
 _STAGE1_ENRICHMENT_TOOL_NAMES = frozenset(
     {
@@ -221,6 +226,58 @@ def _select_stage1_tools(tools: list) -> dict[str, list]:
     return selected
 
 
+def _extract_stage1_tool_text(result) -> str:
+    """Extract plain text from MCP tool responses."""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, list) and result:
+        first = result[0]
+        if isinstance(first, dict) and "text" in first:
+            return first["text"]
+    return str(result)
+
+
+def _decode_stage1_tool_payload(tool_name: str, result) -> object:
+    text = _extract_stage1_tool_text(result)
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{tool_name} returned invalid JSON: {exc}") from exc
+    if isinstance(payload, dict) and payload.get("error"):
+        raise RuntimeError(f"{tool_name} returned error payload: {payload['error']}")
+
+    rows = None
+    if isinstance(payload, dict):
+        rows = payload.get("data")
+        if tool_name == "get_margin_data" and not rows:
+            rows = payload.get("items")
+    if not rows:
+        raise RuntimeError(f"{tool_name} returned no rows")
+    return payload
+
+
+async def _prefetch_stage1_blocking_payloads(blocking_tools: list) -> dict[str, object]:
+    async def _fetch(tool) -> tuple[str, object]:
+        tool_name = getattr(tool, "name", "")
+        raw_result = await asyncio.wait_for(
+            tool.ainvoke(dict(_STAGE1_BLOCKING_TOOL_ARGS.get(tool_name, {}))),
+            timeout=_STAGE1_TOOL_CALL_TIMEOUT_SEC,
+        )
+        return tool_name, _decode_stage1_tool_payload(tool_name, raw_result)
+
+    prefetched = await asyncio.gather(*(_fetch(tool) for tool in blocking_tools))
+    return {tool_name: payload for tool_name, payload in prefetched if tool_name}
+
+
+def _build_prefetched_blocking_prompt(prefetched_blocking_payloads: dict[str, object]) -> str:
+    return (
+        "Stage 1 blocking core has already been fetched from the canonical Tushare tools. "
+        "Use the following JSON payloads as authoritative input and do not request these "
+        "blocking tools again.\n"
+        f"{json.dumps(prefetched_blocking_payloads, ensure_ascii=False)}"
+    )
+
+
 def is_degraded_market_context(memo: MarketContextMemo | None) -> bool:
     if memo is None:
         return True
@@ -344,14 +401,21 @@ class MarketAnalyst:
     使用 MCP ReAct 循环调用 AKShare 工具，最多 5 轮，生成 MarketContextMemo。
     """
 
-    def __init__(self, mcp_tools: list, skill_loader: SkillLoader | None = None):
+    def __init__(
+        self,
+        mcp_tools: list,
+        skill_loader: SkillLoader | None = None,
+        prefetched_blocking_payloads: dict[str, object] | None = None,
+    ):
         self.tools = {t.name: t for t in mcp_tools}
         self.skill_loader = skill_loader or _SKILL_LOADER
-        self.llm = build_researcher_llm(profile="market_analyst").bind_tools(mcp_tools)
+        self.prefetched_blocking_payloads = dict(prefetched_blocking_payloads or {})
+        llm = build_researcher_llm(profile="market_analyst")
+        self.llm = llm.bind_tools(mcp_tools) if mcp_tools else llm
         self._last_reliability_diagnostics: dict = _empty_stage1_reliability()
         self._last_payload_warnings: list[dict[str, str]] = []
 
-    _TOOL_CALL_TIMEOUT_SEC = 15.0
+    _TOOL_CALL_TIMEOUT_SEC = _STAGE1_TOOL_CALL_TIMEOUT_SEC
 
     async def _invoke_tool_call(self, call: dict) -> tuple[ToolMessage, dict]:
         """Invoke one MCP tool call and normalize it into a ToolMessage."""
@@ -362,10 +426,7 @@ class MarketAnalyst:
         tool = self.tools.get(call["name"])
         if tool:
             try:
-                raw_result = await asyncio.wait_for(
-                    tool.ainvoke(call["args"]),
-                    timeout=self._TOOL_CALL_TIMEOUT_SEC,
-                )
+                raw_result = await asyncio.wait_for(tool.ainvoke(call["args"]), timeout=self._TOOL_CALL_TIMEOUT_SEC)
             except TimeoutError:
                 raw_result = f"工具调用超时（{self._TOOL_CALL_TIMEOUT_SEC}s）: {call['name']}"
                 failed_kind = "timeout"
@@ -399,19 +460,7 @@ class MarketAnalyst:
 
     @staticmethod
     def _extract_tool_text(result) -> str:
-        """从 MCP 工具返回值中提取纯文本。
-
-        langchain-mcp-adapters content_and_artifact 模式返回 list[dict]，
-        每个 dict 含 type='text' + text='...'。需要提取 text 字段，
-        否则 LLM 收到的是 Python repr 而非可解析的数据。
-        """
-        if isinstance(result, str):
-            return result
-        if isinstance(result, list) and result:
-            first = result[0]
-            if isinstance(first, dict) and "text" in first:
-                return first["text"]
-        return str(result)
+        return _extract_stage1_tool_text(result)
 
     @staticmethod
     def _contains_json_payload(content: str) -> bool:
@@ -443,10 +492,15 @@ class MarketAnalyst:
                 system_content + "\n\n## 市场分析规范\n\n" + skill_context
             )
 
-        messages = [
-            SystemMessage(content=system_content),
-            HumanMessage(content="请生成今日市场上下文备忘录。"),
-        ]
+        human_prompt = "请生成今日市场上下文备忘录。"
+        if self.prefetched_blocking_payloads:
+            human_prompt = (
+                human_prompt
+                + "\n\n"
+                + _build_prefetched_blocking_prompt(self.prefetched_blocking_payloads)
+            )
+
+        messages = [SystemMessage(content=system_content), HumanMessage(content=human_prompt)]
 
         # ReAct 循环（默认最多 3 轮工具调用）
         used_all_rounds = False
@@ -682,7 +736,11 @@ async def _run_market_context_once(state: dict) -> dict:
             "No Stage 1 blocking tools available: tushare server registered but blocking tools were not discovered",
             diagnostics=diagnostics,
         )
-    analyst = MarketAnalyst(mcp_tools=[*blocking_tools, *enrichment_tools])
+    prefetched_blocking_payloads = await _prefetch_stage1_blocking_payloads(blocking_tools)
+    analyst = MarketAnalyst(
+        mcp_tools=enrichment_tools,
+        prefetched_blocking_payloads=prefetched_blocking_payloads,
+    )
     memo = await analyst.analyze()
     reliability = analyst.get_reliability_diagnostics()
     reliability["blocking_required"] = True
@@ -695,6 +753,9 @@ async def _run_market_context_once(state: dict) -> dict:
     reliability["configured_servers"] = sorted(servers.keys())
     reliability["available_tools"] = _available_stage1_tool_names(all_tools)
     reliability["tushare_enabled"] = tushare_enabled
+    reliability["blocking_tools_used"] = sorted(
+        set(reliability.get("blocking_tools_used", [])) | set(prefetched_blocking_payloads)
+    )
     logger.info("[Stage 1] 市场上下文生成成功，Regime=%s", memo.market_regime)
     return {"market_context": memo, "stage1_reliability": reliability}
 

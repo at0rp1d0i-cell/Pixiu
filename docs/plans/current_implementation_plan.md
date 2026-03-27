@@ -2,10 +2,10 @@
 
 Status: active
 Owner: coordinator
-Last Reviewed: 2026-03-26
+Last Reviewed: 2026-03-27
 
-> 更新时间：2026-03-26
-> 来源：2026-03-26 repo-wide scan、最新 `fast_feedback` / `controlled single` 工件、`docs/overview/05_spec-execution-audit.md`
+> 更新时间：2026-03-27
+> 来源：2026-03-27 Stage 1 live closure runtime evidence、最新 `controlled single` / `doctor` / `preflight` / live test 结果、`docs/overview/05_spec-execution-audit.md`
 
 ---
 
@@ -46,7 +46,7 @@ Last Reviewed: 2026-03-26
 当前 `controlled single` 仍不健康。
 
 最新主线证据：
-- `Stage 1 degraded`
+- `Stage 1 live closure` 已完成
 - `Stage 2: 48 -> 5`
 - `Stage 3: 5 -> 4`
 - `Stage 5: low_sharpe x4`
@@ -82,14 +82,14 @@ Last Reviewed: 2026-03-26
 
 ### Phase 2: Stage 1 Live Closure
 
-- [ ] 对齐 `pixiu run` 与 `doctor/preflight` 的 env truth
-- [ ] 在真实 `pixiu run` 环境下验证：
+- [x] 对齐 `pixiu run` 与 `doctor/preflight` 的 env truth
+- [x] 在真实 `pixiu run` 环境下验证：
   - `TUSHARE_TOKEN` 可见
   - blocking tools 可 discover
   - `get_moneyflow_hsgt`
   - `get_margin_data`
-- [ ] 收口 Stage 1 blocking tool discovery policy，避免“发现阶段过脆”
-- [ ] 用当前 blocking-core 真相重写 live integration test，不再测旧 AKShare/old northbound path
+- [x] 收口 Stage 1 blocking tool discovery policy，避免“发现阶段过脆”
+- [x] 用当前 blocking-core 真相重写 live integration test，不再测旧 AKShare/old northbound path
 
 **Done when**
 - controlled `single` 下 `Stage 1` 不再因为 env/tool discovery 直接 degraded

@@ -30,7 +30,7 @@ def _resolve_run_env_truth(
         process_env=process_env,
         target_env=target_env,
         runtime_env_path=runtime_env_path,
-        repo_env_path=repo_env_path,
+        repo_env_path=repo_env_path if repo_env_path is not None else PROJECT_ROOT / ".env",
         defaults={"QLIB_DATA_DIR": str(_DEFAULT_QLIB_DATA_DIR)},
     )
     logger.info(

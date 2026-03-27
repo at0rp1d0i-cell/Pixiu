@@ -190,6 +190,45 @@ def test_market_analyst_injects_context_skill_into_system_prompt():
     assert "<!-- SKILL:MARKET_ANALYST_CONTEXT_FRAMING -->" in system_message.content
 
 
+def test_market_analyst_injects_prefetched_blocking_payload_into_prompt():
+    from src.agents.market_analyst import MarketAnalyst
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.tool_calls = []
+        response.content = """{
+            "date": "2026-03-27",
+            "northbound": null,
+            "macro_signals": [],
+            "hot_themes": [],
+            "historical_insights": [],
+            "suggested_islands": ["momentum"],
+            "market_regime": "range_bound",
+            "raw_summary": "测试"
+        }"""
+        return response
+
+    prefetched_payloads = {
+        "get_moneyflow_hsgt": {"data": [{"trade_date": "20260327", "north_money": "123.0"}]},
+        "get_margin_data": {"data": [{"trade_date": "20260326", "rzye": 1.0}]},
+    }
+
+    with patch("src.agents.market_analyst.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        analyst = MarketAnalyst(mcp_tools=[], prefetched_blocking_payloads=prefetched_payloads)
+        asyncio.run(analyst.analyze())
+
+    human_message = captured_messages[0][1]
+    assert "Stage 1 blocking core has already been fetched" in human_message.content
+    assert "get_moneyflow_hsgt" in human_message.content
+    assert "get_margin_data" in human_message.content
+
+
 def test_market_analyst_forces_final_json_when_tool_rounds_exhausted():
     from src.agents.market_analyst import MarketAnalyst
 
@@ -369,6 +408,7 @@ def test_run_market_context_once_includes_tushare_when_token_present():
 
     tool = MagicMock()
     tool.name = "get_moneyflow_hsgt"
+    tool.ainvoke = AsyncMock(return_value='{"data": [{"trade_date": "20260327"}]}')
     mock_client = MagicMock()
     mock_client.get_tools = AsyncMock(return_value=[tool])
 
@@ -407,6 +447,8 @@ def test_run_market_context_once_includes_tushare_when_token_present():
     assert result["stage1_reliability"]["available_tools"] == ["get_moneyflow_hsgt"]
     assert result["stage1_reliability"]["tushare_enabled"] is True
     assert result["stage1_reliability"]["tool_calls_total"] == 1
+    assert result["stage1_reliability"]["blocking_tools_used"] == ["get_moneyflow_hsgt"]
+    mock_builder.return_value.bind_tools.assert_not_called()
 
 
 def test_run_market_context_once_reports_missing_blocking_tools_even_with_tushare_enabled():
@@ -433,6 +475,7 @@ def test_run_market_context_once_can_disable_enrichment_tools():
 
     blocking_tool = MagicMock()
     blocking_tool.name = "get_moneyflow_hsgt"
+    blocking_tool.ainvoke = AsyncMock(return_value='{"data": [{"trade_date": "20260327"}]}')
     enrichment_tool = MagicMock()
     enrichment_tool.name = "get_market_hot_topics"
     mock_client = MagicMock()
@@ -468,10 +511,44 @@ def test_run_market_context_once_can_disable_enrichment_tools():
                     ):
                         result = asyncio.run(_run_market_context_once({}))
 
-    bound_tools = mock_builder.return_value.bind_tools.call_args.args[0]
-    assert [tool.name for tool in bound_tools] == ["get_moneyflow_hsgt"]
+    mock_builder.return_value.bind_tools.assert_not_called()
     assert mock_analyze.await_count == 1
     assert result["stage1_reliability"]["enrichment_tools_used"] == []
+    assert result["stage1_reliability"]["blocking_tools_used"] == ["get_moneyflow_hsgt"]
+
+
+def test_run_market_context_once_binds_enrichment_tools_after_prefetching_blocking_core():
+    from src.agents.market_analyst import _run_market_context_once
+
+    moneyflow_tool = MagicMock()
+    moneyflow_tool.name = "get_moneyflow_hsgt"
+    moneyflow_tool.ainvoke = AsyncMock(return_value='{"data": [{"trade_date": "20260327"}]}')
+    margin_tool = MagicMock()
+    margin_tool.name = "get_margin_data"
+    margin_tool.ainvoke = AsyncMock(return_value='{"data": [{"trade_date": "20260326"}]}')
+    enrichment_tool = MagicMock()
+    enrichment_tool.name = "get_market_hot_topics"
+    mock_client = MagicMock()
+    mock_client.get_tools = AsyncMock(return_value=[moneyflow_tool, margin_tool, enrichment_tool])
+
+    with patch.dict("os.environ", {"TUSHARE_TOKEN": "test-token"}, clear=True):
+        with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client):
+            with patch("src.agents.market_analyst.build_researcher_llm") as mock_builder:
+                mock_chat = MagicMock()
+                mock_chat.bind_tools = MagicMock(return_value=mock_chat)
+                mock_builder.return_value = mock_chat
+                with patch(
+                    "src.agents.market_analyst.MarketAnalyst.analyze",
+                    new=AsyncMock(return_value=_make_market_memo()),
+                ):
+                    with patch(
+                        "src.agents.market_analyst.MarketAnalyst.get_reliability_diagnostics",
+                        return_value={"blocking_tools_used": [], "enrichment_tools_used": ["get_market_hot_topics"]},
+                    ):
+                        asyncio.run(_run_market_context_once({}))
+
+    bound_tools = mock_builder.return_value.bind_tools.call_args.args[0]
+    assert [tool.name for tool in bound_tools] == ["get_market_hot_topics"]
 
 
 def test_market_context_node_can_load_frozen_context_file(tmp_path: Path):
@@ -697,6 +774,52 @@ def test_resolve_run_env_truth_applies_layered_env_defaults(tmp_path: Path):
     assert resolved.sources["TUSHARE_TOKEN"] == "repo_env"
     assert target_env["QLIB_DATA_DIR"].endswith("data/qlib_bin")
     assert resolved.sources["QLIB_DATA_DIR"] == "default"
+
+
+def test_resolve_run_env_truth_uses_repo_env_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from src.core.orchestrator import _entrypoints as module
+
+    repo_env_path = tmp_path / ".env"
+    repo_env_path.write_text("TUSHARE_TOKEN=repo-token\n", encoding="utf-8")
+    target_env: dict[str, str] = {}
+
+    monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_DEFAULT_QLIB_DATA_DIR", tmp_path / "data" / "qlib_bin")
+
+    resolved = module._resolve_run_env_truth(
+        process_env={},
+        target_env=target_env,
+        runtime_env_path=tmp_path / "runtime.env",
+    )
+
+    assert target_env["TUSHARE_TOKEN"] == "repo-token"
+    assert resolved.sources["TUSHARE_TOKEN"] == "repo_env"
+
+
+def test_researcher_live_env_ready_accepts_openai_api_key_fallback():
+    from tests.helpers import live_env
+
+    live_env.researcher_live_env_ready.cache_clear()
+
+    with patch("tests.helpers.live_env.load_researcher_dotenv", return_value=None):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai-test"}, clear=True):
+            assert live_env.researcher_live_env_ready() is True
+
+    live_env.researcher_live_env_ready.cache_clear()
+
+
+def test_ensure_researcher_live_env_or_skip_uses_runtime_truth_message():
+    from tests.helpers import live_env
+
+    live_env.researcher_live_env_ready.cache_clear()
+
+    with patch("src.llm.openai_compat.get_researcher_llm_kwargs", side_effect=RuntimeError("missing creds")):
+        with patch("tests.helpers.live_env.load_researcher_dotenv", return_value=None):
+            with patch.dict(os.environ, {}, clear=True):
+                with pytest.raises(pytest.skip.Exception, match="researcher LLM 凭据未就绪"):
+                    live_env.ensure_researcher_live_env_or_skip()
+
+    live_env.researcher_live_env_ready.cache_clear()
 
 
 def test_pixiu_run_single_cli_resolves_env_truth_before_stage1_entry(monkeypatch, tmp_path: Path):
