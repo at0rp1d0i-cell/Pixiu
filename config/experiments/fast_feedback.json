@@ -22,5 +22,6 @@
   "report_every_n_rounds": 1,
   "max_rounds_env_override_allowed": false,
   "human_gate_auto_action": "approve",
-  "stage2_total_quota_override": 2
+  "stage2_total_quota_override": 2,
+  "stage2_requested_note_count_override": 1
 }

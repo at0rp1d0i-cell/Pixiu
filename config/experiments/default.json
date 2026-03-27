@@ -29,5 +29,6 @@
   "namespace": "controlled_run",
   "report_every_n_rounds": 5,
   "max_rounds_env_override_allowed": true,
-  "human_gate_auto_action": "approve"
+  "human_gate_auto_action": "approve",
+  "stage2_requested_note_count_override": 1
 }

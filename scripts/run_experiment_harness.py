@@ -128,6 +128,7 @@ _MANAGED_RUNTIME_ENV_KEYS = (
     "PIXIU_ARTIFACTS_DIR",
     "PIXIU_REPORTS_DIR",
     "PIXIU_STAGE2_TOTAL_QUOTA",
+    "PIXIU_STAGE2_REQUESTED_NOTE_COUNT",
     "REPORT_EVERY_N_ROUNDS",
     "PIXIU_HUMAN_GATE_AUTO_ACTION",
 )
@@ -172,6 +173,7 @@ def _fallback_runtime_truth(profile) -> dict[str, object]:
         "market_context_path": market_context_path,
         "stage1_enrichment_enabled": getattr(profile, "stage1_enrichment_enabled", True),
         "stage2_total_quota_override": getattr(profile, "stage2_total_quota_override", None),
+        "stage2_requested_note_count_override": getattr(profile, "stage2_requested_note_count_override", None),
         "planned_phases": planned_phases,
         "formal_writes_allowed": formal_writes_allowed,
         "state_store_path": str(data_root / "control_plane_state.db"),
@@ -218,6 +220,11 @@ def _apply_runtime_env(
     merged.setdefault("PIXIU_REPORTS_DIR", str(runtime_truth.get("reports_dir", "")))
     if runtime_truth.get("stage2_total_quota_override") is not None:
         merged.setdefault("PIXIU_STAGE2_TOTAL_QUOTA", str(runtime_truth["stage2_total_quota_override"]))
+    if runtime_truth.get("stage2_requested_note_count_override") is not None:
+        merged.setdefault(
+            "PIXIU_STAGE2_REQUESTED_NOTE_COUNT",
+            str(runtime_truth["stage2_requested_note_count_override"]),
+        )
     merged.setdefault("REPORT_EVERY_N_ROUNDS", str(profile.report_every_n_rounds))
     merged.setdefault("PIXIU_HUMAN_GATE_AUTO_ACTION", str(profile.human_gate_auto_action))
     for key in _MANAGED_RUNTIME_ENV_KEYS:

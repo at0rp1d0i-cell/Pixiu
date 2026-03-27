@@ -47,6 +47,7 @@ def test_load_profile_parses_minimal_schema(tmp_path: Path):
                 "run_single": True,
                 "run_preflight_evolve": True,
                 "stage2_total_quota_override": 3,
+                "stage2_requested_note_count_override": 1,
             }
         ),
         encoding="utf-8",
@@ -62,6 +63,7 @@ def test_load_profile_parses_minimal_schema(tmp_path: Path):
     assert profile.stage1_enrichment_enabled is False
     assert profile.preflight_evolve_rounds == 2
     assert profile.stage2_total_quota_override == 3
+    assert profile.stage2_requested_note_count_override == 1
 
 
 def test_load_profile_missing_key_raises(tmp_path: Path):
@@ -202,6 +204,7 @@ def test_preflight_print_text_includes_runtime_truth_and_next_steps(capsys: pyte
             "target_subspaces": ["factor_algebra"],
             "planned_phases": ["doctor", "single"],
             "stage2_total_quota_override": 2,
+            "stage2_requested_note_count_override": 1,
             "write_scope": "artifact_only_scratch",
             "formal_writes_allowed": False,
             "state_store_path": "/tmp/state.sqlite",
@@ -214,6 +217,7 @@ def test_preflight_print_text_includes_runtime_truth_and_next_steps(capsys: pyte
 
     assert "[Preflight] planned_phases: doctor, single" in captured
     assert "[Preflight] stage2_total_quota_override: 2" in captured
+    assert "[Preflight] stage2_requested_note_count_override: 1" in captured
     assert "[Preflight] formal_writes_allowed: False" in captured
     assert "[Preflight] market_context_path: /tmp/context.json" in captured
     assert "[Preflight] blocking_issues:" in captured

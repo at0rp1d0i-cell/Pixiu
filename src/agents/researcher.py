@@ -88,9 +88,24 @@ def _is_fast_feedback_factor_algebra(subspace_hint: Optional[ExplorationSubspace
     )
 
 
-def _requested_note_count_text(subspace_hint: Optional[ExplorationSubspace]) -> str:
+def _requested_note_count_limit(subspace_hint: Optional[ExplorationSubspace]) -> int | None:
+    raw = os.getenv("PIXIU_STAGE2_REQUESTED_NOTE_COUNT", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
     if _is_fast_feedback_factor_algebra(subspace_hint):
-        return "1"
+        return 1
+    return None
+
+
+def _requested_note_count_text(subspace_hint: Optional[ExplorationSubspace]) -> str:
+    limit = _requested_note_count_limit(subspace_hint)
+    if limit is not None:
+        return str(limit)
     return "2-3"
 
 
@@ -655,6 +670,9 @@ class AlphaResearcher:
             )
 
             parsed_batch = self._parse_batch(response.content, iteration, subspace_hint)
+            requested_note_limit = _requested_note_count_limit(subspace_hint)
+            if requested_note_limit is not None and len(parsed_batch.notes) > requested_note_limit:
+                parsed_batch = parsed_batch.model_copy(update={"notes": parsed_batch.notes[:requested_note_limit]})
             approved_notes, diagnostics = self._local_prescreen_notes(
                 parsed_batch.notes,
                 retry_banned_family_gene_keys=retry_banned_family_gene_keys,

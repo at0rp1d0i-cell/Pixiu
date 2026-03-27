@@ -47,6 +47,7 @@ class _FakeProfile:
     run_single: bool = True
     run_preflight_evolve: bool = True
     stage2_total_quota_override: int | None = None
+    stage2_requested_note_count_override: int | None = None
 
 
 @dataclass(frozen=True)
@@ -219,6 +220,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
         observed["PIXIU_TARGET_SUBSPACES"] = os.environ.get("PIXIU_TARGET_SUBSPACES", "")
         observed["PIXIU_STAGE1_CONTEXT_MODE"] = os.environ.get("PIXIU_STAGE1_CONTEXT_MODE", "")
         observed["PIXIU_STAGE2_TOTAL_QUOTA"] = os.environ.get("PIXIU_STAGE2_TOTAL_QUOTA", "")
+        observed["PIXIU_STAGE2_REQUESTED_NOTE_COUNT"] = os.environ.get("PIXIU_STAGE2_REQUESTED_NOTE_COUNT", "")
         observed["PIXIU_EXPERIMENT_PROFILE_KIND"] = os.environ.get("PIXIU_EXPERIMENT_PROFILE_KIND", "")
         observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] = os.environ.get("PIXIU_EXPERIMENT_PERSISTENCE_MODE", "")
         observed["PIXIU_STATE_STORE_PATH"] = os.environ.get("PIXIU_STATE_STORE_PATH", "")
@@ -244,6 +246,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
             namespace="fast_feedback",
             stage1_enrichment_enabled=False,
             stage2_total_quota_override=2,
+            stage2_requested_note_count_override=1,
             run_preflight_evolve=False,
         ),
         profile_path="dummy.json",
@@ -267,6 +270,7 @@ async def test_harness_applies_resolved_env_truth_before_runtime(monkeypatch: py
     assert observed["PIXIU_TARGET_SUBSPACES"] == "factor_algebra"
     assert observed["PIXIU_STAGE1_CONTEXT_MODE"] == "frozen"
     assert observed["PIXIU_STAGE2_TOTAL_QUOTA"] == "2"
+    assert observed["PIXIU_STAGE2_REQUESTED_NOTE_COUNT"] == "1"
     assert observed["PIXIU_EXPERIMENT_PROFILE_KIND"] == "fast_feedback"
     assert observed["PIXIU_EXPERIMENT_PERSISTENCE_MODE"] == "artifact_only"
     assert "runtime_namespaces/fast_feedback" in observed["PIXIU_STATE_STORE_PATH"]
