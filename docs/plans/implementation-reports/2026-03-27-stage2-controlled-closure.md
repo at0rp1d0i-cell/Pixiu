@@ -17,6 +17,8 @@ Bounded Stage 2 closure slice: extend single-note local full-rejection stop-loss
 
 - `uv run pytest -q tests/test_stage2.py -k "controlled_run_rejects_low_value_family_as_value_density or controlled_run_single_note_full_rejection_skips_retry"`
 - `uv run pytest -q tests/test_stage2.py -k "fast_feedback_retry_bans_volume_confirmation_after_repeated_alignment_failures or fast_feedback_validator_full_rejection_still_retries or controlled_run_rejects_low_value_family_as_value_density or controlled_run_single_note_full_rejection_skips_retry"`
+- `env HOME=/tmp/pixiu-home UV_CACHE_DIR=/tmp/pixiu-uv-cache QLIB_DATA_DIR=/home/torpedo/Workspace/ML/Pixiu/data/qlib_bin REPORT_EVERY_N_ROUNDS=999 PIXIU_LLM_DEFAULT_PROVIDER=openai uv run python scripts/doctor.py --mode core`
+- `env HOME=/tmp/pixiu-home UV_CACHE_DIR=/tmp/pixiu-uv-cache QLIB_DATA_DIR=/home/torpedo/Workspace/ML/Pixiu/data/qlib_bin REPORT_EVERY_N_ROUNDS=999 PIXIU_LLM_DEFAULT_PROVIDER=openai uv run python scripts/run_experiment_harness.py --profile config/experiments/default.json --json`
 
 ## Follow-Ups
 
@@ -49,9 +51,20 @@ This keeps scope inside Stage 2 local generation/prescreen logic and avoids touc
 
 - `uv run pytest -q tests/test_stage2.py -k "controlled_run_rejects_low_value_family_as_value_density or controlled_run_single_note_full_rejection_skips_retry"`
   - Result: `2 passed, 97 deselected in 4.37s`
+- `uv run pytest -q tests/test_stage2.py -k "fast_feedback_retry_bans_volume_confirmation_after_repeated_alignment_failures or fast_feedback_validator_full_rejection_still_retries or controlled_run_rejects_low_value_family_as_value_density or controlled_run_single_note_full_rejection_skips_retry"`
+  - Result: `4 passed, 95 deselected in 30.26s`
+- `env HOME=/tmp/pixiu-home ... uv run python scripts/doctor.py --mode core`
+  - Result: blocking data + blocking API checks passed; doctor no longer blocked by the read-only home cache path once `HOME` was redirected to `/tmp/pixiu-home`
+- `env HOME=/tmp/pixiu-home ... uv run python scripts/run_experiment_harness.py --profile config/experiments/default.json --json`
+  - Result: command timed out later in the run, but a real controlled/default artifact was written at `data/experiment_runs/20260329_224455/round_000.json`
+  - Runtime evidence from `round_000.json`:
+    - `generated_count = 18`
+    - `delivered_count = 0`
+    - `local_retry_count = 0`
+    - `rejection_counts_by_filter = {"novelty": 16, "alignment": 2}`
+  - Runtime log evidence showed the new stop-loss firing on the controlled surface for `factor_algebra`, `narrative_mining`, and `cross_market`
 
 ## Open items
 
-- This slice proves the new controlled-run stop-loss and value-density behavior with targeted Stage 2 tests only.
-- A full controlled/default runtime artifact was attempted earlier, but that path remains expensive and noisy because of live provider latency/retries; this report therefore uses the bounded substitute allowed by the sprint contract.
-- The next slice should verify whether these guarded retries materially reduce real controlled-run `local_retry_count` / `novelty waste` on a fresh runtime artifact, without widening scope beyond Stage 2 closure.
+- This slice now has both targeted test proof and one real controlled/default artifact showing `local_retry_count = 0`, but the run still timed out later because the broader controlled surface remains expensive and noisy under live provider latency.
+- The next slice should target the remaining dominant wastes exposed by `round_000.json`: `novelty` and `alignment`, plus broader JSON/output robustness.

@@ -11,7 +11,7 @@ Controlled-run Stage 2 slice: extend single-note local full-rejection stop-loss 
 ## Auto Decisions
 
 - Accept the bounded Stage 2 stop-loss/value-density slice as a valid first closure step.
-- Do not treat this slice as full Stage 2 closure; it still lacks fresh controlled/default runtime artifact proof.
+- Do not treat this slice as full Stage 2 closure; the fresh controlled/default artifact now exists, but it still shows dominant `novelty` and `alignment` waste and no downstream candidates.
 
 ## Taste Decisions
 

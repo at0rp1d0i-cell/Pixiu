@@ -17,6 +17,8 @@ local uv
 ## Scenarios Tested
 
 - Targeted Stage 2 controlled-run stop-loss/value-density tests plus fast-feedback regression tests
+- Controlled/default doctor proof under `/tmp` HOME override
+- Controlled/default harness run long enough to emit `data/experiment_runs/20260329_224455/round_000.json`
 
 ## Issues Found
 
