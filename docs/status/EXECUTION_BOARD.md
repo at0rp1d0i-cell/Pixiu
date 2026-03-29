@@ -8,7 +8,7 @@ qa
 
 ## Active Work
 
-- Stage1 live closure QA
+- Stage2 controlled closure initial slice QA
 
 ## Completed
 

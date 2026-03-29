@@ -67,6 +67,9 @@ _FACTOR_ALGEBRA_BATCH_FAMILY_BUDGET = 1
 _FACTOR_ALGEBRA_SATURATED_FAMILY_MIN_VARIANTS = 2
 _FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES = 2
 _FAST_FEEDBACK_NONRETRY_FILTERS = frozenset({"alignment", "novelty", "anti_collapse", "value_density"})
+_CONTROLLED_RUN_NONRETRY_FILTERS = frozenset(
+    {"alignment", "novelty", "anti_collapse", "value_density", "grounding"}
+)
 _FACTOR_ALGEBRA_RECIPE_STATUS_PREFIX = "invalid_recipe:"
 _FACTOR_ALGEBRA_ALIGNMENT_STATUS_PREFIX = "invalid_alignment:"
 _GROUNDING_STATUS_PREFIX = "invalid_grounding:"
@@ -111,6 +114,10 @@ def _requested_note_count_text(subspace_hint: Optional[ExplorationSubspace]) -> 
 
 def _is_fast_feedback_profile() -> bool:
     return os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() == "fast_feedback"
+
+
+def _is_controlled_run_profile() -> bool:
+    return os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() == "controlled_run"
 
 # ====================================================
 # System Prompt（对齐 docs/design/stage-2-hypothesis-expansion.md）
@@ -413,12 +420,10 @@ def _build_fast_feedback_factor_algebra_recipe_instruction() -> str:
     )
 
 
-def _should_skip_fast_feedback_retry(
+def _should_skip_stage2_retry(
     subspace_hint: Optional[ExplorationSubspace],
     diagnostics: Mapping[str, Any],
 ) -> bool:
-    if not _is_fast_feedback_factor_algebra(subspace_hint):
-        return False
     rejection_counts = diagnostics.get("rejection_counts_by_filter")
     if not isinstance(rejection_counts, Mapping) or not rejection_counts:
         return False
@@ -429,7 +434,11 @@ def _should_skip_fast_feedback_retry(
     }
     if not active_filters:
         return False
-    return active_filters.issubset(_FAST_FEEDBACK_NONRETRY_FILTERS)
+    if _is_fast_feedback_factor_algebra(subspace_hint):
+        return active_filters.issubset(_FAST_FEEDBACK_NONRETRY_FILTERS)
+    if _is_controlled_run_profile() and _requested_note_count_limit(subspace_hint) == 1:
+        return active_filters.issubset(_CONTROLLED_RUN_NONRETRY_FILTERS)
+    return False
 
 def _today_str() -> str:
     return date.today().strftime("%Y-%m-%d")
@@ -703,11 +712,13 @@ class AlphaResearcher:
                     self.last_generation_diagnostics[_FACTOR_GENE_DIAGNOSTICS_KEY] = dict(self._factor_gene_by_note_id)
                 return parsed_batch.model_copy(update={"notes": approved_notes})
 
-            if attempt < _MAX_LOCAL_RETRY and _should_skip_fast_feedback_retry(subspace_hint, diagnostics):
+            if attempt < _MAX_LOCAL_RETRY and _should_skip_stage2_retry(subspace_hint, diagnostics):
                 logger.info(
-                    "[AlphaResearcher] fast_feedback stop-loss: skip retry after local full rejection "
-                    "(island=%s, filters=%s)",
+                    "[AlphaResearcher] stage2 stop-loss: skip retry after local full rejection "
+                    "(profile=%s, island=%s, subspace=%s, filters=%s)",
+                    os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() or "default",
                     self.island,
+                    subspace_hint.value if subspace_hint is not None else None,
                     diagnostics.get("rejection_counts_by_filter"),
                 )
                 break
@@ -1329,7 +1340,7 @@ class AlphaResearcher:
                         continue
                     low_value_count = low_value_family_counts.get(family_key, 0)
                     if (
-                        _is_fast_feedback_profile()
+                        (_is_fast_feedback_profile() or _is_controlled_run_profile())
                         and low_value_count >= _FACTOR_ALGEBRA_LOW_VALUE_FAMILY_MIN_FAILURES
                     ):
                         rejection_counts["value_density"] += 1

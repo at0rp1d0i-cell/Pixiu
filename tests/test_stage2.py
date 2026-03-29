@@ -2334,6 +2334,91 @@ def test_factor_algebra_fast_feedback_rejects_low_value_family_as_value_density(
     assert sample["family_gene_key"] == "factor_algebra|mean_spread|$vwap|null|none|quantile"
 
 
+def test_factor_algebra_controlled_run_rejects_low_value_family_as_value_density():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_low_value_controlled",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期均价高于长期均价，说明均价差持续偏强。",
+            "economic_intuition": "均价差可以刻画短强长弱的价差状态。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "mean_spread",
+                "interaction_mode": "none",
+                "normalization": "quantile",
+                "normalization_window": 60,
+                "quantile_qscore": 0.8
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-25",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "low-value-family"
+    }'''
+
+    mock_pool = MagicMock()
+    mock_pool.get_passed_factors.return_value = []
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "mom_lv_1",
+            "formula": "Quantile(Mean($vwap, 10) - Mean($vwap, 30), 60, 0.8)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+            "family_gene_key": "factor_algebra|mean_spread|$vwap|null|none|quantile",
+            "variant_gene_key": "10|30|60|0.8",
+        },
+        {
+            "factor_id": "mom_lv_2",
+            "formula": "Quantile(Mean($vwap, 10) - Mean($vwap, 30), 60, 0.8)",
+            "subspace_origin": "factor_algebra",
+            "failure_mode": "low_sharpe",
+            "family_gene_key": "factor_algebra|mean_spread|$vwap|null|none|quantile",
+            "variant_gene_key": "10|30|60|0.8",
+        },
+    ]
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "controlled_run",
+                "PIXIU_STAGE2_REQUESTED_NOTE_COUNT": "1",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "historical low-value family" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|mean_spread|$vwap|null|none|quantile"
+
+
 def test_factor_algebra_fast_feedback_rejects_disallowed_volume_confirmation_family():
     from src.agents.researcher import AlphaResearcher
 
@@ -3445,6 +3530,74 @@ def test_factor_algebra_fast_feedback_retry_bans_volume_confirmation_after_repea
     assert mock_chat.ainvoke.await_count == 1
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
     assert researcher.last_generation_diagnostics["rejection_counts_by_filter"].get("alignment", 0) >= 1
+
+
+def test_factor_algebra_controlled_run_single_note_full_rejection_skips_retry(monkeypatch):
+    from src.agents.researcher import AlphaResearcher
+
+    duplicate_response = MagicMock()
+    duplicate_response.content = """{
+        "notes": [{
+            "note_id": "duplicate_ratio",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期收益相对长期收益更强，说明动量加速。",
+            "economic_intuition": "长短窗口收益率差体现加速。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$close",
+                "lookback_short": 10,
+                "lookback_long": 30,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-29",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "duplicate"
+    }"""
+
+    mock_pool = MagicMock()
+    mock_pool.get_island_factors.return_value = [
+        {
+            "factor_id": "momentum_acceleration_10_30d",
+            "formula": "Rank(($close / Ref($close, 10) - 1) - ($close / Ref($close, 30) - 1), 20)",
+            "subspace_origin": "factor_algebra",
+            "family_gene_key": "factor_algebra|ratio_momentum|$close|null|none|rank",
+            "variant_gene_key": "10|30|20|null",
+        }
+    ]
+    mock_pool.get_passed_factors.return_value = []
+
+    monkeypatch.setenv("PIXIU_EXPERIMENT_PROFILE_KIND", "controlled_run")
+    monkeypatch.setenv("PIXIU_STAGE2_REQUESTED_NOTE_COUNT", "1")
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[duplicate_response, duplicate_response])
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}, clear=False):
+            researcher = AlphaResearcher(
+                island="momentum",
+                factor_pool=mock_pool,
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert batch.notes == []
+    assert mock_chat.ainvoke.await_count == 1
+    assert researcher.last_generation_diagnostics["local_retry_count"] == 0
+    rejection_counts = researcher.last_generation_diagnostics["rejection_counts_by_filter"]
+    assert rejection_counts.get("novelty", 0) >= 1 or rejection_counts.get("alignment", 0) >= 1
 
 
 def test_factor_algebra_fast_feedback_validator_full_rejection_still_retries(monkeypatch):
