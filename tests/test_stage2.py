@@ -2603,6 +2603,68 @@ def test_factor_algebra_fast_feedback_rejects_disallowed_ratio_momentum_family()
     assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|rank"
 
 
+def test_factor_algebra_controlled_run_rejects_ratio_momentum_family():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_ratio_controlled_banned",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "短期相对长期更强，体现相对强弱延续。",
+            "economic_intuition": "长短窗口比值变化刻画相对强弱。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$vwap",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "ratio_momentum",
+                "interaction_mode": "none",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-30",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "controlled-run-family-pause"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "controlled_run",
+                "PIXIU_STAGE2_REQUESTED_NOTE_COUNT": "1",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "controlled_run single-note 暂停 transform_family=ratio_momentum" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|rank"
+
+
 def test_factor_algebra_fast_feedback_rejects_volatility_state_without_volatility_wording():
     from src.agents.researcher import AlphaResearcher
 
@@ -3407,6 +3469,88 @@ def test_factor_algebra_fast_feedback_requests_and_keeps_single_note(monkeypatch
     assert "当前 fast_feedback 的 factor_algebra 只允许使用以下 transform_family" in human_message.content
     assert "mean_spread" in human_message.content
     assert "暂停 volume_confirmation / volatility_state / ratio_momentum" in human_message.content
+
+
+def test_factor_algebra_controlled_run_single_note_injects_focus_section(monkeypatch):
+    from src.agents.researcher import AlphaResearcher
+
+    captured_messages = []
+
+    async def capture_ainvoke(messages, **kwargs):
+        captured_messages.append(messages)
+        response = MagicMock()
+        response.content = """{
+            "notes": [
+                {
+                    "note_id": "fa_1",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "均线差反映价格扩散",
+                    "economic_intuition": "短期均线与长期均线的扩散体现趋势状态",
+                    "proposed_formula": "placeholder",
+                    "formula_recipe": {
+                        "base_field": "$close",
+                        "lookback_short": 5,
+                        "lookback_long": 20,
+                        "transform_family": "mean_spread",
+                        "interaction_mode": "none",
+                        "normalization": "none"
+                    },
+                    "risk_factors": [],
+                    "market_context_date": "2026-03-30",
+                    "applicable_regimes": ["bull_trend"],
+                    "invalid_regimes": ["range_bound"]
+                },
+                {
+                    "note_id": "fa_2",
+                    "island": "momentum",
+                    "iteration": 1,
+                    "hypothesis": "短强长弱的相对强弱延续",
+                    "economic_intuition": "短期价格相对长期价格更强时，趋势更可能延续",
+                    "proposed_formula": "placeholder",
+                    "formula_recipe": {
+                        "base_field": "$close",
+                        "lookback_short": 5,
+                        "lookback_long": 20,
+                        "transform_family": "ratio_momentum",
+                        "interaction_mode": "none",
+                        "normalization": "rank",
+                        "normalization_window": 20
+                    },
+                    "risk_factors": [],
+                    "market_context_date": "2026-03-30",
+                    "applicable_regimes": ["bull_trend"],
+                    "invalid_regimes": ["range_bound"]
+                }
+            ],
+            "generation_rationale": "controlled run"
+        }"""
+        return response
+
+    monkeypatch.setenv("PIXIU_EXPERIMENT_PROFILE_KIND", "controlled_run")
+    monkeypatch.setenv("PIXIU_STAGE2_REQUESTED_NOTE_COUNT", "1")
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=capture_ainvoke)
+        mock_builder.return_value = mock_chat
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test", "RESEARCHER_API_KEY": "test"}, clear=False):
+            researcher = AlphaResearcher(island="momentum")
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 1
+    assert batch.notes[0].note_id == "fa_1"
+    assert captured_messages
+    human_message = captured_messages[0][1]
+    assert "请提出 1 个差异化的 FactorResearchNote" in human_message.content
+    assert "## controlled_run single-note 限制" in human_message.content
+    assert "暂停以下 transform_family：ratio_momentum" in human_message.content
+    assert "优先探索更干净的 family" in human_message.content
 
 
 def test_requested_note_count_override_caps_non_fast_feedback_batch(monkeypatch):

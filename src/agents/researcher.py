@@ -82,12 +82,23 @@ _PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt
 _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
     "mean_spread",
 )
+_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES = (
+    "ratio_momentum",
+)
 
 
 def _is_fast_feedback_factor_algebra(subspace_hint: Optional[ExplorationSubspace]) -> bool:
     return (
         subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA
         and os.getenv("PIXIU_EXPERIMENT_PROFILE_KIND", "").strip() == "fast_feedback"
+    )
+
+
+def _is_controlled_run_single_note_factor_algebra(subspace_hint: Optional[ExplorationSubspace]) -> bool:
+    return (
+        subspace_hint == ExplorationSubspace.FACTOR_ALGEBRA
+        and _is_controlled_run_profile()
+        and _requested_note_count_limit(subspace_hint) == 1
     )
 
 
@@ -414,6 +425,17 @@ def _build_fast_feedback_factor_algebra_focus_section() -> str:
     )
 
 
+def _build_controlled_run_factor_algebra_focus_section() -> str:
+    paused = " | ".join(_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES)
+    return (
+        "## controlled_run single-note 限制\n"
+        "- 当前 controlled_run 的 factor_algebra 单注模式优先探索更干净的 family\n"
+        f"- 当前 single-note controlled_run 暂停以下 transform_family：{paused}\n"
+        "- 不要提交 ratio_momentum 的 recipe，也不要把相对强弱/加速类叙事伪装成 mean_spread\n"
+        "- 当前优先保留 mean_spread 这类更容易对齐和去重的表达"
+    )
+
+
 def _build_fast_feedback_factor_algebra_recipe_instruction() -> str:
     return _build_factor_algebra_recipe_instruction_for_families(
         _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES
@@ -629,6 +651,8 @@ class AlphaResearcher:
                     user_msg += "\n\n" + _build_fast_feedback_factor_algebra_focus_section()
                 else:
                     user_msg += "\n" + FACTOR_ALGEBRA_RECIPE_INSTRUCTION
+                    if _is_controlled_run_single_note_factor_algebra(subspace_hint):
+                        user_msg += "\n\n" + _build_controlled_run_factor_algebra_focus_section()
                 anti_collapse_section = self._build_factor_algebra_anti_collapse_section()
                 if anti_collapse_section:
                     user_msg += "\n\n" + anti_collapse_section
@@ -931,12 +955,10 @@ class AlphaResearcher:
         detail = status.removeprefix(_GROUNDING_STATUS_PREFIX).strip() or "invalid_grounding_claim"
         return f"Mechanism grounding 无效：{detail}"
 
-    def _fast_feedback_factor_algebra_policy_rejection_reason(
+    def _factor_algebra_policy_rejection_reason(
         self,
         note: FactorResearchNote,
     ) -> str | None:
-        if not _is_fast_feedback_profile():
-            return None
         if note.exploration_subspace != ExplorationSubspace.FACTOR_ALGEBRA:
             return None
         factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
@@ -947,13 +969,24 @@ class AlphaResearcher:
         if len(parts) < 2:
             return None
         transform_family = parts[1]
-        if transform_family in _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES:
-            return None
-        allowed = ", ".join(_FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
-        return (
-            "fast_feedback 暂停 "
-            f"transform_family={transform_family}; 当前 profile 仅允许 {allowed}"
-        )
+        if _is_fast_feedback_profile():
+            if transform_family in _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES:
+                return None
+            allowed = ", ".join(_FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
+            return (
+                "fast_feedback 暂停 "
+                f"transform_family={transform_family}; 当前 profile 仅允许 {allowed}"
+            )
+        if _is_controlled_run_single_note_factor_algebra(note.exploration_subspace):
+            if transform_family not in _CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES:
+                return None
+            paused = ", ".join(_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES)
+            return (
+                "controlled_run single-note 暂停 "
+                f"transform_family={transform_family}; 当前 profile 暂停 {paused}，"
+                "优先探索 mean_spread 等更易对齐的 family"
+            )
+        return None
 
     def _try_symbolic_mutation_batch(
         self,
@@ -1326,7 +1359,7 @@ class AlphaResearcher:
 
             subspace = _note_subspace_value(note)
             if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
-                policy_reason = self._fast_feedback_factor_algebra_policy_rejection_reason(note)
+                policy_reason = self._factor_algebra_policy_rejection_reason(note)
                 if policy_reason is not None:
                     rejection_counts["value_density"] += 1
                     rejection_counts_by_filter_and_subspace["value_density"][subspace] += 1
