@@ -989,6 +989,14 @@ class AlphaResearcher:
                 )
                 return None
 
+            candidates = self._filter_symbolic_mutation_candidates(candidates)
+            if not candidates:
+                logger.info(
+                    "[AlphaResearcher] SYMBOLIC_MUTATION 候选在 novelty 预筛后为空：island=%s",
+                    self.island,
+                )
+                return None
+
             # 取前 batch_size 个，转换为 FactorResearchNote
             notes = []
             for mut_result in candidates[:batch_size]:
@@ -1009,7 +1017,7 @@ class AlphaResearcher:
                 notes.append(note)
 
             logger.info(
-                "[AlphaResearcher] SYMBOLIC_MUTATION 纯符号路径：island=%s, seeds=%d, candidates=%d, notes=%d",
+                "[AlphaResearcher] SYMBOLIC_MUTATION 纯符号路径：island=%s, seeds=%d, filtered_candidates=%d, notes=%d",
                 self.island, len(seeds), len(candidates), len(notes),
             )
             return AlphaResearcherBatch(
@@ -1022,6 +1030,45 @@ class AlphaResearcher:
                 "[AlphaResearcher] _try_symbolic_mutation_batch failed: %s, fallback to LLM", e
             )
             return None
+
+    def _filter_symbolic_mutation_candidates(
+        self,
+        candidates: list,
+    ) -> list:
+        """Drop symbolic mutations that are already near-duplicates before note creation."""
+        if not candidates or self.factor_pool is None:
+            return candidates
+
+        from src.agents.prefilter import NoveltyFilter
+
+        novelty_filter = NoveltyFilter(pool=self.factor_pool)
+        existing_formulas = [
+            item.get("formula", "")
+            for item in self.factor_pool.get_island_factors(island=self.island, limit=50)
+            if isinstance(item.get("formula"), str) and item.get("formula", "").strip()
+        ]
+        existing_tokens = [novelty_filter._tokenize(formula) for formula in existing_formulas]
+
+        kept = []
+        kept_tokens: list[set] = []
+        for candidate in candidates:
+            result_formula = getattr(candidate, "result_formula", "")
+            if not isinstance(result_formula, str) or not result_formula.strip():
+                continue
+            tokens_new = novelty_filter._tokenize(result_formula)
+            if any(
+                novelty_filter._jaccard(tokens_new, tokens_existing) > novelty_filter.threshold
+                for tokens_existing in existing_tokens
+            ):
+                continue
+            if any(
+                novelty_filter._jaccard(tokens_new, tokens_existing) > novelty_filter.threshold
+                for tokens_existing in kept_tokens
+            ):
+                continue
+            kept.append(candidate)
+            kept_tokens.append(tokens_new)
+        return kept
 
     def _build_constraint_section(self, failed_formulas: Optional[list] = None) -> str:
         """构建失败约束提示段落。

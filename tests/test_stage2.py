@@ -3186,6 +3186,70 @@ def test_alpha_researcher_symbolic_path_runs_local_prescreen():
     assert researcher.last_generation_diagnostics["sample_rejections"][0]["exploration_subspace"] == "symbolic_mutation"
 
 
+def test_symbolic_mutation_prefilters_candidates_against_existing_factor_pool():
+    from src.agents.researcher import AlphaResearcher
+    from src.hypothesis.mutation import MutationOperator, MutationResult
+
+    mock_pool = MagicMock()
+    mock_pool.get_island_best_factors.return_value = [{"formula": "Rank($close, 5)"}]
+    mock_pool.get_island_factors.return_value = [
+        {"factor_id": "existing_rank_close_10", "formula": "Rank($close, 10)"}
+    ]
+
+    researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+    candidates = [
+        MutationResult(
+            operator=MutationOperator.ADD_OPERATOR,
+            source_formula="Rank($close, 5)",
+            result_formula="Rank($close, 10)",
+            description="dup-existing",
+        ),
+        MutationResult(
+            operator=MutationOperator.ADD_OPERATOR,
+            source_formula="Rank($close, 5)",
+            result_formula="Rank($volume, 20)",
+            description="novel",
+        ),
+    ]
+
+    with patch("src.agents.researcher.try_all_mutations", return_value=candidates):
+        batch = researcher._try_symbolic_mutation_batch(iteration=1, batch_size=3)
+
+    assert batch is not None
+    assert [note.proposed_formula for note in batch.notes] == ["Rank($volume, 20)"]
+
+
+def test_symbolic_mutation_prefilters_same_batch_near_duplicates():
+    from src.agents.researcher import AlphaResearcher
+    from src.hypothesis.mutation import MutationOperator, MutationResult
+
+    mock_pool = MagicMock()
+    mock_pool.get_island_best_factors.return_value = [{"formula": "Rank($close, 5)"}]
+    mock_pool.get_island_factors.return_value = []
+
+    researcher = AlphaResearcher(island="momentum", factor_pool=mock_pool)
+    candidates = [
+        MutationResult(
+            operator=MutationOperator.ADD_OPERATOR,
+            source_formula="Rank($close, 5)",
+            result_formula="Rank($volume, 20)",
+            description="first",
+        ),
+        MutationResult(
+            operator=MutationOperator.ADD_OPERATOR,
+            source_formula="Rank($close, 5)",
+            result_formula="Rank($volume, 20)",
+            description="duplicate",
+        ),
+    ]
+
+    with patch("src.agents.researcher.try_all_mutations", return_value=candidates):
+        batch = researcher._try_symbolic_mutation_batch(iteration=1, batch_size=3)
+
+    assert batch is not None
+    assert [note.proposed_formula for note in batch.notes] == ["Rank($volume, 20)"]
+
+
 def test_prefilter_diagnostics_include_rejection_subspace_breakdown():
     from src.agents.prefilter import PreFilter
 
