@@ -139,20 +139,20 @@ Last Reviewed: 2026-03-27
 - `Current Behavior`:
   - Stage 2 在本地复用 canonical validator/novelty/alignment 规则做 pre-screen
   - `factor_algebra` 已叠加最小 anti-collapse / value-density stop-loss
-  - 在 `controlled_run + factor_algebra + single-note` 下，可临时暂停当前稳定主 blocker family，避免 `ratio_momentum` 持续占用受控单注配额
+  - 在 `controlled_run + factor_algebra + single-note` 下，当前临时收缩为 `mean_spread` allowlist，避免不稳定 family 持续占用受控单注配额
   - 整批全灭时最多只做一次 bounded retry
 - `Why It Exists`:
   - 即使 FormulaSketch Lite 和 anti-collapse v1 已进入主线，controlled run 仍有大量 `novelty/alignment/validator` waste
-  - `symbolic_mutation` novelty slice 之后，最新 controlled-run residual 已稳定收敛到 `factor_algebra|ratio_momentum|...` 的重复与错配
+  - `symbolic_mutation` novelty slice 之后，最新 controlled-run residual 先稳定收敛到 `factor_algebra|ratio_momentum|...`，随后又转到 `volume_confirmation` alignment，说明当前 single-note surface 仍需进一步收缩
   - 当前本地 pre-screen 仍是防止低价值候选继续烧远端 LLM 和 Stage 4 回测的止血层
 - `Risk If Kept`:
   - 这只是止血层，不是最终生成架构
   - 容易继续掩盖上游 contract 问题
-  - profile-level family pause 容易被误读为正式 research surface 已经收缩
+  - profile-level allowlist 容易被误读为正式 research surface 已经收缩
 - `Removal Trigger`:
   - controlled-run `Stage 2` 主拒绝不再由 `novelty/alignment/validator` 主导
   - family steering / value-density control 能在生成分布层稳定生效
-  - `controlled_run` 不再需要用 profile-level paused family 来维持单注探索质量
+  - `controlled_run` 不再需要用 profile-level allowlist 来维持单注探索质量
   - bounded retry 不再是主要止血手段
 - `Related Settings`:
   - `src/agents/researcher.py` 内部诊断与 retry 逻辑

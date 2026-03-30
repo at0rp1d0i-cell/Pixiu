@@ -82,8 +82,8 @@ _PROMPT_ASSETS_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "prompt
 _FAST_FEEDBACK_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
     "mean_spread",
 )
-_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES = (
-    "ratio_momentum",
+_CONTROLLED_RUN_SINGLE_NOTE_FACTOR_ALGEBRA_ALLOWED_FAMILIES = (
+    "mean_spread",
 )
 
 
@@ -426,13 +426,13 @@ def _build_fast_feedback_factor_algebra_focus_section() -> str:
 
 
 def _build_controlled_run_factor_algebra_focus_section() -> str:
-    paused = " | ".join(_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES)
+    allowed = " | ".join(_CONTROLLED_RUN_SINGLE_NOTE_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
     return (
         "## controlled_run single-note 限制\n"
-        "- 当前 controlled_run 的 factor_algebra 单注模式优先探索更干净的 family\n"
-        f"- 当前 single-note controlled_run 暂停以下 transform_family：{paused}\n"
-        "- 不要提交 ratio_momentum 的 recipe，也不要把相对强弱/加速类叙事伪装成 mean_spread\n"
-        "- 当前优先保留 mean_spread 这类更容易对齐和去重的表达"
+        f"- 当前 controlled_run 的 factor_algebra 单注模式仅允许以下 transform_family：{allowed}\n"
+        "- 当前先不要提交 ratio_momentum / volume_confirmation / volatility_state 等 family\n"
+        "- 不要把相对强弱、量价确认或波动状态叙事伪装成 mean_spread\n"
+        "- 目标是先用更稳定的 mean_spread surface 打通 controlled single 的 Stage 2 漏斗"
     )
 
 
@@ -978,13 +978,13 @@ class AlphaResearcher:
                 f"transform_family={transform_family}; 当前 profile 仅允许 {allowed}"
             )
         if _is_controlled_run_single_note_factor_algebra(note.exploration_subspace):
-            if transform_family not in _CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES:
+            if transform_family in _CONTROLLED_RUN_SINGLE_NOTE_FACTOR_ALGEBRA_ALLOWED_FAMILIES:
                 return None
-            paused = ", ".join(_CONTROLLED_RUN_FACTOR_ALGEBRA_PAUSED_FAMILIES)
+            allowed = ", ".join(_CONTROLLED_RUN_SINGLE_NOTE_FACTOR_ALGEBRA_ALLOWED_FAMILIES)
             return (
                 "controlled_run single-note 暂停 "
-                f"transform_family={transform_family}; 当前 profile 暂停 {paused}，"
-                "优先探索 mean_spread 等更易对齐的 family"
+                f"transform_family={transform_family}; 当前 profile 仅允许 {allowed}，"
+                "先用更稳定的 mean_spread surface 收缩 factor_algebra 单注探索面"
             )
         return None
 
@@ -1328,10 +1328,21 @@ class AlphaResearcher:
                     sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", recipe_reason, subspace))
                 continue
 
+            subspace = _note_subspace_value(note)
+            if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
+                policy_reason = self._factor_algebra_policy_rejection_reason(note)
+                if policy_reason is not None:
+                    rejection_counts["value_density"] += 1
+                    rejection_counts_by_filter_and_subspace["value_density"][subspace] += 1
+                    if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
+                        sample_rejections.append(
+                            self._build_stage2_rejection_sample(note, "value_density", policy_reason, subspace)
+                        )
+                    continue
+
             alignment_reason = self._factor_algebra_alignment_rejection_reason(note)
             if alignment_reason is not None:
                 rejection_counts["alignment"] += 1
-                subspace = _note_subspace_value(note)
                 rejection_counts_by_filter_and_subspace["alignment"][subspace] += 1
                 if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
                     sample_rejections.append(
@@ -1357,17 +1368,7 @@ class AlphaResearcher:
                     sample_rejections.append(self._build_stage2_rejection_sample(note, "validator", reason, subspace))
                 continue
 
-            subspace = _note_subspace_value(note)
             if subspace == ExplorationSubspace.FACTOR_ALGEBRA.value:
-                policy_reason = self._factor_algebra_policy_rejection_reason(note)
-                if policy_reason is not None:
-                    rejection_counts["value_density"] += 1
-                    rejection_counts_by_filter_and_subspace["value_density"][subspace] += 1
-                    if len(sample_rejections) < _MAX_STAGE2_REJECTION_SAMPLES:
-                        sample_rejections.append(
-                            self._build_stage2_rejection_sample(note, "value_density", policy_reason, subspace)
-                        )
-                    continue
                 factor_gene = self._factor_gene_by_note_id.get(note.note_id, {})
                 family_key = factor_gene.get("family_gene_key")
                 if isinstance(family_key, str):

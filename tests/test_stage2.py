@@ -2662,7 +2662,72 @@ def test_factor_algebra_controlled_run_rejects_ratio_momentum_family():
     assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
     sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
     assert "controlled_run single-note 暂停 transform_family=ratio_momentum" in sample["reason"]
+    assert "当前 profile 仅允许 mean_spread" in sample["reason"]
     assert sample["family_gene_key"] == "factor_algebra|ratio_momentum|$vwap|null|none|rank"
+
+
+def test_factor_algebra_controlled_run_rejects_volume_confirmation_family():
+    from src.agents.researcher import AlphaResearcher
+
+    response = MagicMock()
+    response.content = '''{
+        "notes": [{
+            "note_id": "fa_volume_confirmation_controlled_banned",
+            "island": "momentum",
+            "iteration": 1,
+            "hypothesis": "量价确认趋势延续。",
+            "economic_intuition": "价格动量叠加成交量确认有助于过滤弱趋势。",
+            "proposed_formula": "placeholder",
+            "formula_recipe": {
+                "base_field": "$close",
+                "secondary_field": "$volume",
+                "lookback_short": 5,
+                "lookback_long": 20,
+                "transform_family": "volume_confirmation",
+                "interaction_mode": "mul",
+                "normalization": "rank",
+                "normalization_window": 20
+            },
+            "risk_factors": [],
+            "market_context_date": "2026-03-30",
+            "applicable_regimes": ["bull_trend"],
+            "invalid_regimes": ["range_bound"]
+        }],
+        "generation_rationale": "controlled-run-family-allowlist"
+    }'''
+
+    with patch("src.agents.researcher.build_researcher_llm") as mock_builder:
+        mock_chat = MagicMock()
+        mock_chat.ainvoke = AsyncMock(side_effect=[response])
+        mock_builder.return_value = mock_chat
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test",
+                "RESEARCHER_API_KEY": "test",
+                "PIXIU_EXPERIMENT_PROFILE_KIND": "controlled_run",
+                "PIXIU_STAGE2_REQUESTED_NOTE_COUNT": "1",
+            },
+        ):
+            researcher = AlphaResearcher(
+                island="momentum",
+                capabilities=_stage2_test_capabilities(),
+            )
+            batch = asyncio.run(
+                researcher.generate_batch(
+                    context=None,
+                    iteration=1,
+                    subspace_hint=ExplorationSubspace.FACTOR_ALGEBRA,
+                )
+            )
+
+    assert len(batch.notes) == 0
+    diag = researcher.last_generation_diagnostics
+    assert diag["rejection_counts_by_filter"].get("value_density", 0) >= 1
+    sample = next(item for item in diag["sample_rejections"] if item["filter"] == "value_density")
+    assert "controlled_run single-note 暂停 transform_family=volume_confirmation" in sample["reason"]
+    assert "当前 profile 仅允许 mean_spread" in sample["reason"]
+    assert sample["family_gene_key"] == "factor_algebra|volume_confirmation|$close|$volume|mul|rank"
 
 
 def test_factor_algebra_fast_feedback_rejects_volatility_state_without_volatility_wording():
@@ -3549,8 +3614,9 @@ def test_factor_algebra_controlled_run_single_note_injects_focus_section(monkeyp
     human_message = captured_messages[0][1]
     assert "请提出 1 个差异化的 FactorResearchNote" in human_message.content
     assert "## controlled_run single-note 限制" in human_message.content
-    assert "暂停以下 transform_family：ratio_momentum" in human_message.content
-    assert "优先探索更干净的 family" in human_message.content
+    assert "仅允许以下 transform_family：mean_spread" in human_message.content
+    assert "先不要提交 ratio_momentum / volume_confirmation / volatility_state" in human_message.content
+    assert "先用更稳定的 mean_spread surface" in human_message.content
 
 
 def test_requested_note_count_override_caps_non_fast_feedback_batch(monkeypatch):
@@ -3805,7 +3871,7 @@ def test_factor_algebra_controlled_run_single_note_full_rejection_skips_retry(mo
     assert mock_chat.ainvoke.await_count == 1
     assert researcher.last_generation_diagnostics["local_retry_count"] == 0
     rejection_counts = researcher.last_generation_diagnostics["rejection_counts_by_filter"]
-    assert rejection_counts.get("novelty", 0) >= 1 or rejection_counts.get("alignment", 0) >= 1
+    assert rejection_counts.get("value_density", 0) >= 1
 
 
 def test_factor_algebra_fast_feedback_validator_full_rejection_still_retries(monkeypatch):
