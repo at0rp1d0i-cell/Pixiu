@@ -21,7 +21,7 @@ Reduced controlled-run novelty churn by prefiltering symbolic-mutation candidate
 ## Follow-Ups
 
 - The next Stage 2 slice should target the remaining novelty-heavy subspaces after this cut, especially `factor_algebra`, `narrative_mining`, and `cross_market`.
-- Controlled-run still has `approved_count = 0`; after novelty waste falls further, the next bottleneck remains downstream alignment/value-density rather than retry churn.
+- Controlled-run still has `approved_count = 0`; after novelty waste falls further, the next bottleneck remains downstream alignment/value-density, while `validator/local_retry` still fluctuate across reruns.
 
 ## What changed
 
@@ -43,23 +43,26 @@ Reduced controlled-run novelty churn by prefiltering symbolic-mutation candidate
 ## Verification
 
 - `uv run pytest -q tests/test_stage2.py -k "symbolic_mutation_prefilters_candidates_against_existing_factor_pool or symbolic_mutation_prefilters_same_batch_near_duplicates or alpha_researcher_symbolic_path_runs_local_prescreen"`
-  - Result: `3 passed, 98 deselected in 11.85s`
+  - Result: `3 passed, 98 deselected in 10.81s`
 
 - `env HOME=/tmp/pixiu-home UV_CACHE_DIR=/tmp/pixiu-uv-cache QLIB_DATA_DIR=/home/torpedo/Workspace/ML/Pixiu/data/qlib_bin REPORT_EVERY_N_ROUNDS=999 PIXIU_LLM_DEFAULT_PROVIDER=openai PIXIU_EXPERIMENT_PROFILE_KIND=controlled_run PIXIU_STAGE2_REQUESTED_NOTE_COUNT=1 PIXIU_STAGE1_ENABLE_ENRICHMENT=0 uv run pixiu run --mode single --island momentum`
-  - Result: completed successfully and wrote [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_114038/round_000.json)
+  - Result: completed successfully and wrote [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_114204/round_000.json)
   - Controlled-run comparison against the previous baseline [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260329_224455/round_000.json):
-    - `generated_count: 18 -> 14`
+    - `generated_count: 18 -> 15`
     - `novelty: 16 -> 11`
     - `symbolic_mutation novelty: 9 -> 3`
     - `alignment: 2 -> 1`
-    - `local_retry_count: 0 -> 2`
-    - `validator: 0 -> 2`
+    - `local_retry_count: 0 -> 3`
+    - `validator: 0 -> 3`
+  - Repeated-run note:
+    - The earlier proof artifact [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_113329/round_000.json) showed the same main novelty signal: `generated_count = 13`, `novelty = 11`, `symbolic_mutation novelty = 3`.
+    - `validator/local_retry` moved between reruns, so this slice should be credited for reducing symbolic novelty waste, not for stabilizing all downstream rejection modes.
   - Interpretation:
     - This slice materially reduced novelty waste, especially in `symbolic_mutation`.
     - It did not close Stage 2 by itself; controlled-run still generates no approved candidates and still carries residual novelty/alignment/validator waste in other subspaces.
-    - The new residuals are concentrated in `factor_algebra`, `narrative_mining`, and validator failures rather than duplicate symbolic mutations.
+    - The new residuals are concentrated in `factor_algebra`, `narrative_mining`, `cross_market`, and validator failures rather than duplicate symbolic mutations.
 
 ## Open items
 
-- `local_retry_count` rose from `0` to `2` in the fresh controlled-run artifact, so retry churn is not uniformly solved across all subspaces.
+- `local_retry_count` and `validator` counts moved across repeated controlled-run proofs, so retry churn and validator stability remain open outside this slice.
 - `approved_count` remains `0`, so the next slice should continue on novelty/alignment in the remaining subspaces before revisiting downstream value-density.

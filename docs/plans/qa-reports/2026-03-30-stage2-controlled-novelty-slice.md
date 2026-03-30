@@ -25,20 +25,21 @@ QA validates the bounded novelty-slice claims against the current worktree verif
 - Controlled-run `single` execution on `momentum`
 - Baseline-vs-current artifact comparison:
   - baseline [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260329_224455/round_000.json)
-  - current [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_114038/round_000.json)
+  - current [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_114204/round_000.json)
 
 ## Evidence Summary
 
 - Targeted tests passed: `3 passed, 98 deselected`
 - Controlled-run finished successfully and emitted a fresh artifact
 - Stage 2 artifact delta supports the bounded claim:
-  - `generated_count: 18 -> 14`
+  - `generated_count: 18 -> 15`
   - `stage2.rejection_counts_by_filter.novelty: 16 -> 11`
   - `stage2.rejection_counts_by_filter_and_subspace.novelty.symbolic_mutation: 9 -> 3`
 - The slice does not support a stronger claim than that:
   - `approved_notes_count` remains `0`
-  - `local_retry_count: 0 -> 2`
-  - validator rejections appear in `symbolic_mutation` and `narrative_mining`
+  - `local_retry_count: 0 -> 3`
+  - validator rejections appear in `narrative_mining` and `cross_market`
+  - a prior rerun [round_000.json](/home/torpedo/Workspace/ML/Pixiu/data/experiment_runs/20260330_113329/round_000.json) kept the same main novelty delta, but retry/validator counts varied
 
 ## Issues Found
 
